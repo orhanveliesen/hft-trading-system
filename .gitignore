@@ -1,0 +1,78 @@
+# Build directories
+build/
+cmake-build-*/
+out/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Compiled objects
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.dylib
+
+# Executables
+*.exe
+*.out
+
+# Binary files (no extension, explicitly named)
+benchmarks/bench_orderbook
+examples/backtest_demo
+examples/backtest_real_data
+
+# FPGA simulation outputs
+*.vcd
+*.vvp
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+compile_commands.json
+
+# Rust
+rust/target/
+rust/Cargo.lock
+
+# Logs
+*.log
+logs/
+
+# Data files
+data/
+*.csv
+*.json
+!package.json
+
+# Credentials (NEVER commit these)
+.env
+.env.*
+*.pem
+*.key
+credentials.json
+secrets.json
+api_keys.txt
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Python virtual environment
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+# Test coverage
+coverage/
+*.gcov
+*.gcda
+*.gcno
