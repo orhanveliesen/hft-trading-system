@@ -307,7 +307,7 @@ public:
         return states_[symbol].notional;
     }
 
-    RiskState get_state() const {
+    RiskState build_state() const {
         RiskState state;
         state.current_pnl = current_pnl_;
         state.daily_pnl = daily_pnl();

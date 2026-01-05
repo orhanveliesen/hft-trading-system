@@ -252,7 +252,7 @@ TEST(test_risk_state_summary) {
     rm.update_pnl(5000);  // Profit
     rm.update_pnl(-2000); // Small loss
 
-    auto state = rm.get_state();
+    auto state = rm.build_state();
 
     assert(state.current_pnl == -2000);
     assert(state.peak_equity == 105000);
