@@ -91,6 +91,9 @@ add_test(NAME PaperTradingTests COMMAND test_paper_trading)
 add_executable(test_queue_fill_detector tests/test_queue_fill_detector.cpp)
 add_test(NAME QueueFillDetectorTests COMMAND test_queue_fill_detector)
 
+add_executable(test_enhanced_risk tests/test_enhanced_risk.cpp)
+add_test(NAME EnhancedRiskTests COMMAND test_enhanced_risk)
+
 # === Tools ===
 add_executable(hft_control tools/hft_control.cpp)
 target_link_libraries(hft_control pthread rt)
