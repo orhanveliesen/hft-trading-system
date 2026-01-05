@@ -26,7 +26,7 @@ public:
         position_ = 0;
     }
 
-    Signal on_kline(const exchange::Kline& kline, const Position& pos) override {
+    Signal on_kline(const exchange::Kline& kline, const BacktestPosition& pos) override {
         // Kline'dan bid/ask simüle et
         Price bid = kline.close;
         Price ask = kline.close + 100;  // 1 cent spread
@@ -66,7 +66,7 @@ public:
         position_ = 0;
     }
 
-    Signal on_kline(const exchange::Kline& kline, const Position& pos) override {
+    Signal on_kline(const exchange::Kline& kline, const BacktestPosition& pos) override {
         Price bid = kline.close;
         Price ask = kline.close + 100;
 
@@ -113,7 +113,7 @@ public:
         position_ = 0;
     }
 
-    Signal on_kline(const exchange::Kline& kline, const Position& pos) override {
+    Signal on_kline(const exchange::Kline& kline, const BacktestPosition& pos) override {
         Price bid = kline.close;
         Price ask = kline.close + 100;
 

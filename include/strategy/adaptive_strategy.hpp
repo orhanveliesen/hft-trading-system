@@ -100,7 +100,7 @@ public:
     }
 
     backtest::Signal on_kline(const exchange::Kline& kline,
-                               const backtest::Position& position) override {
+                               const backtest::BacktestPosition& position) override {
         // Update regime detector
         regime_detector_.update(kline);
 

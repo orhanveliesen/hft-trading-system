@@ -23,7 +23,7 @@ public:
         , prev_slow_(0)
     {}
 
-    Signal on_kline(const exchange::Kline& kline, const Position& position) override {
+    Signal on_kline(const exchange::Kline& kline, const BacktestPosition& position) override {
         double close = kline.close / 10000.0;
         closes_.push_back(close);
 
@@ -95,7 +95,7 @@ public:
         , prev_close_(0)
     {}
 
-    Signal on_kline(const exchange::Kline& kline, const Position& position) override {
+    Signal on_kline(const exchange::Kline& kline, const BacktestPosition& position) override {
         double close = kline.close / 10000.0;
 
         if (prev_close_ > 0) {
@@ -170,7 +170,7 @@ public:
         , std_multiplier_(std_multiplier)
     {}
 
-    Signal on_kline(const exchange::Kline& kline, const Position& position) override {
+    Signal on_kline(const exchange::Kline& kline, const BacktestPosition& position) override {
         double close = kline.close / 10000.0;
         closes_.push_back(close);
 
@@ -226,7 +226,7 @@ public:
         : lookback_(lookback)
     {}
 
-    Signal on_kline(const exchange::Kline& kline, const Position& position) override {
+    Signal on_kline(const exchange::Kline& kline, const BacktestPosition& position) override {
         double high = kline.high / 10000.0;
         double low = kline.low / 10000.0;
         double close = kline.close / 10000.0;
@@ -292,7 +292,7 @@ public:
         , initialized_(false)
     {}
 
-    Signal on_kline(const exchange::Kline& kline, const Position& position) override {
+    Signal on_kline(const exchange::Kline& kline, const BacktestPosition& position) override {
         double close = kline.close / 10000.0;
 
         if (!initialized_) {

@@ -16,7 +16,7 @@ namespace strategy {
  */
 struct EnhancedRiskConfig {
     // Daily limits
-    int64_t daily_loss_limit = 100000;      // Max loss per day before halt
+    PnL daily_loss_limit = 100000;          // Max loss per day before halt
 
     // Drawdown limits
     double max_drawdown_pct = 0.10;         // Max drawdown from peak (0.10 = 10%)
@@ -25,26 +25,26 @@ struct EnhancedRiskConfig {
     Quantity max_order_size = 10000;        // Max single order size
 
     // Global exposure limits
-    int64_t max_total_notional = 100000000; // Max total notional across all symbols
+    Notional max_total_notional = 100000000; // Max total notional across all symbols
 
     // Position limits (global)
-    int64_t max_total_position = 100000;    // Max total absolute position
+    Position max_total_position = 100000;    // Max total absolute position
 };
 
 /**
  * Per-symbol risk limits
  */
 struct SymbolRiskLimit {
-    int64_t max_position = 0;    // 0 = no limit
-    int64_t max_notional = 0;    // 0 = no limit
+    Position max_position = 0;   // 0 = no limit
+    Notional max_notional = 0;   // 0 = no limit
 };
 
 /**
  * Per-symbol risk state (updated on each fill)
  */
 struct SymbolRiskState {
-    int64_t position = 0;        // Current net position
-    int64_t notional = 0;        // Current notional (abs(position) * last_price)
+    Position position = 0;       // Current net position (negative = short)
+    Notional notional = 0;       // Current notional (abs(position) * last_price)
     Price last_price = 0;        // Last fill price (for notional calc)
 
     void reset() {
@@ -58,10 +58,10 @@ struct SymbolRiskState {
  * Global risk state snapshot
  */
 struct RiskState {
-    int64_t current_pnl;
-    int64_t daily_pnl;
-    int64_t peak_equity;
-    int64_t total_notional;
+    PnL current_pnl;
+    PnL daily_pnl;
+    Capital peak_equity;
+    Notional total_notional;
     double current_drawdown_pct;
     bool can_trade;
     bool daily_limit_breached;
@@ -112,12 +112,12 @@ public:
     // Configuration
     // ========================================
 
-    void set_initial_capital(int64_t capital) {
+    void set_initial_capital(Capital capital) {
         initial_capital_ = capital;
         peak_equity_ = capital;
     }
 
-    void set_symbol_limit(Symbol symbol, int64_t max_position, int64_t max_notional) {
+    void set_symbol_limit(Symbol symbol, Position max_position, Notional max_notional) {
         if (symbol < MAX_SYMBOLS) {
             limits_[symbol].max_position = max_position;
             limits_[symbol].max_notional = max_notional;
@@ -132,10 +132,10 @@ public:
      * Update current P&L and check limits
      * Called on every fill or periodically with mark-to-market
      */
-    void update_pnl(int64_t pnl) {
+    void update_pnl(PnL pnl) {
         current_pnl_ = pnl;
 
-        int64_t current_equity = initial_capital_ + current_pnl_;
+        Capital current_equity = initial_capital_ + current_pnl_;
 
         // Update peak equity (only goes up)
         if (current_equity > peak_equity_) {
@@ -143,7 +143,7 @@ public:
         }
 
         // Check daily loss limit
-        int64_t daily_pnl = current_pnl_ - daily_start_pnl_;
+        PnL daily_pnl = current_pnl_ - daily_start_pnl_;
         if (daily_pnl < -config_.daily_loss_limit) {
             daily_limit_breached_ = true;
             halted_ = true;
@@ -203,11 +203,11 @@ public:
 
             // Position limit check
             if (limit.max_position > 0) {
-                int64_t new_position = state.position;
+                Position new_position = state.position;
                 if (side == Side::Buy) {
-                    new_position += static_cast<int64_t>(qty);
+                    new_position += static_cast<Position>(qty);
                 } else {
-                    new_position -= static_cast<int64_t>(qty);
+                    new_position -= static_cast<Position>(qty);
                 }
 
                 if (std::abs(new_position) > limit.max_position) {
@@ -217,8 +217,8 @@ public:
 
             // Notional limit check
             if (limit.max_notional > 0 && price > 0) {
-                int64_t order_notional = static_cast<int64_t>(qty) * price / 10000;  // Assuming price in bps
-                int64_t new_notional = state.notional + order_notional;
+                Notional order_notional = static_cast<Notional>(qty) * price / 10000;  // Assuming price in bps
+                Notional new_notional = state.notional + order_notional;
 
                 if (new_notional > limit.max_notional) {
                     return false;
@@ -228,7 +228,7 @@ public:
 
         // Global notional check
         if (config_.max_total_notional > 0) {
-            int64_t order_notional = static_cast<int64_t>(qty) * price / 10000;
+            Notional order_notional = static_cast<Notional>(qty) * price / 10000;
             if (total_notional_ + order_notional > config_.max_total_notional) {
                 return false;
             }
@@ -259,7 +259,7 @@ public:
         auto& state = states_[symbol];
 
         // Update position
-        int64_t signed_qty = static_cast<int64_t>(qty);
+        Position signed_qty = static_cast<Position>(qty);
         if (side == Side::Buy) {
             state.position += signed_qty;
         } else {
@@ -282,27 +282,27 @@ public:
     bool is_daily_limit_breached() const { return daily_limit_breached_; }
     bool is_drawdown_breached() const { return drawdown_breached_; }
 
-    int64_t current_pnl() const { return current_pnl_; }
-    int64_t peak_equity() const { return peak_equity_; }
-    int64_t total_notional() const { return total_notional_; }
+    PnL current_pnl() const { return current_pnl_; }
+    Capital peak_equity() const { return peak_equity_; }
+    Notional total_notional() const { return total_notional_; }
 
-    int64_t daily_pnl() const {
+    PnL daily_pnl() const {
         return current_pnl_ - daily_start_pnl_;
     }
 
     double current_drawdown_pct() const {
         if (peak_equity_ <= 0) return 0.0;
-        int64_t current_equity = initial_capital_ + current_pnl_;
+        Capital current_equity = initial_capital_ + current_pnl_;
         return static_cast<double>(peak_equity_ - current_equity) /
                static_cast<double>(peak_equity_);
     }
 
-    int64_t symbol_position(Symbol symbol) const {
+    Position symbol_position(Symbol symbol) const {
         if (symbol >= MAX_SYMBOLS) return 0;
         return states_[symbol].position;
     }
 
-    int64_t symbol_notional(Symbol symbol) const {
+    Notional symbol_notional(Symbol symbol) const {
         if (symbol >= MAX_SYMBOLS) return 0;
         return states_[symbol].notional;
     }
@@ -352,7 +352,7 @@ public:
 
 private:
     void recalculate_total_notional() {
-        int64_t total = 0;
+        Notional total = 0;
         for (size_t i = 0; i < MAX_SYMBOLS; ++i) {
             total += states_[i].notional;
         }
@@ -362,11 +362,11 @@ private:
     EnhancedRiskConfig config_;
 
     // Capital and P&L tracking
-    int64_t initial_capital_;
-    int64_t current_pnl_;
-    int64_t peak_equity_;
-    int64_t daily_start_pnl_;
-    int64_t total_notional_;
+    Capital initial_capital_;
+    PnL current_pnl_;
+    Capital peak_equity_;
+    PnL daily_start_pnl_;
+    Notional total_notional_;
 
     // Risk flags
     bool daily_limit_breached_;

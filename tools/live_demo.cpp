@@ -170,7 +170,7 @@ private:
  */
 struct PaperAccount {
     double capital = 10000.0;
-    std::map<std::string, Position> positions;
+    std::map<std::string, BacktestPosition> positions;
     int total_trades = 0;
     double total_pnl = 0;
 
@@ -242,7 +242,7 @@ int main(int argc, char* argv[]) {
     for (const auto& sym_config : config.symbols) {
         strategies[sym_config.symbol] = StrategyFactory::create(sym_config);
         aggregators[sym_config.symbol] = KlineAggregator(60);  // 1 minute klines
-        account.positions[sym_config.symbol] = Position{};
+        account.positions[sym_config.symbol] = BacktestPosition{};
         feed.add_symbol(sym_config.symbol);
     }
 
@@ -299,7 +299,7 @@ int main(int argc, char* argv[]) {
                         std::cout << "         -> Closed position, P&L: $"
                                   << std::fixed << std::setprecision(2) << pnl << "\n";
 
-                        position = Position{};  // Reset
+                        position = BacktestPosition{};  // Reset
                     }
                 }
             }
