@@ -14,6 +14,12 @@ using TraderId = uint32_t;
 using Symbol = uint32_t;  // Numeric symbol ID for speed
 using Timestamp = uint64_t;
 
+// Risk management types (signed for negative values: short positions, losses)
+using Position = int64_t;   // Net position (negative = short)
+using PnL = int64_t;        // Profit/Loss (negative = loss)
+using Notional = int64_t;   // Notional value (position * price)
+using Capital = int64_t;    // Capital/Equity
+
 constexpr Price INVALID_PRICE = std::numeric_limits<Price>::max();
 constexpr OrderId INVALID_ORDER_ID = 0;
 constexpr TraderId NO_TRADER = 0;

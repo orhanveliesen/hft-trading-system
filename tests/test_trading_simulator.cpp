@@ -91,7 +91,7 @@ TEST(test_pnl_tracking) {
 // Test: Risk manager halts trading on max loss
 TEST(test_risk_halt_on_loss) {
     SimulatorConfig config;
-    config.max_loss = 1000;  // Halt at -1000
+    config.daily_loss_limit_pct = 0.01;  // 1% of 100k = 1000 max daily loss
 
     TradingSimulator sim(config);
 

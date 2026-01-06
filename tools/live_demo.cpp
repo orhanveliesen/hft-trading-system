@@ -16,6 +16,8 @@
 #include "../include/config/strategy_factory.hpp"
 #include "../include/backtest/kline_backtest.hpp"
 #include "../include/exchange/market_data.hpp"
+#include "../include/strategy/signal.hpp"
+#include "../include/strategy/trading_position.hpp"
 #include <iostream>
 #include <iomanip>
 #include <chrono>
@@ -28,8 +30,9 @@
 
 using namespace hft;
 using namespace hft::config;
-using namespace hft::backtest;
+using namespace hft::backtest;  // For IStrategy, KlineBacktester
 using namespace hft::exchange;
+using namespace hft::strategy;  // For Signal, TradingPosition
 
 std::atomic<bool> g_running{true};
 
@@ -170,7 +173,7 @@ private:
  */
 struct PaperAccount {
     double capital = 10000.0;
-    std::map<std::string, Position> positions;
+    std::map<std::string, TradingPosition> positions;
     int total_trades = 0;
     double total_pnl = 0;
 
@@ -193,14 +196,7 @@ struct PaperAccount {
     }
 };
 
-std::string signal_to_string(Signal sig) {
-    switch (sig) {
-        case Signal::Buy: return "BUY";
-        case Signal::Sell: return "SELL";
-        case Signal::Close: return "CLOSE";
-        default: return "HOLD";
-    }
-}
+// Use signal_to_string from strategy namespace
 
 int main(int argc, char* argv[]) {
     std::string config_file = "trading_config.json";
@@ -242,7 +238,7 @@ int main(int argc, char* argv[]) {
     for (const auto& sym_config : config.symbols) {
         strategies[sym_config.symbol] = StrategyFactory::create(sym_config);
         aggregators[sym_config.symbol] = KlineAggregator(60);  // 1 minute klines
-        account.positions[sym_config.symbol] = Position{};
+        account.positions[sym_config.symbol] = TradingPosition{};
         feed.add_symbol(sym_config.symbol);
     }
 
@@ -299,7 +295,7 @@ int main(int argc, char* argv[]) {
                         std::cout << "         -> Closed position, P&L: $"
                                   << std::fixed << std::setprecision(2) << pnl << "\n";
 
-                        position = Position{};  // Reset
+                        position = TradingPosition{};  // Reset
                     }
                 }
             }

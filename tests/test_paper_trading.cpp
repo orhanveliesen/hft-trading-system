@@ -8,6 +8,8 @@
 using namespace hft;
 using namespace hft::logging;
 using namespace hft::paper;
+using namespace hft::strategy;
+using namespace hft::risk;
 
 #define TEST(name) void name()
 #define RUN_TEST(name) do { \
@@ -305,8 +307,9 @@ TEST(test_paper_engine_pnl_calculation) {
 
 TEST(test_paper_engine_risk_halt) {
     PaperTradingEngine::Config config;
-    config.initial_capital = 10000.0;
-    config.max_loss_pct = 0.01;  // 1% max loss = $100
+    config.initial_capital = 10000 * risk::PRICE_SCALE;  // $10,000 scaled
+    config.max_drawdown_pct = 0.01;  // 1% max drawdown = $100
+    config.daily_loss_limit_pct = 0.01;                   // 1% daily loss limit = $100
     config.enable_logging = false;
     config.fill_config.min_latency_ns = 0;
     config.fill_config.max_latency_ns = 0;
@@ -333,22 +336,27 @@ TEST(test_paper_engine_risk_halt) {
 
 TEST(test_paper_engine_position_limit) {
     PaperTradingEngine::Config config;
-    config.max_position_qty = 100;  // Max 100 shares
+    config.default_max_position = 100;  // Max 100 shares per symbol
     config.enable_logging = false;
+    config.fill_config.min_latency_ns = 0;
+    config.fill_config.max_latency_ns = 0;
 
     PaperTradingEngine engine(config);
 
+    // Register symbol with position limit
+    engine.register_symbol("TEST", 100, 0);  // max 100 shares
+
     // Submit order for 100 shares - should work
-    ASSERT_TRUE(engine.submit_order(1, Side::Buy, 100, true));
+    ASSERT_TRUE(engine.submit_order(0, Side::Buy, 100, true));
 
     // Fill the order
-    engine.on_market_data(1, 1000000, 1001000, 0);
+    engine.on_market_data(0, 1000000, 1001000, 0);
 
-    // Try to buy more - should be rejected
-    ASSERT_FALSE(engine.submit_order(1, Side::Buy, 50, true));
+    // Try to buy more - should be rejected by risk manager
+    ASSERT_FALSE(engine.submit_order(0, Side::Buy, 50, true));
 
     // Selling should work
-    ASSERT_TRUE(engine.submit_order(1, Side::Sell, 50, true));
+    ASSERT_TRUE(engine.submit_order(0, Side::Sell, 50, true));
 }
 
 // ============================================

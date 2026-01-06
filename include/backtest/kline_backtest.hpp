@@ -2,6 +2,8 @@
 
 #include "../exchange/market_data.hpp"
 #include "../types.hpp"
+#include "../strategy/signal.hpp"
+#include "../strategy/trading_position.hpp"
 #include <vector>
 #include <string>
 #include <functional>
@@ -11,15 +13,12 @@
 namespace hft {
 namespace backtest {
 
-/**
- * Strategy Signal
- */
-enum class Signal {
-    None,
-    Buy,
-    Sell,
-    Close
-};
+// Import generic types from strategy namespace
+using Signal = strategy::Signal;
+using TradingPosition = strategy::TradingPosition;
+
+// Backward compatibility alias (deprecated)
+using BacktestPosition = strategy::TradingPosition;
 
 /**
  * Trade Record
@@ -33,20 +32,6 @@ struct TradeRecord {
     Side side = Side::Buy;
     double pnl = 0;
     double fees = 0;
-};
-
-/**
- * Position for backtest
- */
-struct Position {
-    double quantity = 0;      // Positive = long, negative = short
-    double avg_price = 0;     // Average entry price (as double for precision)
-    Timestamp entry_time = 0;
-
-    bool is_flat() const { return quantity == 0; }
-    bool is_long() const { return quantity > 0; }
-    bool is_short() const { return quantity < 0; }
-    double size() const { return std::abs(quantity); }
 };
 
 /**
@@ -104,7 +89,7 @@ public:
     virtual void on_start(double capital) { (void)capital; }
 
     // Called for each kline - return signal
-    virtual Signal on_kline(const exchange::Kline& kline, const Position& position) = 0;
+    virtual Signal on_kline(const exchange::Kline& kline, const BacktestPosition& position) = 0;
 
     // Called when trade is executed
     virtual void on_trade(const TradeRecord& trade) { (void)trade; }
@@ -144,7 +129,7 @@ public:
         capital_ = config_.initial_capital;
         peak_capital_ = config_.initial_capital;
         max_drawdown_ = 0;
-        position_ = Position{};
+        position_ = BacktestPosition{};
         trades_.clear();
         equity_curve_.clear();
 
@@ -202,7 +187,7 @@ private:
     double capital_;
     double peak_capital_;
     double max_drawdown_;
-    Position position_;
+    BacktestPosition position_;
     std::vector<TradeRecord> trades_;
     std::vector<double> equity_curve_;
 
@@ -299,7 +284,7 @@ private:
         trade.fees = fee;
         trades_.push_back(trade);
 
-        position_ = Position{};
+        position_ = BacktestPosition{};
     }
 
     void check_stops(const exchange::Kline& kline) {
