@@ -154,7 +154,7 @@ int main(int argc, char* argv[]) {
         Price ask = base_price + 5;
 
         // Run strategy (if trading enabled)
-        Signal signal = Signal::Hold;
+        Signal signal = Signal::None;
         if (config_ptr->trading_enabled.load()) {
             signal = strategy(bid, ask, position);
 

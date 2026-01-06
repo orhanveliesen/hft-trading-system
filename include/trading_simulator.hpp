@@ -3,7 +3,7 @@
 #include "types.hpp"
 #include "strategy/market_maker.hpp"
 #include "strategy/position.hpp"
-#include "strategy/enhanced_risk_manager.hpp"
+#include "risk/enhanced_risk_manager.hpp"
 #include <cstdint>
 #include <string>
 
@@ -33,7 +33,7 @@ public:
         : config_(config)
         , market_maker_(create_mm_config(config))
         , risk_manager_(create_risk_config(config))
-        , symbol_index_(strategy::INVALID_SYMBOL_INDEX)
+        , symbol_index_(risk::INVALID_SYMBOL_INDEX)
         , quotes_generated_(0)
         , last_mid_(0)
     {
@@ -60,7 +60,7 @@ public:
         }
 
         // Generate quotes from market maker
-        auto quote = market_maker_.generate_quotes(last_mid_, position_.position());
+        auto quote = market_maker_.generate_quotes(last_mid_, pos_tracker_.position());
 
         if (quote.has_bid || quote.has_ask) {
             ++quotes_generated_;
@@ -72,7 +72,7 @@ public:
     // Process a fill (our order was executed)
     void on_fill(Side side, Quantity qty, Price price) {
         // Update position tracker
-        position_.on_fill(side, qty, price);
+        pos_tracker_.on_fill(side, qty, price);
 
         // Update risk manager position tracking (hot path)
         risk_manager_.on_fill(symbol_index_, side, qty, price);
@@ -81,7 +81,7 @@ public:
         Price mark = (last_mid_ > 0) ? last_mid_ : price;
 
         // Update risk manager with current P&L
-        risk_manager_.update_pnl(position_.total_pnl(mark));
+        risk_manager_.update_pnl(pos_tracker_.total_pnl(mark));
     }
 
     // Check if order passes risk checks (call before sending)
@@ -90,16 +90,16 @@ public:
     }
 
     // Accessors
-    int64_t position() const { return position_.position(); }
-    int64_t realized_pnl() const { return position_.realized_pnl(); }
-    int64_t unrealized_pnl() const { return position_.unrealized_pnl(last_mid_); }
-    int64_t total_pnl() const { return position_.total_pnl(last_mid_); }
+    int64_t position() const { return pos_tracker_.position(); }
+    int64_t realized_pnl() const { return pos_tracker_.realized_pnl(); }
+    int64_t unrealized_pnl() const { return pos_tracker_.unrealized_pnl(last_mid_); }
+    int64_t total_pnl() const { return pos_tracker_.total_pnl(last_mid_); }
     bool is_halted() const { return risk_manager_.is_halted(); }
     uint64_t total_quotes_generated() const { return quotes_generated_; }
 
     // Reset for new simulation
     void reset() {
-        position_.reset();
+        pos_tracker_.reset();
         risk_manager_.reset_halt();
         quotes_generated_ = 0;
         last_mid_ = 0;
@@ -108,10 +108,10 @@ public:
     const SimulatorConfig& config() const { return config_; }
 
     // Access to risk manager for advanced queries
-    const strategy::EnhancedRiskManager& risk_manager() const { return risk_manager_; }
+    const risk::EnhancedRiskManager& risk_manager() const { return risk_manager_; }
 
     // Get risk state snapshot
-    strategy::RiskState risk_state() const { return risk_manager_.build_state(); }
+    risk::RiskState risk_state() const { return risk_manager_.build_state(); }
 
 private:
     static strategy::MarketMakerConfig create_mm_config(const SimulatorConfig& cfg) {
@@ -123,8 +123,8 @@ private:
         };
     }
 
-    static strategy::EnhancedRiskConfig create_risk_config(const SimulatorConfig& cfg) {
-        strategy::EnhancedRiskConfig risk_cfg;
+    static risk::EnhancedRiskConfig create_risk_config(const SimulatorConfig& cfg) {
+        risk::EnhancedRiskConfig risk_cfg;
         risk_cfg.initial_capital = cfg.initial_capital;
         risk_cfg.daily_loss_limit = cfg.daily_loss_limit;
         risk_cfg.max_drawdown_pct = cfg.max_drawdown_pct;
@@ -136,9 +136,9 @@ private:
 
     SimulatorConfig config_;
     strategy::MarketMaker market_maker_;
-    strategy::PositionTracker position_;
-    strategy::EnhancedRiskManager risk_manager_;
-    strategy::SymbolIndex symbol_index_;
+    strategy::PositionTracker pos_tracker_;
+    risk::EnhancedRiskManager risk_manager_;
+    risk::SymbolIndex symbol_index_;
     uint64_t quotes_generated_;
     Price last_mid_;
 };

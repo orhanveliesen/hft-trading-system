@@ -9,7 +9,7 @@
 #include <algorithm>
 
 namespace hft {
-namespace strategy {
+namespace risk {
 
 // Symbol index type for hot path
 using SymbolIndex = uint32_t;
@@ -289,7 +289,7 @@ public:
 
         // Global notional check
         if (config_.max_total_notional > 0) {
-            Notional order_notional = static_cast<Notional>(qty) * price / 10000;
+            Notional order_notional = static_cast<Notional>(qty) * price / PRICE_SCALE;
             if (total_notional_ + order_notional > config_.max_total_notional) [[unlikely]] {
                 return false;
             }
@@ -483,5 +483,5 @@ private:
     std::vector<std::string> index_to_symbol_;
 };
 
-}  // namespace strategy
+}  // namespace risk
 }  // namespace hft

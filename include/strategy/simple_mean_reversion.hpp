@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../types.hpp"
+#include "signal.hpp"
 
 namespace hft {
 namespace strategy {
@@ -16,12 +17,6 @@ namespace strategy {
  *   - Tüm component'leri nasıl kullanacağını gösterir
  *   - Market data → Signal → Order akışını öğretir
  */
-
-enum class Signal : uint8_t {
-    Hold = 0,
-    Buy  = 1,
-    Sell = 2
-};
 
 struct SimpleMRConfig {
     Quantity order_size = 100;       // Her işlemde kaç lot
@@ -39,7 +34,7 @@ public:
     Signal operator()(Price bid, Price ask, int64_t current_position) {
         // Geçersiz veri kontrolü
         if (bid == INVALID_PRICE || ask == INVALID_PRICE || bid >= ask) {
-            return Signal::Hold;
+            return Signal::None;
         }
 
         // Mid price hesapla
@@ -48,15 +43,15 @@ public:
         // İlk tick - referans al
         if (last_mid_ == INVALID_PRICE) {
             last_mid_ = mid;
-            return Signal::Hold;
+            return Signal::None;
         }
 
         // Fiyat değişmedi
         if (mid == last_mid_) {
-            return Signal::Hold;
+            return Signal::None;
         }
 
-        Signal signal = Signal::Hold;
+        Signal signal = Signal::None;
 
         // Fiyat DÜŞTÜ → AL (mean reversion: geri çıkacak)
         if (mid < last_mid_) {

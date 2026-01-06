@@ -2,10 +2,10 @@
 #include <iostream>
 #include <cstring>
 
-#include "../include/strategy/enhanced_risk_manager.hpp"
+#include "../include/risk/enhanced_risk_manager.hpp"
 
 using namespace hft;
-using namespace hft::strategy;
+using namespace hft::risk;
 
 // ============================================
 // Test Helpers

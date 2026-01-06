@@ -2,6 +2,8 @@
 
 #include "../exchange/market_data.hpp"
 #include "../types.hpp"
+#include "../strategy/signal.hpp"
+#include "../strategy/trading_position.hpp"
 #include <vector>
 #include <string>
 #include <functional>
@@ -11,15 +13,12 @@
 namespace hft {
 namespace backtest {
 
-/**
- * Strategy Signal
- */
-enum class Signal {
-    None,
-    Buy,
-    Sell,
-    Close
-};
+// Import generic types from strategy namespace
+using Signal = strategy::Signal;
+using TradingPosition = strategy::TradingPosition;
+
+// Backward compatibility alias (deprecated)
+using BacktestPosition = strategy::TradingPosition;
 
 /**
  * Trade Record
@@ -33,22 +32,6 @@ struct TradeRecord {
     Side side = Side::Buy;
     double pnl = 0;
     double fees = 0;
-};
-
-/**
- * BacktestPosition - Position state for backtest
- *
- * Note: Named BacktestPosition to avoid collision with hft::Position type alias
- */
-struct BacktestPosition {
-    double quantity = 0;      // Positive = long, negative = short
-    double avg_price = 0;     // Average entry price (as double for precision)
-    Timestamp entry_time = 0;
-
-    bool is_flat() const { return quantity == 0; }
-    bool is_long() const { return quantity > 0; }
-    bool is_short() const { return quantity < 0; }
-    double size() const { return std::abs(quantity); }
 };
 
 /**
