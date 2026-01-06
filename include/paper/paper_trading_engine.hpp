@@ -4,6 +4,7 @@
 #include "../order_sender.hpp"
 #include "../strategy/regime_detector.hpp"
 #include "../strategy/adaptive_strategy.hpp"
+#include "../strategy/enhanced_risk_manager.hpp"
 #include "../logging/async_logger.hpp"
 #include <vector>
 #include <unordered_map>
@@ -12,6 +13,7 @@
 #include <chrono>
 #include <random>
 #include <cmath>
+#include <string>
 
 namespace hft {
 namespace paper {
@@ -348,17 +350,37 @@ private:
 static_assert(is_order_sender_v<PaperOrderSender>, "PaperOrderSender must satisfy OrderSender concept");
 
 /**
+ * Per-symbol risk configuration for paper trading
+ */
+struct SymbolRiskConfig {
+    std::string symbol;
+    Position max_position = 1000;      // Max shares per symbol
+    Notional max_notional = 10000000;  // Max notional per symbol (in scaled units)
+};
+
+/**
  * Paper Trading Engine Configuration
  */
 struct PaperTradingConfig {
-    double initial_capital = 100000.0;
+    // Capital
+    Capital initial_capital = 100000 * strategy::PRICE_SCALE;  // Convert to scaled units
+
+    // Fill simulation
     FillSimConfig fill_config = {};
     strategy::RegimeConfig regime_config = {};
 
-    // Risk limits
-    double max_position_value = 10000.0;  // Max notional per symbol
-    int64_t max_position_qty = 1000;      // Max shares per symbol
-    double max_loss_pct = 0.02;           // 2% max drawdown
+    // Risk limits (maps to EnhancedRiskConfig)
+    PnL daily_loss_limit = 2000 * strategy::PRICE_SCALE;    // $2000 daily loss limit
+    double max_drawdown_pct = 0.10;                          // 10% max drawdown
+    Quantity max_order_size = 1000;                          // Max single order size
+    Notional max_total_notional = 1000000 * strategy::PRICE_SCALE;  // $1M total exposure
+
+    // Per-symbol defaults
+    Position default_max_position = 1000;
+    Notional default_max_notional = 100000 * strategy::PRICE_SCALE;
+
+    // Symbol configurations
+    std::vector<SymbolRiskConfig> symbol_configs;
 
     // Logging
     bool enable_logging = true;
@@ -374,6 +396,7 @@ struct PaperTradingConfig {
  * - P&L calculation
  * - Regime detection
  * - Async logging
+ * - Production-grade risk management (EnhancedRiskManager)
  */
 class PaperTradingEngine {
 public:
@@ -383,10 +406,15 @@ public:
         : config_(config)
         , order_sender_(config.fill_config)
         , regime_detector_(config.regime_config)
+        , risk_manager_(create_risk_config(config))
         , capital_(config.initial_capital)
         , peak_equity_(config.initial_capital)
-        , is_halted_(false)
     {
+        // Register symbols from config
+        for (const auto& sym_cfg : config.symbol_configs) {
+            register_symbol(sym_cfg.symbol, sym_cfg.max_position, sym_cfg.max_notional);
+        }
+
         // Set up fill callback
         order_sender_.set_fill_callback([this](const FillEvent& event) {
             on_fill(event);
@@ -399,6 +427,19 @@ public:
         }
     }
 
+private:
+    static strategy::EnhancedRiskConfig create_risk_config(const Config& cfg) {
+        strategy::EnhancedRiskConfig risk_cfg;
+        risk_cfg.initial_capital = cfg.initial_capital;
+        risk_cfg.daily_loss_limit = cfg.daily_loss_limit;
+        risk_cfg.max_drawdown_pct = cfg.max_drawdown_pct;
+        risk_cfg.max_order_size = cfg.max_order_size;
+        risk_cfg.max_total_notional = cfg.max_total_notional;
+        return risk_cfg;
+    }
+
+public:
+
     ~PaperTradingEngine() {
         if (config_.enable_logging) {
             logger_.stop();
@@ -406,10 +447,37 @@ public:
     }
 
     /**
+     * Register a symbol for trading (must be called before trading)
+     * Returns SymbolIndex for hot path operations
+     */
+    strategy::SymbolIndex register_symbol(const std::string& symbol_name,
+                                           Position max_position = 0,
+                                           Notional max_notional = 0) {
+        // Use defaults if not specified
+        if (max_position == 0) max_position = config_.default_max_position;
+        if (max_notional == 0) max_notional = config_.default_max_notional;
+
+        // Register with risk manager
+        strategy::SymbolIndex idx = risk_manager_.register_symbol(symbol_name, max_position, max_notional);
+
+        // Create Symbol (numeric) from index for internal use
+        Symbol symbol = static_cast<Symbol>(idx);
+        symbol_index_map_[symbol] = idx;
+        symbol_name_map_[symbol] = symbol_name;
+
+        if (config_.enable_logging) {
+            LOGF_INFO(logger_, "Symbol %s idx=%u pos=%ld",
+                     symbol_name.c_str(), idx, max_position);
+        }
+
+        return idx;
+    }
+
+    /**
      * Process market data update
      */
     void on_market_data(Symbol symbol, Price bid, Price ask, uint64_t timestamp_ns) {
-        if (is_halted_) return;
+        if (!risk_manager_.can_trade()) return;
 
         // Update regime
         double mid = (bid + ask) / 2.0 / 10000.0;  // Convert to dollars
@@ -429,23 +497,32 @@ public:
     }
 
     /**
-     * Submit order
+     * Submit order with risk checks
      */
     bool submit_order(Symbol symbol, Side side, Quantity qty, bool is_market = true) {
-        if (is_halted_) {
-            if (config_.enable_logging) {
-                LOG_WARN(logger_, "Order rejected: trading halted");
+        return submit_order_with_price(symbol, side, qty, 0, is_market);
+    }
+
+    /**
+     * Submit order with explicit price for risk calculation
+     */
+    bool submit_order_with_price(Symbol symbol, Side side, Quantity qty, Price price, bool is_market = true) {
+        // Get or create symbol index
+        strategy::SymbolIndex idx = get_or_register_symbol(symbol);
+
+        // Use last known price if not provided
+        if (price == 0) {
+            auto it = last_prices_.find(symbol);
+            if (it != last_prices_.end()) {
+                price = (side == Side::Buy) ? it->second.ask : it->second.bid;
             }
-            return false;
         }
 
-        // Check position limits
-        auto& pos = positions_[symbol];
-        int64_t new_qty = pos.quantity + (side == Side::Buy ? qty : -static_cast<int64_t>(qty));
-
-        if (std::abs(new_qty) > config_.max_position_qty) {
+        // Pre-trade risk check
+        if (!risk_manager_.check_order(idx, side, qty, price)) {
             if (config_.enable_logging) {
-                LOGF_WARN(logger_, "Order rejected: pos limit %ld", new_qty);
+                LOGF_WARN(logger_, "Risk reject: %s %u",
+                         side == Side::Buy ? "BUY" : "SELL", qty);
             }
             return false;
         }
@@ -453,7 +530,7 @@ public:
         bool result = order_sender_.send_order(symbol, side, qty, is_market);
 
         if (result && config_.enable_logging) {
-            LOGF_INFO(logger_, "Order sent: %s %u @ mkt",
+            LOGF_INFO(logger_, "Order: %s %u",
                      side == Side::Buy ? "BUY" : "SELL", qty);
         }
 
@@ -502,11 +579,21 @@ public:
     double volatility() const { return regime_detector_.volatility(); }
     double trend_strength() const { return regime_detector_.trend_strength(); }
 
-    bool is_halted() const { return is_halted_; }
-    void set_halted(bool halted) { is_halted_ = halted; }
+    bool is_halted() const { return !risk_manager_.can_trade(); }
+    void set_halted(bool halted) {
+        if (halted) {
+            risk_manager_.halt();
+        } else {
+            risk_manager_.reset_halt();
+        }
+    }
 
     const Config& config() const { return config_; }
     logging::AsyncLogger& logger() { return logger_; }
+
+    // Risk manager access
+    const strategy::EnhancedRiskManager& risk_manager() const { return risk_manager_; }
+    strategy::RiskState risk_state() const { return risk_manager_.build_state(); }
 
     // Statistics
     uint64_t total_orders() const { return order_sender_.total_orders(); }
@@ -516,13 +603,15 @@ private:
     Config config_;
     PaperOrderSender order_sender_;
     strategy::RegimeDetector regime_detector_;
+    strategy::EnhancedRiskManager risk_manager_;
     logging::AsyncLogger logger_;
 
     double capital_;
     double peak_equity_;
-    bool is_halted_;
 
     std::unordered_map<Symbol, PaperPosition> positions_;
+    std::unordered_map<Symbol, strategy::SymbolIndex> symbol_index_map_;
+    std::unordered_map<Symbol, std::string> symbol_name_map_;
 
     struct PriceInfo {
         Price bid;
@@ -533,6 +622,10 @@ private:
 
     void on_fill(const FillEvent& event) {
         auto& pos = positions_[event.symbol];
+
+        // Update risk manager position tracking
+        strategy::SymbolIndex idx = get_or_register_symbol(event.symbol);
+        risk_manager_.on_fill(idx, event.side, event.quantity, event.price);
 
         // Update position
         int64_t sign = (event.side == Side::Buy) ? 1 : -1;
@@ -545,7 +638,7 @@ private:
         if (is_closing) {
             // Calculate realized P&L for closed portion
             int64_t close_qty = std::min(std::abs(old_qty), std::abs(fill_qty));
-            double price_diff = (static_cast<double>(event.price) - pos.avg_entry_price) / 10000.0;
+            double price_diff = (static_cast<double>(event.price) - pos.avg_entry_price) / strategy::PRICE_SCALE;
 
             if (old_qty > 0) {
                 pos.realized_pnl += price_diff * close_qty;
@@ -568,11 +661,15 @@ private:
         pos.symbol = event.symbol;
         pos.last_update_ns = event.timestamp_ns;
 
+        // Update risk manager P&L
+        PnL total_pnl_scaled = static_cast<PnL>(total_pnl() * strategy::PRICE_SCALE);
+        risk_manager_.update_pnl(total_pnl_scaled);
+
         if (config_.enable_logging) {
             LOGF_INFO(logger_, "Fill: %s %u @ %.4f pos=%ld",
                      event.side == Side::Buy ? "BUY" : "SELL",
                      event.quantity,
-                     event.price / 10000.0,
+                     static_cast<double>(event.price) / strategy::PRICE_SCALE,
                      pos.quantity);
         }
     }
@@ -589,7 +686,7 @@ private:
 
         // Mark to market
         Price mark_price = (pos.quantity > 0) ? bid : ask;
-        double price_diff = (static_cast<double>(mark_price) - pos.avg_entry_price) / 10000.0;
+        double price_diff = (static_cast<double>(mark_price) - pos.avg_entry_price) / strategy::PRICE_SCALE;
 
         if (pos.quantity > 0) {
             pos.unrealized_pnl = price_diff * pos.quantity;
@@ -599,22 +696,32 @@ private:
     }
 
     void check_risk_limits() {
-        double current_dd = drawdown();
+        // Risk manager already handles limits
+        // Just update P&L for mark-to-market
+        PnL total_pnl_scaled = static_cast<PnL>(total_pnl() * strategy::PRICE_SCALE);
+        risk_manager_.update_pnl(total_pnl_scaled);
 
-        if (current_dd >= config_.max_loss_pct && !is_halted_) {
-            is_halted_ = true;
-
-            if (config_.enable_logging) {
-                LOGF_WARN(logger_, "HALT: drawdown %.2f%% >= limit %.2f%%",
-                         current_dd * 100, config_.max_loss_pct * 100);
-            }
-        }
-
-        // Update peak equity
+        // Update local peak equity tracking
         double current = equity();
         if (current > peak_equity_) {
             peak_equity_ = current;
         }
+    }
+
+    // Helper to get symbol index (non-const version for on_fill)
+    strategy::SymbolIndex get_or_register_symbol(Symbol symbol) {
+        auto it = symbol_index_map_.find(symbol);
+        if (it != symbol_index_map_.end()) {
+            return it->second;
+        }
+
+        // Auto-register with default name and limits
+        std::string name = "SYM" + std::to_string(symbol);
+        strategy::SymbolIndex idx = risk_manager_.register_symbol(
+            name, config_.default_max_position, config_.default_max_notional);
+        symbol_index_map_[symbol] = idx;
+        symbol_name_map_[symbol] = name;
+        return idx;
     }
 };
 
