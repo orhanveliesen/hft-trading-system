@@ -237,7 +237,7 @@ int main(int argc, char* argv[]) {
     config.initial_capital = 100000 * hft::risk::PRICE_SCALE;  // $100k scaled
     config.default_max_position = 200;
     config.max_drawdown_pct = 0.05;  // 5% max drawdown
-    config.daily_loss_limit = 5000 * hft::risk::PRICE_SCALE;   // $5k daily loss limit
+    config.daily_loss_limit_pct = 0.05;   // 5% = $5k daily loss limit
     config.fill_config.min_latency_ns = fast_mode ? 0 : 100'000;
     config.fill_config.max_latency_ns = fast_mode ? 0 : 500'000;
     config.fill_config.slippage_bps = 0.5;

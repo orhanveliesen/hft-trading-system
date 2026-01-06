@@ -369,11 +369,11 @@ struct PaperTradingConfig {
     FillSimConfig fill_config = {};
     strategy::RegimeConfig regime_config = {};
 
-    // Risk limits (maps to EnhancedRiskConfig)
-    PnL daily_loss_limit = 2000 * risk::PRICE_SCALE;    // $2000 daily loss limit
+    // Risk limits (maps to EnhancedRiskConfig - all as percentages)
+    double daily_loss_limit_pct = 0.02;                      // 2% daily loss limit
     double max_drawdown_pct = 0.10;                          // 10% max drawdown
     Quantity max_order_size = 1000;                          // Max single order size
-    Notional max_total_notional = 1000000 * risk::PRICE_SCALE;  // $1M total exposure
+    double max_notional_pct = 1.0;                           // 100% of capital max exposure
 
     // Per-symbol defaults
     Position default_max_position = 1000;
@@ -431,10 +431,10 @@ private:
     static risk::EnhancedRiskConfig create_risk_config(const Config& cfg) {
         risk::EnhancedRiskConfig risk_cfg;
         risk_cfg.initial_capital = cfg.initial_capital;
-        risk_cfg.daily_loss_limit = cfg.daily_loss_limit;
+        risk_cfg.daily_loss_limit_pct = cfg.daily_loss_limit_pct;
         risk_cfg.max_drawdown_pct = cfg.max_drawdown_pct;
         risk_cfg.max_order_size = cfg.max_order_size;
-        risk_cfg.max_total_notional = cfg.max_total_notional;
+        risk_cfg.max_notional_pct = cfg.max_notional_pct;
         return risk_cfg;
     }
 

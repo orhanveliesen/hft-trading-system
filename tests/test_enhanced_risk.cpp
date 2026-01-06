@@ -24,7 +24,8 @@ using namespace hft::risk;
 
 TEST(test_daily_pnl_limit_not_exceeded) {
     EnhancedRiskConfig config;
-    config.daily_loss_limit = 10000;  // Max 10k loss per day
+    config.initial_capital = 100000;
+    config.daily_loss_limit_pct = 0.10;  // 10% = 10k max loss per day
 
     EnhancedRiskManager rm(config);
 
@@ -38,7 +39,8 @@ TEST(test_daily_pnl_limit_not_exceeded) {
 
 TEST(test_daily_pnl_limit_exceeded) {
     EnhancedRiskConfig config;
-    config.daily_loss_limit = 10000;
+    config.initial_capital = 100000;
+    config.daily_loss_limit_pct = 0.10;  // 10% = 10k max loss
 
     EnhancedRiskManager rm(config);
 
@@ -52,7 +54,8 @@ TEST(test_daily_pnl_limit_exceeded) {
 
 TEST(test_daily_pnl_reset_on_new_day) {
     EnhancedRiskConfig config;
-    config.daily_loss_limit = 10000;
+    config.initial_capital = 100000;
+    config.daily_loss_limit_pct = 0.10;  // 10% = 10k max loss
 
     EnhancedRiskManager rm(config);
 
@@ -203,7 +206,8 @@ TEST(test_symbol_notional_limit) {
 
 TEST(test_global_notional_limit) {
     EnhancedRiskConfig config;
-    config.max_total_notional = 5000000;  // 5M total
+    config.initial_capital = 5000000;  // 5M capital
+    config.max_notional_pct = 1.0;     // 100% = 5M max notional
 
     EnhancedRiskManager rm(config);
 
@@ -220,8 +224,9 @@ TEST(test_global_notional_limit) {
     // Buy TSLA: 500 @ 250 = 125k - allowed
     assert(rm.check_order(tsla, Side::Buy, 500, 2500000));
 
-    // Total notional check
-    assert(rm.total_notional() < config.max_total_notional);
+    // Total notional check - max is initial_capital * max_notional_pct
+    Notional max_notional = static_cast<Notional>(config.initial_capital * config.max_notional_pct);
+    assert(rm.total_notional() < max_notional);
 }
 
 // ============================================
@@ -251,11 +256,11 @@ TEST(test_max_order_size) {
 
 TEST(test_multiple_risk_checks) {
     EnhancedRiskConfig config;
-    config.daily_loss_limit = 50000;
+    config.initial_capital = 200000;
+    config.daily_loss_limit_pct = 0.25;  // 25% = 50k max loss
     config.max_drawdown_pct = 0.15;
     config.max_order_size = 500;
-    config.max_total_notional = 1000000;
-    config.initial_capital = 200000;
+    config.max_notional_pct = 5.0;       // 500% = 1M max notional
 
     EnhancedRiskManager rm(config);
     SymbolIndex idx = rm.register_symbol("AAPL", 2000, 500000);
@@ -269,9 +274,9 @@ TEST(test_multiple_risk_checks) {
 
 TEST(test_risk_state_summary) {
     EnhancedRiskConfig config;
-    config.daily_loss_limit = 10000;
-    config.max_drawdown_pct = 0.10;
     config.initial_capital = 100000;
+    config.daily_loss_limit_pct = 0.10;  // 10% = 10k max loss
+    config.max_drawdown_pct = 0.10;
 
     EnhancedRiskManager rm(config);
 
@@ -292,10 +297,10 @@ TEST(test_risk_state_summary) {
 
 TEST(test_hot_path_performance) {
     EnhancedRiskConfig config;
-    config.daily_loss_limit = 100000;
+    config.initial_capital = 1000000;
+    config.daily_loss_limit_pct = 0.10;  // 10% = 100k max loss
     config.max_drawdown_pct = 0.20;
     config.max_order_size = 10000;
-    config.initial_capital = 1000000;
 
     EnhancedRiskManager rm(config);
 
@@ -362,7 +367,7 @@ TEST(test_itch_style_symbol_mapping) {
 TEST(test_config_based_initialization) {
     EnhancedRiskConfig config;
     config.initial_capital = 500000;
-    config.daily_loss_limit = 25000;
+    config.daily_loss_limit_pct = 0.05;  // 5% = 25k max loss
     config.max_drawdown_pct = 0.08;
     config.max_order_size = 5000;
 
@@ -370,7 +375,7 @@ TEST(test_config_based_initialization) {
 
     // Verify config was applied
     assert(rm.peak_equity() == 500000);
-    assert(rm.config().daily_loss_limit == 25000);
+    assert(rm.config().daily_loss_limit_pct == 0.05);
     assert(rm.config().max_order_size == 5000);
 
     // Register a test symbol

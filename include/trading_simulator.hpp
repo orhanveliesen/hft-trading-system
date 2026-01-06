@@ -16,12 +16,13 @@ struct SimulatorConfig {
     double skew_factor = 0.5;        // Quote skew factor
 
     // Risk settings (maps to EnhancedRiskConfig)
-    Capital initial_capital = 100000;   // Starting capital
-    Position max_position = 1000;       // Position limit per symbol
-    PnL daily_loss_limit = 100000;      // Max loss before halt
-    Quantity max_order_size = 100;      // Max single order size
-    double max_drawdown_pct = 0.10;     // 10% max drawdown
-    Notional max_notional = 10000000;   // Max notional per symbol
+    // All monetary limits as percentages of initial_capital
+    Capital initial_capital = 100000;      // Starting capital
+    Position max_position = 1000;          // Position limit per symbol
+    double daily_loss_limit_pct = 0.02;    // 2% daily loss limit
+    Quantity max_order_size = 100;         // Max single order size
+    double max_drawdown_pct = 0.10;        // 10% max drawdown
+    double max_notional_pct = 1.0;         // 100% of capital max notional
 
     // Symbol to trade
     std::string symbol = "SIM";
@@ -38,10 +39,13 @@ public:
         , last_mid_(0)
     {
         // Register symbol and cache index for hot path
+        // Calculate max notional from percentage
+        Notional max_notional = static_cast<Notional>(
+            config.initial_capital * config.max_notional_pct);
         symbol_index_ = risk_manager_.register_symbol(
             config.symbol,
             config.max_position,
-            config.max_notional
+            max_notional
         );
     }
 
@@ -126,10 +130,10 @@ private:
     static risk::EnhancedRiskConfig create_risk_config(const SimulatorConfig& cfg) {
         risk::EnhancedRiskConfig risk_cfg;
         risk_cfg.initial_capital = cfg.initial_capital;
-        risk_cfg.daily_loss_limit = cfg.daily_loss_limit;
+        risk_cfg.daily_loss_limit_pct = cfg.daily_loss_limit_pct;
         risk_cfg.max_drawdown_pct = cfg.max_drawdown_pct;
         risk_cfg.max_order_size = cfg.max_order_size;
-        risk_cfg.max_total_notional = cfg.max_notional;
+        risk_cfg.max_notional_pct = cfg.max_notional_pct;
         risk_cfg.max_total_position = cfg.max_position;
         return risk_cfg;
     }

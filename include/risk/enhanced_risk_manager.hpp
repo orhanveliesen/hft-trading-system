@@ -21,26 +21,27 @@ constexpr int64_t PRICE_SCALE = 10000;
 /**
  * EnhancedRiskConfig - Complete risk configuration
  *
- * All monetary values are in the same unit as Price (typically basis points or cents)
+ * All monetary limits are expressed as percentages of initial_capital.
+ * This ensures consistent scaling regardless of capital size.
  */
 struct EnhancedRiskConfig {
-    // Initial capital (required for drawdown calculation)
+    // Initial capital (required - all percentage limits are calculated from this)
     Capital initial_capital = 0;            // Must be set!
 
-    // Daily limits
-    PnL daily_loss_limit = 100000;          // Max loss per day before halt
+    // Daily loss limit as percentage of initial capital
+    double daily_loss_limit_pct = 0.02;     // 2% daily loss limit (0.02 = 2%)
 
-    // Drawdown limits
-    double max_drawdown_pct = 0.10;         // Max drawdown from peak (0.10 = 10%)
+    // Max drawdown from peak as percentage
+    double max_drawdown_pct = 0.10;         // 10% max drawdown (0.10 = 10%)
 
-    // Order limits
+    // Max total notional exposure as percentage of initial capital
+    double max_notional_pct = 1.0;          // 100% of capital (1.0 = 100%)
+
+    // Order limits (quantity-based, not percentage)
     Quantity max_order_size = 10000;        // Max single order size
 
-    // Global exposure limits
-    Notional max_total_notional = 100000000; // Max total notional across all symbols
-
-    // Position limits (global)
-    Position max_total_position = 100000;    // Max total absolute position
+    // Position limits (quantity-based, not percentage)
+    Position max_total_position = 100000;   // Max total absolute position
 };
 
 /**
@@ -201,9 +202,10 @@ public:
             peak_equity_ = current_equity;
         }
 
-        // Check daily loss limit
+        // Check daily loss limit (percentage of initial capital)
         PnL daily_pnl = current_pnl_ - daily_start_pnl_;
-        if (daily_pnl < -config_.daily_loss_limit) {
+        PnL daily_loss_limit = static_cast<PnL>(initial_capital_ * config_.daily_loss_limit_pct);
+        if (daily_pnl < -daily_loss_limit) {
             daily_limit_breached_ = true;
             halted_ = true;
         }
@@ -287,10 +289,11 @@ public:
             }
         }
 
-        // Global notional check
-        if (config_.max_total_notional > 0) {
+        // Global notional check (percentage of initial capital)
+        if (config_.max_notional_pct > 0) {
+            Notional max_notional = static_cast<Notional>(initial_capital_ * config_.max_notional_pct);
             Notional order_notional = static_cast<Notional>(qty) * price / PRICE_SCALE;
-            if (total_notional_ + order_notional > config_.max_total_notional) [[unlikely]] {
+            if (total_notional_ + order_notional > max_notional) [[unlikely]] {
                 return false;
             }
         }

@@ -94,6 +94,9 @@ add_test(NAME QueueFillDetectorTests COMMAND test_queue_fill_detector)
 add_executable(test_enhanced_risk tests/test_enhanced_risk.cpp)
 add_test(NAME EnhancedRiskTests COMMAND test_enhanced_risk)
 
+add_executable(test_arbitrage tests/test_arbitrage.cpp)
+add_test(NAME ArbitrageTests COMMAND test_arbitrage)
+
 # === Tools ===
 add_executable(hft_control tools/hft_control.cpp)
 target_link_libraries(hft_control pthread rt)

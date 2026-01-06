@@ -309,7 +309,7 @@ TEST(test_paper_engine_risk_halt) {
     PaperTradingEngine::Config config;
     config.initial_capital = 10000 * risk::PRICE_SCALE;  // $10,000 scaled
     config.max_drawdown_pct = 0.01;  // 1% max drawdown = $100
-    config.daily_loss_limit = 100 * risk::PRICE_SCALE;   // $100 daily loss limit
+    config.daily_loss_limit_pct = 0.01;                   // 1% daily loss limit = $100
     config.enable_logging = false;
     config.fill_config.min_latency_ns = 0;
     config.fill_config.max_latency_ns = 0;
