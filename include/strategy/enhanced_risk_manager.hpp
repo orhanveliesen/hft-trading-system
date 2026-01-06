@@ -1,7 +1,9 @@
 #pragma once
 
 #include "../types.hpp"
-#include <array>
+#include <unordered_map>
+#include <vector>
+#include <string>
 #include <cstdint>
 #include <cstdlib>
 #include <algorithm>
@@ -9,12 +11,22 @@
 namespace hft {
 namespace strategy {
 
+// Symbol index type for hot path
+using SymbolIndex = uint32_t;
+constexpr SymbolIndex INVALID_SYMBOL_INDEX = std::numeric_limits<SymbolIndex>::max();
+
+// Price scaling factor (prices are in basis points: 1 dollar = 10000)
+constexpr int64_t PRICE_SCALE = 10000;
+
 /**
  * EnhancedRiskConfig - Complete risk configuration
  *
  * All monetary values are in the same unit as Price (typically basis points or cents)
  */
 struct EnhancedRiskConfig {
+    // Initial capital (required for drawdown calculation)
+    Capital initial_capital = 0;            // Must be set!
+
     // Daily limits
     PnL daily_loss_limit = 100000;          // Max loss per day before halt
 
@@ -69,7 +81,7 @@ struct RiskState {
 };
 
 /**
- * EnhancedRiskManager - Production-grade risk management
+ * EnhancedRiskManager - Production-grade risk management (Hybrid Design)
  *
  * Features:
  * - Daily P&L limit with automatic halt
@@ -78,50 +90,97 @@ struct RiskState {
  * - Global notional exposure limit
  * - Max order size limit
  *
- * Design:
- * - O(1) all operations
- * - Zero allocation on hot path
- * - Pre-allocated arrays for MAX_SYMBOLS
- * - Cache-line aligned critical data
- *
- * Memory: ~800KB for 10k symbols (80 bytes per symbol)
+ * Design (Hybrid):
+ * - Config/Cold path: String-based symbol names for readability
+ * - Hot path: Dense array indexing for O(1) with minimal cycles
+ * - register_symbol() returns SymbolIndex for caller to cache
+ * - check_order(SymbolIndex, ...) for hot path (~4-5 cycles)
+ * - check_order(string, ...) convenience overload for non-critical paths
  */
 class EnhancedRiskManager {
 public:
-    static constexpr size_t MAX_SYMBOLS = 10000;
-
     explicit EnhancedRiskManager(const EnhancedRiskConfig& config = EnhancedRiskConfig{})
         : config_(config)
-        , initial_capital_(0)
+        , initial_capital_(config.initial_capital)
         , current_pnl_(0)
-        , peak_equity_(0)
+        , peak_equity_(config.initial_capital)
         , daily_start_pnl_(0)
         , total_notional_(0)
         , daily_limit_breached_(false)
         , drawdown_breached_(false)
         , halted_(false)
-    {
-        // Zero-initialize arrays
-        for (size_t i = 0; i < MAX_SYMBOLS; ++i) {
-            limits_[i] = SymbolRiskLimit{};
-            states_[i] = SymbolRiskState{};
-        }
-    }
+    {}
 
     // ========================================
-    // Configuration
+    // Symbol Registration (Cold Path)
     // ========================================
 
-    void set_initial_capital(Capital capital) {
-        initial_capital_ = capital;
-        peak_equity_ = capital;
+    /**
+     * Reserve capacity for expected number of symbols
+     * Call once at startup to avoid reallocations
+     */
+    void reserve_symbols(size_t count) {
+        limits_.reserve(count);
+        states_.reserve(count);
+        index_to_symbol_.reserve(count);
     }
 
-    void set_symbol_limit(Symbol symbol, Position max_position, Notional max_notional) {
-        if (symbol < MAX_SYMBOLS) {
-            limits_[symbol].max_position = max_position;
-            limits_[symbol].max_notional = max_notional;
+    /**
+     * Register a symbol and get its index for hot path usage
+     * Returns SymbolIndex that caller should cache
+     *
+     * @param symbol String symbol name (e.g., "AAPL", "BTCUSDT")
+     * @param max_position Max position limit (0 = no limit)
+     * @param max_notional Max notional limit (0 = no limit)
+     * @return SymbolIndex for hot path operations
+     */
+    SymbolIndex register_symbol(const std::string& symbol,
+                                 Position max_position = 0,
+                                 Notional max_notional = 0) {
+        // Check if already registered
+        auto it = symbol_to_index_.find(symbol);
+        if (it != symbol_to_index_.end()) {
+            // Update limits for existing symbol
+            limits_[it->second] = {max_position, max_notional};
+            return it->second;
         }
+
+        // Register new symbol
+        SymbolIndex index = static_cast<SymbolIndex>(states_.size());
+        symbol_to_index_[symbol] = index;
+        index_to_symbol_.push_back(symbol);
+        states_.push_back(SymbolRiskState{});
+        limits_.push_back({max_position, max_notional});
+
+        return index;
+    }
+
+    /**
+     * Get symbol index by name (cold path lookup)
+     * Returns INVALID_SYMBOL_INDEX if not found
+     */
+    SymbolIndex get_symbol_index(const std::string& symbol) const {
+        auto it = symbol_to_index_.find(symbol);
+        if (it == symbol_to_index_.end()) {
+            return INVALID_SYMBOL_INDEX;
+        }
+        return it->second;
+    }
+
+    /**
+     * Get symbol name by index (for logging/debug)
+     */
+    const std::string& get_symbol_name(SymbolIndex index) const {
+        static const std::string empty;
+        if (index >= index_to_symbol_.size()) return empty;
+        return index_to_symbol_[index];
+    }
+
+    /**
+     * Update limits for existing symbol (cold path)
+     */
+    void set_symbol_limit(const std::string& symbol, Position max_position, Notional max_notional) {
+        register_symbol(symbol, max_position, max_notional);
     }
 
     // ========================================
@@ -175,31 +234,33 @@ public:
     }
 
     // ========================================
-    // Pre-Trade Risk Checks (Hot Path)
+    // Pre-Trade Risk Checks - HOT PATH
     // ========================================
 
     /**
-     * Check if an order is allowed
-     * Returns true if all risk checks pass
+     * Check if an order is allowed (HOT PATH - use this!)
      *
-     * This is the hot path - must be O(1) with no allocations
+     * @param symbol_index Index from register_symbol() - caller must cache this
+     * @return true if order passes all risk checks
+     *
+     * Performance: ~4-5 cycles (array indexing only)
      */
     __attribute__((always_inline))
-    bool check_order(Symbol symbol, Side side, Quantity qty, Price price) const {
+    bool check_order(SymbolIndex symbol_index, Side side, Quantity qty, Price price) const {
         // Global halt check
-        if (halted_) {
+        if (halted_) [[unlikely]] {
             return false;
         }
 
         // Order size check
-        if (qty > config_.max_order_size) {
+        if (qty > config_.max_order_size) [[unlikely]] {
             return false;
         }
 
-        // Symbol-specific checks
-        if (symbol < MAX_SYMBOLS) {
-            const auto& limit = limits_[symbol];
-            const auto& state = states_[symbol];
+        // Symbol-specific checks (direct array access)
+        if (symbol_index < limits_.size()) [[likely]] {
+            const auto& limit = limits_[symbol_index];
+            const auto& state = states_[symbol_index];
 
             // Position limit check
             if (limit.max_position > 0) {
@@ -210,17 +271,17 @@ public:
                     new_position -= static_cast<Position>(qty);
                 }
 
-                if (std::abs(new_position) > limit.max_position) {
+                if (std::abs(new_position) > limit.max_position) [[unlikely]] {
                     return false;
                 }
             }
 
             // Notional limit check
             if (limit.max_notional > 0 && price > 0) {
-                Notional order_notional = static_cast<Notional>(qty) * price / 10000;  // Assuming price in bps
+                Notional order_notional = static_cast<Notional>(qty) * price / PRICE_SCALE;
                 Notional new_notional = state.notional + order_notional;
 
-                if (new_notional > limit.max_notional) {
+                if (new_notional > limit.max_notional) [[unlikely]] {
                     return false;
                 }
             }
@@ -229,12 +290,25 @@ public:
         // Global notional check
         if (config_.max_total_notional > 0) {
             Notional order_notional = static_cast<Notional>(qty) * price / 10000;
-            if (total_notional_ + order_notional > config_.max_total_notional) {
+            if (total_notional_ + order_notional > config_.max_total_notional) [[unlikely]] {
                 return false;
             }
         }
 
         return true;
+    }
+
+    /**
+     * Check order by symbol name (convenience, NOT for hot path)
+     * Use check_order(SymbolIndex, ...) for performance-critical code
+     */
+    bool check_order(const std::string& symbol, Side side, Quantity qty, Price price) const {
+        SymbolIndex idx = get_symbol_index(symbol);
+        if (idx == INVALID_SYMBOL_INDEX) {
+            // Unknown symbol - allow if no specific limits
+            return !halted_ && qty <= config_.max_order_size;
+        }
+        return check_order(idx, side, qty, price);
     }
 
     /**
@@ -246,17 +320,17 @@ public:
     }
 
     // ========================================
-    // Fill Updates
+    // Fill Updates - HOT PATH
     // ========================================
 
     /**
-     * Update state after a fill
-     * Called for every execution
+     * Update state after a fill (HOT PATH)
      */
-    void on_fill(Symbol symbol, Side side, Quantity qty, Price price) {
-        if (symbol >= MAX_SYMBOLS) return;
+    __attribute__((always_inline))
+    void on_fill(SymbolIndex symbol_index, Side side, Quantity qty, Price price) {
+        if (symbol_index >= states_.size()) [[unlikely]] return;
 
-        auto& state = states_[symbol];
+        auto& state = states_[symbol_index];
 
         // Update position
         Position signed_qty = static_cast<Position>(qty);
@@ -268,10 +342,21 @@ public:
 
         // Update notional
         state.last_price = price;
-        state.notional = std::abs(state.position) * price / 10000;
+        state.notional = std::abs(state.position) * price / PRICE_SCALE;
 
-        // Update total notional
+        // Update total notional (could be optimized with delta tracking)
         recalculate_total_notional();
+    }
+
+    /**
+     * Update state by symbol name (convenience, NOT for hot path)
+     */
+    void on_fill(const std::string& symbol, Side side, Quantity qty, Price price) {
+        SymbolIndex idx = get_symbol_index(symbol);
+        if (idx == INVALID_SYMBOL_INDEX) {
+            idx = register_symbol(symbol);  // Auto-register
+        }
+        on_fill(idx, side, qty, price);
     }
 
     // ========================================
@@ -297,14 +382,20 @@ public:
                static_cast<double>(peak_equity_);
     }
 
-    Position symbol_position(Symbol symbol) const {
-        if (symbol >= MAX_SYMBOLS) return 0;
-        return states_[symbol].position;
+    Position symbol_position(SymbolIndex index) const {
+        if (index >= states_.size()) return 0;
+        return states_[index].position;
     }
 
-    Notional symbol_notional(Symbol symbol) const {
-        if (symbol >= MAX_SYMBOLS) return 0;
-        return states_[symbol].notional;
+    Position symbol_position(const std::string& symbol) const {
+        SymbolIndex idx = get_symbol_index(symbol);
+        if (idx == INVALID_SYMBOL_INDEX) return 0;
+        return states_[idx].position;
+    }
+
+    Notional symbol_notional(SymbolIndex index) const {
+        if (index >= states_.size()) return 0;
+        return states_[index].notional;
     }
 
     RiskState build_state() const {
@@ -343,18 +434,28 @@ public:
         drawdown_breached_ = false;
         halted_ = false;
 
-        for (size_t i = 0; i < MAX_SYMBOLS; ++i) {
-            states_[i].reset();
+        for (auto& state : states_) {
+            state.reset();
         }
     }
 
     const EnhancedRiskConfig& config() const { return config_; }
 
+    // ========================================
+    // Symbol enumeration
+    // ========================================
+
+    size_t symbol_count() const { return states_.size(); }
+
+    const std::vector<std::string>& symbols() const {
+        return index_to_symbol_;
+    }
+
 private:
     void recalculate_total_notional() {
         Notional total = 0;
-        for (size_t i = 0; i < MAX_SYMBOLS; ++i) {
-            total += states_[i].notional;
+        for (const auto& state : states_) {
+            total += state.notional;
         }
         total_notional_ = total;
     }
@@ -373,9 +474,13 @@ private:
     bool drawdown_breached_;
     bool halted_;
 
-    // Per-symbol data (pre-allocated)
-    std::array<SymbolRiskLimit, MAX_SYMBOLS> limits_;
-    std::array<SymbolRiskState, MAX_SYMBOLS> states_;
+    // Per-symbol data - HOT PATH (dense arrays for cache efficiency)
+    std::vector<SymbolRiskLimit> limits_;
+    std::vector<SymbolRiskState> states_;
+
+    // Symbol mapping - COLD PATH (string lookups)
+    std::unordered_map<std::string, SymbolIndex> symbol_to_index_;
+    std::vector<std::string> index_to_symbol_;
 };
 
 }  // namespace strategy
