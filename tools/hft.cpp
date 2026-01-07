@@ -260,6 +260,21 @@ struct SymbolStrategy {
     Price last_mid = 0;
     uint64_t last_signal_time = 0;
     std::string ticker;  // for logging
+
+    // Dynamic spread tracking (EMA of spread)
+    double ema_spread_pct = 0.001;  // Start with 0.1% default
+    static constexpr double SPREAD_ALPHA = 0.1;  // EMA decay
+
+    void update_spread(Price bid, Price ask) {
+        if (bid > 0 && ask > bid) {
+            double spread_pct = static_cast<double>(ask - bid) / static_cast<double>(bid);
+            ema_spread_pct = SPREAD_ALPHA * spread_pct + (1.0 - SPREAD_ALPHA) * ema_spread_pct;
+        }
+    }
+
+    // Threshold = 2x spread (need to make more than spread to profit)
+    double buy_threshold() const { return -ema_spread_pct * 2.0; }
+    double sell_threshold() const { return ema_spread_pct * 2.0; }
 };
 
 // Portfolio: tracks cash and holdings (no leverage, no shorting)
@@ -371,9 +386,12 @@ public:
             sender_.process_fills(id, bid, ask);
         }
 
-        // Update regime
+        // Update regime and spread
         auto* strat = strategies_[id].get();
         if (!strat) return;
+
+        // Track spread for dynamic thresholds
+        strat->update_spread(bid, ask);
 
         double mid = (bid + ask) / 2.0 / risk::PRICE_SCALE;
         strat->regime.update(mid);
@@ -456,6 +474,7 @@ public:
         double holding;     // quantity held (0 = no position)
         double value;       // holding * price
         double mid_price;
+        double spread_pct;  // current spread as percentage
     };
 
     std::vector<SymbolInfo> get_symbol_details() {
@@ -472,7 +491,13 @@ public:
             info.value = info.holding * info.mid_price;
 
             auto it = strategies_.find(w.id());
-            info.regime = (it != strategies_.end()) ? it->second->current_regime : MarketRegime::Unknown;
+            if (it != strategies_.end()) {
+                info.regime = it->second->current_regime;
+                info.spread_pct = it->second->ema_spread_pct * 100;  // as percentage
+            } else {
+                info.regime = MarketRegime::Unknown;
+                info.spread_pct = 0;
+            }
 
             result.push_back(info);
         });
@@ -570,9 +595,10 @@ private:
         // - Buy: need cash, adds to holding
         // - Sell: need holding, reduces position
 
-        // Thresholds for tick-by-tick trading (very small moves)
-        constexpr double BUY_THRESHOLD = -0.00005;   // -0.005% dip
-        constexpr double SELL_THRESHOLD = 0.00005;   // +0.005% rally
+        // Dynamic thresholds based on per-symbol spread
+        // Threshold = 2x spread to ensure profit after spread cost
+        const double BUY_THRESHOLD = strat->buy_threshold();    // -2x spread
+        const double SELL_THRESHOLD = strat->sell_threshold();  // +2x spread
 
         switch (strat->current_regime) {
             case MarketRegime::TrendingUp:
@@ -711,8 +737,8 @@ void print_status(App& app, int elapsed, bool paper_mode, double capital) {
     std::cout << "\n\n";
 
     // Symbol details table with individual strategy (top 15 by value)
-    std::cout << "  SYMBOL      REGIME  STRATEGY   QTY      PRICE        VALUE\n";
-    std::cout << "  ---------------------------------------------------------------\n";
+    std::cout << "  SYMBOL      REGIME  STRATEGY  SPREAD   QTY      PRICE        VALUE\n";
+    std::cout << "  ------------------------------------------------------------------------\n";
 
     size_t show_count = std::min(symbols.size(), size_t(15));
     for (size_t i = 0; i < show_count; ++i) {
@@ -721,7 +747,8 @@ void print_status(App& app, int elapsed, bool paper_mode, double capital) {
             std::cout << "  " << std::left << std::setw(10) << s.ticker
                       << "  " << regime_short(s.regime)
                       << "  " << strategy_short(s.regime)
-                      << "  " << std::right << std::setw(5) << std::fixed << std::setprecision(2) << s.holding
+                      << "  " << std::right << std::setw(5) << std::fixed << std::setprecision(3) << s.spread_pct << "%"
+                      << "  " << std::setw(5) << std::setprecision(2) << s.holding
                       << "  $" << std::setw(9) << s.mid_price
                       << "  $" << std::setw(9) << s.value
                       << "\n";
