@@ -17,6 +17,7 @@
 #include "../include/exchange/binance_ws.hpp"
 #include "../include/trading_engine.hpp"
 #include "../include/strategy/regime_detector.hpp"
+#include "../include/strategy/technical_indicators.hpp"
 #include "../include/symbol_config.hpp"
 #include "../include/risk/enhanced_risk_manager.hpp"
 #include <iostream>
@@ -256,6 +257,7 @@ static_assert(is_order_sender_v<ProductionOrderSender>, "ProductionOrderSender m
 
 struct SymbolStrategy {
     RegimeDetector regime{RegimeConfig{}};
+    TechnicalIndicators indicators{TechnicalIndicators::Config{}};
     MarketRegime current_regime = MarketRegime::Unknown;
     Price last_mid = 0;
     uint64_t last_signal_time = 0;
@@ -395,6 +397,7 @@ public:
 
         double mid = (bid + ask) / 2.0 / risk::PRICE_SCALE;
         strat->regime.update(mid);
+        strat->indicators.update(mid);  // Update technical indicators
 
         MarketRegime new_regime = strat->regime.current_regime();
         if (new_regime != strat->current_regime && strat->current_regime != MarketRegime::Unknown) {
@@ -475,6 +478,8 @@ public:
         double value;       // holding * price
         double mid_price;
         double spread_pct;  // current spread as percentage
+        double rsi;         // RSI value
+        bool ema_bullish;   // EMA crossover state
     };
 
     std::vector<SymbolInfo> get_symbol_details() {
@@ -494,9 +499,13 @@ public:
             if (it != strategies_.end()) {
                 info.regime = it->second->current_regime;
                 info.spread_pct = it->second->ema_spread_pct * 100;  // as percentage
+                info.rsi = it->second->indicators.rsi();
+                info.ema_bullish = it->second->indicators.ema_bullish();
             } else {
                 info.regime = MarketRegime::Unknown;
                 info.spread_pct = 0;
+                info.rsi = 50;
+                info.ema_bullish = false;
             }
 
             result.push_back(info);
@@ -581,44 +590,58 @@ private:
         Price mid = (bid + ask) / 2;
         if (strat->last_mid == 0) { strat->last_mid = mid; return; }
 
-        // CRITICAL: Cast to double BEFORE subtraction to avoid unsigned underflow
-        double change = (static_cast<double>(mid) - static_cast<double>(strat->last_mid)) / strat->last_mid;
-
         strat->last_mid = mid;
+
+        // Wait for indicators to have enough data
+        if (!strat->indicators.ready()) return;
 
         double ask_usd = static_cast<double>(ask) / risk::PRICE_SCALE;
         double holding = portfolio_.get_holding(id);
 
         bool buy = false, sell = false;
 
-        // SPOT TRADING: No shorting allowed!
-        // - Buy: need cash, adds to holding
-        // - Sell: need holding, reduces position
+        // Get composite signals from technical indicators
+        auto buy_strength = strat->indicators.buy_signal();
+        auto sell_strength = strat->indicators.sell_signal();
 
-        // Dynamic thresholds based on per-symbol spread
-        // Threshold = 2x spread to ensure profit after spread cost
-        const double BUY_THRESHOLD = strat->buy_threshold();    // -2x spread
-        const double SELL_THRESHOLD = strat->sell_threshold();  // +2x spread
+        // SPOT TRADING: No shorting allowed!
+        // Regime determines which signals we act on and required strength
+
+        using SS = TechnicalIndicators::SignalStrength;
 
         switch (strat->current_regime) {
             case MarketRegime::TrendingUp:
-                // Trend following: buy dips
-                if (change < BUY_THRESHOLD && holding < args_.max_position) buy = true;
+                // Trend following: buy on EMA bullish + dip signals
+                // More aggressive - accept Medium strength
+                if (buy_strength >= SS::Medium && holding < args_.max_position) {
+                    buy = true;
+                }
                 break;
+
             case MarketRegime::TrendingDown:
-                // Sell holdings to reduce exposure
-                if (holding > 0 && change > SELL_THRESHOLD) sell = true;
+                // Exit positions - sell on any bearish signal
+                if (sell_strength >= SS::Weak && holding > 0) {
+                    sell = true;
+                }
                 break;
+
             case MarketRegime::Ranging:
             case MarketRegime::LowVolatility:
-                // Mean reversion: buy dips, sell rallies
-                if (change < BUY_THRESHOLD && holding < args_.max_position) buy = true;
-                else if (change > SELL_THRESHOLD && holding > 0) sell = true;
+                // Mean reversion: need Strong signals (multiple indicators agree)
+                if (buy_strength >= SS::Strong && holding < args_.max_position) {
+                    buy = true;
+                } else if (sell_strength >= SS::Strong && holding > 0) {
+                    sell = true;
+                }
                 break;
+
             case MarketRegime::HighVolatility:
-                // Reduce risk: sell if holding too much
-                if (holding > 2 && change > SELL_THRESHOLD) sell = true;
+                // Risk reduction: only sell on Strong signal, no buying
+                if (sell_strength >= SS::Medium && holding > 0) {
+                    sell = true;
+                }
                 break;
+
             default:
                 break;
         }
@@ -633,16 +656,30 @@ private:
             }
         }
 
+        auto signal_str = [](TechnicalIndicators::SignalStrength s) {
+            switch (s) {
+                case SS::Strong: return "STRONG";
+                case SS::Medium: return "MEDIUM";
+                case SS::Weak: return "WEAK";
+                default: return "NONE";
+            }
+        };
+
         if (buy && world->can_trade(Side::Buy, 1)) {
             if (args_.verbose) {
                 std::cout << "[SIGNAL] " << strat->ticker << " BUY @ $" << ask_usd
-                          << " (change=" << (change * 100) << "%)\n";
+                          << " (strength=" << signal_str(buy_strength)
+                          << ", RSI=" << std::fixed << std::setprecision(1) << strat->indicators.rsi()
+                          << ", EMA=" << (strat->indicators.ema_bullish() ? "BULL" : "BEAR") << ")\n";
             }
             engine_.send_order(id, Side::Buy, 1, true);
             strat->last_signal_time = now;
         } else if (sell && world->can_trade(Side::Sell, 1)) {
             if (args_.verbose) {
-                std::cout << "[SIGNAL] " << strat->ticker << " SELL (change=" << (change * 100) << "%)\n";
+                std::cout << "[SIGNAL] " << strat->ticker << " SELL"
+                          << " (strength=" << signal_str(sell_strength)
+                          << ", RSI=" << std::fixed << std::setprecision(1) << strat->indicators.rsi()
+                          << ", EMA=" << (strat->indicators.ema_bullish() ? "BULL" : "BEAR") << ")\n";
             }
             engine_.send_order(id, Side::Sell, 1, true);
             strat->last_signal_time = now;
@@ -737,8 +774,8 @@ void print_status(App& app, int elapsed, bool paper_mode, double capital) {
     std::cout << "\n\n";
 
     // Symbol details table with individual strategy (top 15 by value)
-    std::cout << "  SYMBOL      REGIME  STRATEGY  SPREAD   QTY      PRICE        VALUE\n";
-    std::cout << "  ------------------------------------------------------------------------\n";
+    std::cout << "  SYMBOL      REGIME  STRATEGY  RSI   EMA   SPREAD   QTY      VALUE\n";
+    std::cout << "  ---------------------------------------------------------------------------\n";
 
     size_t show_count = std::min(symbols.size(), size_t(15));
     for (size_t i = 0; i < show_count; ++i) {
@@ -747,9 +784,10 @@ void print_status(App& app, int elapsed, bool paper_mode, double capital) {
             std::cout << "  " << std::left << std::setw(10) << s.ticker
                       << "  " << regime_short(s.regime)
                       << "  " << strategy_short(s.regime)
-                      << "  " << std::right << std::setw(5) << std::fixed << std::setprecision(3) << s.spread_pct << "%"
+                      << "  " << std::right << std::setw(4) << std::fixed << std::setprecision(0) << s.rsi
+                      << "  " << (s.ema_bullish ? " UP " : " DN ")
+                      << "  " << std::setw(5) << std::setprecision(3) << s.spread_pct << "%"
                       << "  " << std::setw(5) << std::setprecision(2) << s.holding
-                      << "  $" << std::setw(9) << s.mid_price
                       << "  $" << std::setw(9) << s.value
                       << "\n";
         }
