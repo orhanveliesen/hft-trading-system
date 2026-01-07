@@ -26,6 +26,7 @@
 #include "../include/types.hpp"
 #include "../include/risk/enhanced_risk_manager.hpp"
 #include "../include/strategy/regime_detector.hpp"
+#include "../include/strategy/regime_detector_fast.hpp"
 
 using namespace hft;
 using namespace hft::risk;
@@ -946,39 +947,80 @@ bool benchmark_change_calculation() {
 }
 
 bool benchmark_regime_detection() {
+    int iterations = 100000;
+    TEST_LOG("Running " << iterations << " regime updates...");
+
+    // ============================================
+    // OLD: RegimeDetector (with std::deque/vector)
+    // ============================================
     RegimeConfig config;
     config.lookback = 20;
-    RegimeDetector detector(config);
-
-    int iterations = 100000;
-
-    TEST_LOG("Running " << iterations << " regime updates...");
+    RegimeDetector detector_old(config);
 
     // Warmup
     for (int i = 0; i < 100; i++) {
-        detector.update(100.0 + (i % 10) * 0.1);
+        detector_old.update(100.0 + (i % 10) * 0.1);
     }
 
-    // Benchmark
-    auto start = std::chrono::high_resolution_clock::now();
+    volatile MarketRegime regime_old_sink;
+    auto start_old = std::chrono::high_resolution_clock::now();
     for (int i = 0; i < iterations; i++) {
-        detector.update(100.0 + (i % 100) * 0.01);
+        detector_old.update(100.0 + (i % 100) * 0.01);
+        regime_old_sink = detector_old.current_regime();
     }
-    auto end = std::chrono::high_resolution_clock::now();
+    auto end_old = std::chrono::high_resolution_clock::now();
+    (void)regime_old_sink;
+    double ns_old = std::chrono::duration<double, std::nano>(end_old - start_old).count() / iterations;
 
-    double ns_per_op = std::chrono::duration<double, std::nano>(end - start).count() / iterations;
-    double us_per_op = ns_per_op / 1000;
-    TEST_LOG("Regime update: " << std::fixed << std::setprecision(2) << us_per_op << " µs/op");
+    // ============================================
+    // NEW: FastRegimeDetector (zero-storage EMA)
+    // ============================================
+    FastRegimeConfig fast_config;
+    FastRegimeDetector detector_fast(fast_config);
 
-    double updates_per_sec = 1e9 / ns_per_op;
-    TEST_LOG("Throughput: " << std::fixed << std::setprecision(0) << (updates_per_sec / 1e3) << " K updates/sec");
-
-    // Regime detection is typically slower - it does calculations
-    if (us_per_op > 100) {  // 100 µs
-        TEST_WARN("Regime detection > 100µs - may need optimization");
+    // Warmup
+    for (int i = 0; i < 100; i++) {
+        detector_fast.update(100.0 + (i % 10) * 0.1);
     }
 
-    TEST_OK("Benchmark completed");
+    volatile MarketRegime regime_sink;  // Prevent optimization
+    auto start_fast = std::chrono::high_resolution_clock::now();
+    for (int i = 0; i < iterations; i++) {
+        detector_fast.update(100.0 + (i % 100) * 0.01);
+        regime_sink = detector_fast.regime();  // Force computation
+    }
+    auto end_fast = std::chrono::high_resolution_clock::now();
+    (void)regime_sink;
+    double ns_fast = std::chrono::duration<double, std::nano>(end_fast - start_fast).count() / iterations;
+
+    // ============================================
+    // Results
+    // ============================================
+    TEST_LOG("┌─────────────────────────────────────────────────────┐");
+    TEST_LOG("│           REGIME DETECTOR COMPARISON                │");
+    TEST_LOG("├─────────────────────────────────────────────────────┤");
+    TEST_LOG("│  OLD (deque/vector): " << std::fixed << std::setw(8) << std::setprecision(1) << ns_old << " ns/op              │");
+    TEST_LOG("│  NEW (EMA, zero-storage): " << std::fixed << std::setw(8) << std::setprecision(1) << ns_fast << " ns/op         │");
+    TEST_LOG("├─────────────────────────────────────────────────────┤");
+
+    double speedup = ns_old / ns_fast;
+    TEST_LOG("│  \033[32mSPEEDUP: " << std::fixed << std::setprecision(1) << speedup << "x faster!\033[0m                           │");
+    TEST_LOG("└─────────────────────────────────────────────────────┘");
+
+    double updates_per_sec = 1e9 / ns_fast;
+    TEST_LOG("Fast detector throughput: " << std::fixed << std::setprecision(1) << (updates_per_sec / 1e6) << " M updates/sec");
+
+    // Fast detector should be at least 10x faster
+    if (speedup < 10) {
+        TEST_WARN("Expected at least 10x speedup, got " << std::fixed << std::setprecision(1) << speedup << "x");
+    }
+
+    // Fast detector should be under 100ns
+    if (ns_fast > 100) {
+        TEST_WARN("Fast detector > 100ns (" << std::fixed << std::setprecision(1) << ns_fast << " ns)");
+    }
+
+    TEST_OK("Benchmark completed - " << std::fixed << std::setprecision(1) << speedup << "x speedup");
     return true;
 }
 

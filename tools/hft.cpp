@@ -663,6 +663,18 @@ const char* strategy_for_regime(MarketRegime r) {
     }
 }
 
+// Short strategy name for table display
+const char* strategy_short(MarketRegime r) {
+    switch (r) {
+        case MarketRegime::TrendingUp: return "MOM-BUY";
+        case MarketRegime::TrendingDown: return "MOM-SEL";
+        case MarketRegime::Ranging: return "MR     ";
+        case MarketRegime::HighVolatility: return "REDUCE ";
+        case MarketRegime::LowVolatility: return "MR     ";
+        default: return "WAIT   ";
+    }
+}
+
 template<typename App>
 void print_status(App& app, int elapsed, bool paper_mode, double capital) {
     auto stats = app.get_stats();
@@ -685,22 +697,22 @@ void print_status(App& app, int elapsed, bool paper_mode, double capital) {
               << "  (" << (pnl_pct >= 0 ? "+" : "") << pnl_pct << "%)"
               << "  |  Positions: " << stats.positions << " symbols\n\n";
 
-    // Show active strategy based on dominant regime
+    // Regime distribution summary
     std::map<MarketRegime, int> regime_counts;
     for (const auto& s : symbols) {
         regime_counts[s.regime]++;
     }
-    MarketRegime dominant = MarketRegime::Unknown;
-    int max_count = 0;
+    std::cout << "  Regimes: ";
     for (auto& [r, c] : regime_counts) {
-        if (c > max_count) { max_count = c; dominant = r; }
+        if (r != MarketRegime::Unknown) {
+            std::cout << regime_short(r) << ":" << c << "  ";
+        }
     }
-    std::cout << "  Active Strategy: " << strategy_for_regime(dominant)
-              << " (dominant: " << regime_short(dominant) << " " << max_count << "/" << symbols.size() << ")\n\n";
+    std::cout << "\n\n";
 
-    // Symbol details table (top 15 by value)
-    std::cout << "  SYMBOL      REGIME   QTY     PRICE         VALUE\n";
-    std::cout << "  --------------------------------------------------\n";
+    // Symbol details table with individual strategy (top 15 by value)
+    std::cout << "  SYMBOL      REGIME  STRATEGY   QTY      PRICE        VALUE\n";
+    std::cout << "  ---------------------------------------------------------------\n";
 
     size_t show_count = std::min(symbols.size(), size_t(15));
     for (size_t i = 0; i < show_count; ++i) {
@@ -708,9 +720,10 @@ void print_status(App& app, int elapsed, bool paper_mode, double capital) {
         if (s.holding > 0 || i < 5) {  // Show holdings or at least top 5
             std::cout << "  " << std::left << std::setw(10) << s.ticker
                       << "  " << regime_short(s.regime)
+                      << "  " << strategy_short(s.regime)
                       << "  " << std::right << std::setw(5) << std::fixed << std::setprecision(2) << s.holding
-                      << "  $" << std::setw(10) << s.mid_price
-                      << "  $" << std::setw(10) << s.value
+                      << "  $" << std::setw(9) << s.mid_price
+                      << "  $" << std::setw(9) << s.value
                       << "\n";
         }
     }
