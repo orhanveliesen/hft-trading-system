@@ -97,30 +97,24 @@ add_test(NAME EnhancedRiskTests COMMAND test_enhanced_risk)
 add_executable(test_arbitrage tests/test_arbitrage.cpp)
 add_test(NAME ArbitrageTests COMMAND test_arbitrage)
 
+add_executable(test_paper_portfolio tests/test_paper_portfolio.cpp)
+add_test(NAME PaperPortfolioTests COMMAND test_paper_portfolio)
+
 # === Tools ===
+add_executable(hft tools/hft.cpp)
+target_link_libraries(hft hft_core websockets pthread)
+
 add_executable(hft_control tools/hft_control.cpp)
 target_link_libraries(hft_control pthread rt)
 
-add_executable(hft_demo tools/hft_demo.cpp)
-target_link_libraries(hft_demo pthread rt)
-
 add_executable(fetch_klines tools/fetch_klines.cpp)
 target_link_libraries(fetch_klines curl)
-
-add_executable(ws_test tools/ws_test.cpp)
-target_link_libraries(ws_test websockets pthread)
 
 add_executable(run_backtest tools/run_backtest.cpp)
 target_link_libraries(run_backtest hft_core)
 
 add_executable(optimize_strategies tools/optimize_strategies.cpp)
 target_link_libraries(optimize_strategies hft_core)
-
-add_executable(live_demo tools/live_demo.cpp)
-target_link_libraries(live_demo hft_core pthread)
-
-add_executable(paper_trading_demo tools/paper_trading_demo.cpp)
-target_link_libraries(paper_trading_demo pthread)
 
 # === Benchmarks ===
 add_executable(bench_orderbook benchmarks/bench_orderbook.cpp)
