@@ -143,6 +143,7 @@ struct CLIArgs {
     bool paper_mode = false;
     bool help = false;
     bool verbose = false;
+    bool quiet = false;       // No dashboard, minimal output (for observer mode)
     std::vector<std::string> symbols;
     int duration = 0;  // 0 = unlimited
     double capital = 100000.0;
@@ -165,7 +166,8 @@ Options:
   -d, --duration SECS    Duration in seconds (0 = unlimited)
   -c, --capital USD      Initial capital (default: 100000)
   -m, --max-pos N        Max position per symbol (default: 10)
-  -v, --verbose          Verbose output
+  -v, --verbose          Verbose output (fills, targets, stops)
+  -q, --quiet            No dashboard, minimal output (use with observer)
   -h, --help             Show this help
 
 Examples:
@@ -207,6 +209,9 @@ bool parse_args(int argc, char* argv[], CLIArgs& args) {
         }
         else if (arg == "--verbose" || arg == "-v") {
             args.verbose = true;
+        }
+        else if (arg == "--quiet" || arg == "-q") {
+            args.quiet = true;
         }
         else if ((arg == "--symbols" || arg == "-s") && i + 1 < argc) {
             args.symbols = split_symbols(argv[++i]);
@@ -1236,7 +1241,9 @@ int run(const CLIArgs& args) {
 
         if (args.duration > 0 && elapsed >= args.duration) break;
 
-        print_status(app, static_cast<int>(elapsed), args.paper_mode, args.capital);
+        if (!args.quiet) {
+            print_status(app, static_cast<int>(elapsed), args.paper_mode, args.capital);
+        }
 
         if (app.is_halted()) {
             std::cout << "\n  TRADING HALTED - Risk limit breached\n";
@@ -1253,19 +1260,25 @@ int run(const CLIArgs& args) {
     auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
         std::chrono::steady_clock::now() - start).count();
 
-    clear_screen();
-    std::cout << "\nFINAL SUMMARY\n";
-    std::cout << "================================================================\n";
-    std::cout << "  Mode:      " << (args.paper_mode ? "PAPER" : "PRODUCTION") << "\n";
-    std::cout << "  Duration:  " << elapsed << " seconds\n";
-    std::cout << "  Symbols:   " << stats.symbols << "\n";
-    std::cout << "  Ticks:     " << stats.ticks << "\n";
-    std::cout << "  Fills:     " << stats.fills << "\n";
-    std::cout << "  Capital:   $" << std::fixed << std::setprecision(2) << args.capital << "\n";
-    std::cout << "  Equity:    $" << stats.equity << "\n";
-    std::cout << "  P&L:       $" << (stats.pnl >= 0 ? "+" : "") << stats.pnl << "\n";
-    std::cout << "  Status:    " << (stats.halted ? "HALTED" : "OK") << "\n";
-    std::cout << "================================================================\n\n";
+    if (!args.quiet) {
+        clear_screen();
+        std::cout << "\nFINAL SUMMARY\n";
+        std::cout << "================================================================\n";
+        std::cout << "  Mode:      " << (args.paper_mode ? "PAPER" : "PRODUCTION") << "\n";
+        std::cout << "  Duration:  " << elapsed << " seconds\n";
+        std::cout << "  Symbols:   " << stats.symbols << "\n";
+        std::cout << "  Ticks:     " << stats.ticks << "\n";
+        std::cout << "  Fills:     " << stats.fills << "\n";
+        std::cout << "  Capital:   $" << std::fixed << std::setprecision(2) << args.capital << "\n";
+        std::cout << "  Equity:    $" << stats.equity << "\n";
+        std::cout << "  P&L:       $" << (stats.pnl >= 0 ? "+" : "") << stats.pnl << "\n";
+        std::cout << "  Status:    " << (stats.halted ? "HALTED" : "OK") << "\n";
+        std::cout << "================================================================\n\n";
+    } else {
+        // Quiet mode: minimal one-line summary
+        std::cout << "[DONE] " << elapsed << "s, " << stats.fills << " fills, P&L: $"
+                  << std::fixed << std::setprecision(2) << (stats.pnl >= 0 ? "+" : "") << stats.pnl << "\n";
+    }
 
     return 0;
 }

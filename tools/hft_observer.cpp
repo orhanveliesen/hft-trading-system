@@ -27,6 +27,8 @@
 #include <deque>
 #include <map>
 #include <cmath>
+#include <sys/ioctl.h>
+#include <unistd.h>
 
 using namespace hft::ipc;
 
@@ -68,8 +70,10 @@ namespace term {
     constexpr const char* HOME      = "\033[H";
     constexpr const char* HIDE_CURSOR = "\033[?25l";
     constexpr const char* SHOW_CURSOR = "\033[?25h";
+    constexpr const char* CLEAR_LINE = "\033[K";  // Clear from cursor to end of line
 
     void clear_screen() { std::cout << CLEAR << HOME; }
+    void home() { std::cout << HOME; }  // Move cursor to top-left (no clear)
     void move_to(int row, int col) { std::cout << "\033[" << row << ";" << col << "H"; }
 }
 
@@ -121,31 +125,45 @@ struct DisplayEvent {
 
 class Dashboard {
 public:
-    static constexpr int WIDTH = 80;
-    static constexpr int INNER = WIDTH - 4;  // Content width (excluding borders and padding)
-    static constexpr int EVENT_PANEL_HEIGHT = 15;
-    static constexpr int MAX_EVENTS = 50;
+    // Dynamic terminal size
+    int term_width = 80;
+    int term_height = 24;
+    int inner_width = 76;      // Content width (excluding borders)
+    int event_rows = 10;       // Rows for event panel
+    static constexpr int MAX_EVENTS = 100;
+
+    // Get terminal size
+    void update_term_size() {
+        struct winsize w;
+        if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &w) == 0) {
+            term_width = std::max(60, (int)w.ws_col);
+            term_height = std::max(20, (int)w.ws_row);
+        }
+        inner_width = term_width - 4;
+        // Header(3) + Stats(2) + P&L(4) + TradeStats(2) + EventHeader(1) + Footer(2) = 14 fixed rows
+        event_rows = std::max(5, term_height - 14);
+    }
 
     // Helper: pad string to exact width
-    static std::string pad(const std::string& s, int width) {
+    std::string pad(const std::string& s, int width) const {
         if ((int)s.length() >= width) return s.substr(0, width);
         return s + std::string(width - s.length(), ' ');
     }
 
     // Helper: create horizontal line
-    static void hline(bool is_middle = true) {
+    void hline(bool is_middle = true) const {
         std::cout << term::BCYAN;
         std::cout << (is_middle ? box::LT : box::TL);
-        for (int i = 0; i < WIDTH - 2; i++) std::cout << box::H;
+        for (int i = 0; i < term_width - 2; i++) std::cout << box::H;
         std::cout << (is_middle ? box::RT : box::TR);
-        std::cout << term::RESET << "\n";
+        std::cout << term::RESET << term::CLEAR_LINE << "\n";
     }
 
-    // Helper: print row with borders
-    static void row(const std::string& content) {
+    // Helper: print row with borders (clears rest of line)
+    void row(const std::string& content) const {
         std::cout << term::BCYAN << box::V << term::RESET;
-        std::cout << "  " << pad(content, INNER);
-        std::cout << term::BCYAN << box::V << term::RESET << "\n";
+        std::cout << "  " << pad(content, inner_width);
+        std::cout << term::BCYAN << box::V << term::RESET << term::CLEAR_LINE << "\n";
     }
 
     // Statistics
@@ -267,7 +285,11 @@ public:
     }
 
     void render() {
-        std::cout << term::CLEAR << term::HOME << term::HIDE_CURSOR;
+        // Update terminal size
+        update_term_size();
+
+        // Flicker-free: move cursor to home, don't clear screen
+        std::cout << term::HOME << term::HIDE_CURSOR;
 
         auto now = std::chrono::steady_clock::now();
         auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - start_time).count();
@@ -275,112 +297,109 @@ public:
         int mins = (elapsed % 3600) / 60;
         int secs = elapsed % 60;
 
-        // Use fixed-width formatting with ostringstream
         std::ostringstream ss;
 
         // ═══════════════════════════════════════════════════════════════════
         // Header
         // ═══════════════════════════════════════════════════════════════════
-        hline(false);  // Top border
+        hline(false);
 
         std::cout << term::BCYAN << box::V << term::RESET;
         std::cout << term::BOLD << term::BWHITE << "  HFT OBSERVER " << term::RESET << term::DIM << "- Real-time Monitor" << term::RESET;
-        std::cout << std::string(INNER - 33, ' ');
-        std::cout << term::BCYAN << box::V << term::RESET << "\n";
+        std::cout << std::string(std::max(0, inner_width - 33), ' ');
+        std::cout << term::BCYAN << box::V << term::RESET << term::CLEAR_LINE << "\n";
 
         hline();
 
         // ═══════════════════════════════════════════════════════════════════
-        // Stats Row - fixed width fields
+        // Stats Row
         // ═══════════════════════════════════════════════════════════════════
         ss.str(""); ss.clear();
         ss << "Runtime: " << std::setfill('0') << std::setw(2) << hours << ":"
            << std::setw(2) << mins << ":" << std::setw(2) << secs << std::setfill(' ')
-           << "  |  Events: " << std::setw(6) << total_events
-           << "  |  Rate: " << std::fixed << std::setprecision(1) << std::setw(6)
+           << "  |  Events: " << std::setw(8) << total_events
+           << "  |  Rate: " << std::fixed << std::setprecision(1) << std::setw(8)
            << (elapsed > 0 ? (double)total_events / elapsed : 0.0) << "/s";
         row(ss.str());
 
         hline();
 
         // ═══════════════════════════════════════════════════════════════════
-        // P&L Section - fixed width
+        // P&L Section
         // ═══════════════════════════════════════════════════════════════════
         std::cout << term::BCYAN << box::V << term::RESET;
         std::cout << term::BOLD << "  P&L SUMMARY" << term::RESET;
-        std::cout << std::string(INNER - 11, ' ');
-        std::cout << term::BCYAN << box::V << term::RESET << "\n";
+        std::cout << std::string(std::max(0, inner_width - 11), ' ');
+        std::cout << term::BCYAN << box::V << term::RESET << term::CLEAR_LINE << "\n";
 
-        // P&L row with colors - build plain string first, then add colors
         int total_trades = winning_trades + losing_trades;
         double win_rate = total_trades > 0 ? (double)winning_trades / total_trades * 100 : 0;
 
+        // P&L value row
         std::cout << term::BCYAN << box::V << term::RESET << "  ";
-        // P&L value (10 chars)
         ss.str(""); ss.clear();
         ss << std::fixed << std::setprecision(2) << (realized_pnl >= 0 ? "+" : "") << "$" << std::abs(realized_pnl);
-        std::string pnl_str = ss.str();
         if (realized_pnl >= 0) {
-            std::cout << term::BGREEN << term::BOLD << std::setw(10) << pnl_str << term::RESET;
+            std::cout << term::BGREEN << term::BOLD << std::setw(12) << ss.str() << term::RESET;
         } else {
-            std::cout << term::BRED << term::BOLD << std::setw(10) << pnl_str << term::RESET;
+            std::cout << term::BRED << term::BOLD << std::setw(12) << ss.str() << term::RESET;
         }
         std::cout << "  |  ";
-        std::cout << term::GREEN << "W:" << std::setw(3) << winning_trades << term::RESET << " ";
-        std::cout << term::RED << "L:" << std::setw(3) << losing_trades << term::RESET;
+        std::cout << term::GREEN << "W:" << std::setw(4) << winning_trades << term::RESET << " ";
+        std::cout << term::RED << "L:" << std::setw(4) << losing_trades << term::RESET;
         std::cout << "  |  WinRate: " << std::fixed << std::setprecision(0) << std::setw(3) << win_rate << "%";
-        std::cout << std::string(INNER - 52, ' ');
-        std::cout << term::BCYAN << box::V << term::RESET << "\n";
+        std::cout << std::string(std::max(0, inner_width - 56), ' ');
+        std::cout << term::BCYAN << box::V << term::RESET << term::CLEAR_LINE << "\n";
 
         // Profit/Loss breakdown
         std::cout << term::BCYAN << box::V << term::RESET << "  ";
         ss.str(""); ss.clear();
-        ss << "Profit: +$" << std::fixed << std::setprecision(2) << std::setw(10) << total_profit;
+        ss << "Profit: +$" << std::fixed << std::setprecision(2) << std::setw(12) << total_profit;
         std::cout << term::GREEN << ss.str() << term::RESET << "  ";
         ss.str(""); ss.clear();
-        ss << "Loss: -$" << std::fixed << std::setprecision(2) << std::setw(10) << total_loss;
+        ss << "Loss: -$" << std::fixed << std::setprecision(2) << std::setw(12) << total_loss;
         std::cout << term::RED << ss.str() << term::RESET;
-        std::cout << std::string(INNER - 48, ' ');
-        std::cout << term::BCYAN << box::V << term::RESET << "\n";
+        std::cout << std::string(std::max(0, inner_width - 52), ' ');
+        std::cout << term::BCYAN << box::V << term::RESET << term::CLEAR_LINE << "\n";
 
         hline();
 
         // ═══════════════════════════════════════════════════════════════════
-        // Trade Stats - fixed width
+        // Trade Stats
         // ═══════════════════════════════════════════════════════════════════
         std::cout << term::BCYAN << box::V << term::RESET << "  ";
-        std::cout << term::BGREEN << "Fills: " << std::setw(5) << fills << term::RESET << "  |  ";
-        std::cout << term::GREEN << "Targets: " << std::setw(5) << targets << term::RESET << "  |  ";
-        std::cout << term::RED << "Stops: " << std::setw(5) << stops << term::RESET;
-        std::cout << std::string(INNER - 50, ' ');
-        std::cout << term::BCYAN << box::V << term::RESET << "\n";
+        std::cout << term::BGREEN << "Fills: " << std::setw(6) << fills << term::RESET << "  |  ";
+        std::cout << term::GREEN << "Targets: " << std::setw(6) << targets << term::RESET << "  |  ";
+        std::cout << term::RED << "Stops: " << std::setw(6) << stops << term::RESET;
+        std::cout << std::string(std::max(0, inner_width - 53), ' ');
+        std::cout << term::BCYAN << box::V << term::RESET << term::CLEAR_LINE << "\n";
 
         hline();
 
         // ═══════════════════════════════════════════════════════════════════
-        // Event Stream Header
+        // Event Stream
         // ═══════════════════════════════════════════════════════════════════
         std::cout << term::BCYAN << box::V << term::RESET;
-        std::cout << term::BOLD << "  LIVE EVENTS" << term::RESET;
-        std::cout << std::string(INNER - 11, ' ');
-        std::cout << term::BCYAN << box::V << term::RESET << "\n";
+        std::cout << term::BOLD << "  LIVE EVENTS (" << event_rows << " rows)" << term::RESET;
+        std::cout << std::string(std::max(0, inner_width - 20), ' ');
+        std::cout << term::BCYAN << box::V << term::RESET << term::CLEAR_LINE << "\n";
 
-        // Events - fixed width per event
+        // Events
         int displayed = 0;
         for (const auto& ev : recent_events) {
-            if (displayed >= EVENT_PANEL_HEIGHT) break;
+            if (displayed >= event_rows) break;
 
             std::cout << term::BCYAN << box::V << term::RESET;
-            std::cout << ev.color << "  " << pad(ev.text, INNER) << term::RESET;
-            std::cout << term::BCYAN << box::V << term::RESET << "\n";
+            std::cout << ev.color << "  " << pad(ev.text, inner_width) << term::RESET;
+            std::cout << term::BCYAN << box::V << term::RESET << term::CLEAR_LINE << "\n";
             displayed++;
         }
 
         // Fill empty rows
-        while (displayed < EVENT_PANEL_HEIGHT) {
+        while (displayed < event_rows) {
             std::cout << term::BCYAN << box::V << term::RESET;
-            std::cout << std::string(INNER + 2, ' ');
-            std::cout << term::BCYAN << box::V << term::RESET << "\n";
+            std::cout << std::string(inner_width + 2, ' ');
+            std::cout << term::BCYAN << box::V << term::RESET << term::CLEAR_LINE << "\n";
             displayed++;
         }
 
@@ -388,10 +407,10 @@ public:
         // Footer
         // ═══════════════════════════════════════════════════════════════════
         std::cout << term::BCYAN << box::BL;
-        for (int i = 0; i < WIDTH - 2; i++) std::cout << box::H;
-        std::cout << box::BR << term::RESET << "\n";
+        for (int i = 0; i < term_width - 2; i++) std::cout << box::H;
+        std::cout << box::BR << term::RESET << term::CLEAR_LINE << "\n";
 
-        std::cout << term::DIM << "  Press Ctrl+C to exit" << term::RESET << "\n";
+        std::cout << term::DIM << "  Press Ctrl+C to exit  |  Terminal: " << term_width << "x" << term_height << term::RESET << term::CLEAR_LINE << "\n";
 
         std::cout << std::flush;
     }
