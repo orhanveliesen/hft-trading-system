@@ -122,8 +122,31 @@ struct DisplayEvent {
 class Dashboard {
 public:
     static constexpr int WIDTH = 80;
+    static constexpr int INNER = WIDTH - 4;  // Content width (excluding borders and padding)
     static constexpr int EVENT_PANEL_HEIGHT = 15;
     static constexpr int MAX_EVENTS = 50;
+
+    // Helper: pad string to exact width
+    static std::string pad(const std::string& s, int width) {
+        if ((int)s.length() >= width) return s.substr(0, width);
+        return s + std::string(width - s.length(), ' ');
+    }
+
+    // Helper: create horizontal line
+    static void hline(bool is_middle = true) {
+        std::cout << term::BCYAN;
+        std::cout << (is_middle ? box::LT : box::TL);
+        for (int i = 0; i < WIDTH - 2; i++) std::cout << box::H;
+        std::cout << (is_middle ? box::RT : box::TR);
+        std::cout << term::RESET << "\n";
+    }
+
+    // Helper: print row with borders
+    static void row(const std::string& content) {
+        std::cout << term::BCYAN << box::V << term::RESET;
+        std::cout << "  " << pad(content, INNER);
+        std::cout << term::BCYAN << box::V << term::RESET << "\n";
+    }
 
     // Statistics
     uint64_t total_events = 0;
@@ -252,123 +275,103 @@ public:
         int mins = (elapsed % 3600) / 60;
         int secs = elapsed % 60;
 
+        // Use fixed-width formatting with ostringstream
+        std::ostringstream ss;
+
         // ═══════════════════════════════════════════════════════════════════
         // Header
         // ═══════════════════════════════════════════════════════════════════
-        std::cout << term::BOLD << term::BCYAN;
-        std::cout << box::TL;
-        for (int i = 0; i < WIDTH - 2; i++) std::cout << box::H;
-        std::cout << box::TR << "\n";
+        hline(false);  // Top border
 
-        std::cout << box::V << term::BWHITE << "  HFT OBSERVER ";
-        std::cout << term::DIM << "- Real-time Trading Monitor";
-        std::cout << std::string(WIDTH - 44, ' ');
-        std::cout << term::RESET << term::BCYAN << box::V << "\n";
-
-        std::cout << box::LT;
-        for (int i = 0; i < WIDTH - 2; i++) std::cout << box::H;
-        std::cout << box::RT << "\n";
-        std::cout << term::RESET;
-
-        // ═══════════════════════════════════════════════════════════════════
-        // Stats Row
-        // ═══════════════════════════════════════════════════════════════════
         std::cout << term::BCYAN << box::V << term::RESET;
-        std::cout << "  Runtime: " << term::BWHITE
-                  << std::setfill('0') << std::setw(2) << hours << ":"
-                  << std::setw(2) << mins << ":"
-                  << std::setw(2) << secs << term::RESET;
-        std::cout << "  " << term::DIM << "|" << term::RESET;
-        std::cout << "  Events: " << term::BWHITE << total_events << term::RESET;
-        std::cout << "  " << term::DIM << "|" << term::RESET;
-        double eps = elapsed > 0 ? (double)total_events / elapsed : 0;
-        std::cout << "  Rate: " << term::BWHITE << std::fixed << std::setprecision(1) << eps << "/s" << term::RESET;
-        std::cout << std::string(15, ' ');
+        std::cout << term::BOLD << term::BWHITE << "  HFT OBSERVER " << term::RESET << term::DIM << "- Real-time Monitor" << term::RESET;
+        std::cout << std::string(INNER - 33, ' ');
         std::cout << term::BCYAN << box::V << term::RESET << "\n";
 
-        // Separator
-        std::cout << term::BCYAN << box::LT;
-        for (int i = 0; i < WIDTH - 2; i++) std::cout << box::H;
-        std::cout << box::RT << term::RESET << "\n";
+        hline();
 
         // ═══════════════════════════════════════════════════════════════════
-        // P&L Section
+        // Stats Row - fixed width fields
+        // ═══════════════════════════════════════════════════════════════════
+        ss.str(""); ss.clear();
+        ss << "Runtime: " << std::setfill('0') << std::setw(2) << hours << ":"
+           << std::setw(2) << mins << ":" << std::setw(2) << secs << std::setfill(' ')
+           << "  |  Events: " << std::setw(6) << total_events
+           << "  |  Rate: " << std::fixed << std::setprecision(1) << std::setw(6)
+           << (elapsed > 0 ? (double)total_events / elapsed : 0.0) << "/s";
+        row(ss.str());
+
+        hline();
+
+        // ═══════════════════════════════════════════════════════════════════
+        // P&L Section - fixed width
         // ═══════════════════════════════════════════════════════════════════
         std::cout << term::BCYAN << box::V << term::RESET;
         std::cout << term::BOLD << "  P&L SUMMARY" << term::RESET;
-        std::cout << std::string(WIDTH - 16, ' ');
+        std::cout << std::string(INNER - 11, ' ');
         std::cout << term::BCYAN << box::V << term::RESET << "\n";
 
-        // P&L value with color
-        std::cout << term::BCYAN << box::V << term::RESET << "  ";
-        if (realized_pnl >= 0) {
-            std::cout << term::BGREEN << term::BOLD << "+$" << std::fixed << std::setprecision(2) << realized_pnl;
-        } else {
-            std::cout << term::BRED << term::BOLD << "-$" << std::fixed << std::setprecision(2) << std::abs(realized_pnl);
-        }
-        std::cout << term::RESET;
-
-        // Win/Loss stats
+        // P&L row with colors - build plain string first, then add colors
         int total_trades = winning_trades + losing_trades;
         double win_rate = total_trades > 0 ? (double)winning_trades / total_trades * 100 : 0;
-        std::cout << "  " << term::DIM << "|" << term::RESET;
-        std::cout << "  " << term::GREEN << "W:" << winning_trades << term::RESET;
-        std::cout << " " << term::RED << "L:" << losing_trades << term::RESET;
-        std::cout << "  " << term::DIM << "|" << term::RESET;
-        std::cout << "  WinRate: " << term::BWHITE << std::fixed << std::setprecision(0) << win_rate << "%" << term::RESET;
-        std::cout << std::string(20, ' ');
+
+        std::cout << term::BCYAN << box::V << term::RESET << "  ";
+        // P&L value (10 chars)
+        ss.str(""); ss.clear();
+        ss << std::fixed << std::setprecision(2) << (realized_pnl >= 0 ? "+" : "") << "$" << std::abs(realized_pnl);
+        std::string pnl_str = ss.str();
+        if (realized_pnl >= 0) {
+            std::cout << term::BGREEN << term::BOLD << std::setw(10) << pnl_str << term::RESET;
+        } else {
+            std::cout << term::BRED << term::BOLD << std::setw(10) << pnl_str << term::RESET;
+        }
+        std::cout << "  |  ";
+        std::cout << term::GREEN << "W:" << std::setw(3) << winning_trades << term::RESET << " ";
+        std::cout << term::RED << "L:" << std::setw(3) << losing_trades << term::RESET;
+        std::cout << "  |  WinRate: " << std::fixed << std::setprecision(0) << std::setw(3) << win_rate << "%";
+        std::cout << std::string(INNER - 52, ' ');
         std::cout << term::BCYAN << box::V << term::RESET << "\n";
 
         // Profit/Loss breakdown
-        std::cout << term::BCYAN << box::V << term::RESET;
-        std::cout << "  " << term::GREEN << "Profit: +$" << std::fixed << std::setprecision(2) << total_profit << term::RESET;
-        std::cout << "  " << term::RED << "Loss: -$" << std::fixed << std::setprecision(2) << total_loss << term::RESET;
-        std::cout << std::string(WIDTH - 42, ' ');
+        std::cout << term::BCYAN << box::V << term::RESET << "  ";
+        ss.str(""); ss.clear();
+        ss << "Profit: +$" << std::fixed << std::setprecision(2) << std::setw(10) << total_profit;
+        std::cout << term::GREEN << ss.str() << term::RESET << "  ";
+        ss.str(""); ss.clear();
+        ss << "Loss: -$" << std::fixed << std::setprecision(2) << std::setw(10) << total_loss;
+        std::cout << term::RED << ss.str() << term::RESET;
+        std::cout << std::string(INNER - 48, ' ');
         std::cout << term::BCYAN << box::V << term::RESET << "\n";
 
-        // Separator
-        std::cout << term::BCYAN << box::LT;
-        for (int i = 0; i < WIDTH - 2; i++) std::cout << box::H;
-        std::cout << box::RT << term::RESET << "\n";
+        hline();
 
         // ═══════════════════════════════════════════════════════════════════
-        // Trade Stats
+        // Trade Stats - fixed width
         // ═══════════════════════════════════════════════════════════════════
-        std::cout << term::BCYAN << box::V << term::RESET;
-        std::cout << "  " << term::BGREEN << "Fills: " << fills << term::RESET;
-        std::cout << "  " << term::DIM << "|" << term::RESET;
-        std::cout << "  " << term::GREEN << "Targets: " << targets << term::RESET;
-        std::cout << "  " << term::DIM << "|" << term::RESET;
-        std::cout << "  " << term::RED << "Stops: " << stops << term::RESET;
-        std::cout << std::string(WIDTH - 48, ' ');
+        std::cout << term::BCYAN << box::V << term::RESET << "  ";
+        std::cout << term::BGREEN << "Fills: " << std::setw(5) << fills << term::RESET << "  |  ";
+        std::cout << term::GREEN << "Targets: " << std::setw(5) << targets << term::RESET << "  |  ";
+        std::cout << term::RED << "Stops: " << std::setw(5) << stops << term::RESET;
+        std::cout << std::string(INNER - 50, ' ');
         std::cout << term::BCYAN << box::V << term::RESET << "\n";
 
-        // Separator
-        std::cout << term::BCYAN << box::LT;
-        for (int i = 0; i < WIDTH - 2; i++) std::cout << box::H;
-        std::cout << box::RT << term::RESET << "\n";
+        hline();
 
         // ═══════════════════════════════════════════════════════════════════
-        // Event Stream
+        // Event Stream Header
         // ═══════════════════════════════════════════════════════════════════
         std::cout << term::BCYAN << box::V << term::RESET;
         std::cout << term::BOLD << "  LIVE EVENTS" << term::RESET;
-        std::cout << std::string(WIDTH - 16, ' ');
+        std::cout << std::string(INNER - 11, ' ');
         std::cout << term::BCYAN << box::V << term::RESET << "\n";
 
-        // Events
+        // Events - fixed width per event
         int displayed = 0;
         for (const auto& ev : recent_events) {
             if (displayed >= EVENT_PANEL_HEIGHT) break;
 
             std::cout << term::BCYAN << box::V << term::RESET;
-            std::cout << "  " << ev.color << ev.text << term::RESET;
-
-            // Pad to width
-            int text_len = ev.text.length();
-            int padding = WIDTH - text_len - 5;
-            if (padding > 0) std::cout << std::string(padding, ' ');
-
+            std::cout << ev.color << "  " << pad(ev.text, INNER) << term::RESET;
             std::cout << term::BCYAN << box::V << term::RESET << "\n";
             displayed++;
         }
@@ -376,7 +379,7 @@ public:
         // Fill empty rows
         while (displayed < EVENT_PANEL_HEIGHT) {
             std::cout << term::BCYAN << box::V << term::RESET;
-            std::cout << std::string(WIDTH - 2, ' ');
+            std::cout << std::string(INNER + 2, ' ');
             std::cout << term::BCYAN << box::V << term::RESET << "\n";
             displayed++;
         }
@@ -542,14 +545,14 @@ int main(int argc, char* argv[]) {
             auto now = std::chrono::steady_clock::now();
             auto since_render = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_render).count();
 
-            if (since_render >= 200 || got_event) {  // 5 FPS or on new event
+            if (since_render >= 10 || got_event) {  // 100 FPS max refresh
                 dashboard.render();
                 last_render = now;
             }
         }
 
         if (!got_event) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
     }
 
