@@ -274,24 +274,50 @@ struct SymbolStrategy {
         }
     }
 
-    // Threshold = 2x spread (need to make more than spread to profit)
-    double buy_threshold() const { return -ema_spread_pct * 2.0; }
-    double sell_threshold() const { return ema_spread_pct * 2.0; }
+    // Threshold = 3x spread with 0.02% (2 bps) minimum floor
+    // This ensures we only trade when expected profit > spread cost
+    // Math: entry spread + exit spread = 2x spread, so need >2x to profit
+    double buy_threshold() const {
+        double threshold = ema_spread_pct * 3.0;
+        return -std::max(threshold, 0.0002);  // At least -0.02%
+    }
+    double sell_threshold() const {
+        double threshold = ema_spread_pct * 3.0;
+        return std::max(threshold, 0.0002);   // At least +0.02%
+    }
 };
 
-// Portfolio: tracks cash and holdings (no leverage, no shorting)
+// OpenPosition: tracks a single buy with entry price and targets
+struct OpenPosition {
+    double entry_price;      // What we paid
+    double quantity;         // How much we hold
+    double target_price;     // Sell limit price (entry + profit margin)
+    double stop_loss_price;  // Cut loss price (entry - max loss)
+    uint64_t timestamp;      // When we bought
+};
+
+// Portfolio: tracks cash and positions with entry prices
 struct Portfolio {
     double cash = 0;
-    std::map<Symbol, double> holdings;  // symbol -> quantity held
+    std::map<Symbol, std::vector<OpenPosition>> positions;  // Multiple positions per symbol
+
+    // Config
+    double profit_margin_pct = 0.002;   // 0.2% profit target
+    double stop_loss_pct = 0.01;        // 1% max loss
 
     void init(double capital) {
         cash = capital;
-        holdings.clear();
+        positions.clear();
     }
 
     double get_holding(Symbol s) const {
-        auto it = holdings.find(s);
-        return it != holdings.end() ? it->second : 0;
+        auto it = positions.find(s);
+        if (it == positions.end()) return 0;
+        double total = 0;
+        for (const auto& pos : it->second) {
+            total += pos.quantity;
+        }
+        return total;
     }
 
     bool can_buy(double price, double qty) const {
@@ -302,26 +328,117 @@ struct Portfolio {
         return get_holding(s) >= qty;
     }
 
+    // Buy and create position with target/stop-loss
     void buy(Symbol s, double price, double qty) {
+        if (qty <= 0 || price <= 0) return;
         cash -= price * qty;
-        holdings[s] += qty;
+
+        OpenPosition pos;
+        pos.entry_price = price;
+        pos.quantity = qty;
+        pos.target_price = price * (1.0 + profit_margin_pct);
+        pos.stop_loss_price = price * (1.0 - stop_loss_pct);
+        pos.timestamp = std::chrono::steady_clock::now().time_since_epoch().count();
+
+        positions[s].push_back(pos);
     }
 
+    // Sell specific quantity, FIFO order
     void sell(Symbol s, double price, double qty) {
-        cash += price * qty;
-        holdings[s] -= qty;
-        if (holdings[s] <= 0) holdings.erase(s);
+        if (qty <= 0 || price <= 0) return;
+
+        auto it = positions.find(s);
+        if (it == positions.end()) return;
+
+        double remaining = qty;
+        auto& pos_list = it->second;
+
+        while (remaining > 0 && !pos_list.empty()) {
+            auto& pos = pos_list.front();
+            double sell_qty = std::min(remaining, pos.quantity);
+
+            cash += price * sell_qty;
+            pos.quantity -= sell_qty;
+            remaining -= sell_qty;
+
+            if (pos.quantity <= 0.0001) {
+                pos_list.erase(pos_list.begin());
+            }
+        }
+
+        if (pos_list.empty()) {
+            positions.erase(s);
+        }
+    }
+
+    // Check if any position hit target (price went UP)
+    std::vector<std::pair<Symbol, double>> check_targets(const std::map<Symbol, double>& prices) {
+        std::vector<std::pair<Symbol, double>> to_sell;  // symbol, qty
+
+        for (auto& [sym, pos_list] : positions) {
+            auto price_it = prices.find(sym);
+            if (price_it == prices.end()) continue;
+            double current_price = price_it->second;
+
+            for (auto& pos : pos_list) {
+                if (current_price >= pos.target_price) {
+                    to_sell.push_back({sym, pos.quantity});
+                }
+            }
+        }
+        return to_sell;
+    }
+
+    // Check if any position hit stop-loss (price went DOWN)
+    std::vector<std::pair<Symbol, double>> check_stop_losses(const std::map<Symbol, double>& prices) {
+        std::vector<std::pair<Symbol, double>> to_sell;
+
+        for (auto& [sym, pos_list] : positions) {
+            auto price_it = prices.find(sym);
+            if (price_it == prices.end()) continue;
+            double current_price = price_it->second;
+
+            for (auto& pos : pos_list) {
+                if (current_price <= pos.stop_loss_price) {
+                    to_sell.push_back({sym, pos.quantity});
+                }
+            }
+        }
+        return to_sell;
+    }
+
+    // Get average entry price for a symbol
+    double avg_entry_price(Symbol s) const {
+        auto it = positions.find(s);
+        if (it == positions.end()) return 0;
+
+        double total_cost = 0, total_qty = 0;
+        for (const auto& pos : it->second) {
+            total_cost += pos.entry_price * pos.quantity;
+            total_qty += pos.quantity;
+        }
+        return total_qty > 0 ? total_cost / total_qty : 0;
     }
 
     double total_value(const std::map<Symbol, double>& prices) const {
         double value = cash;
-        for (auto& [s, qty] : holdings) {
+        for (auto& [s, pos_list] : positions) {
             auto it = prices.find(s);
             if (it != prices.end()) {
-                value += qty * it->second;
+                for (const auto& pos : pos_list) {
+                    value += pos.quantity * it->second;
+                }
             }
         }
         return value;
+    }
+
+    int position_count() const {
+        int count = 0;
+        for (auto& [s, pos_list] : positions) {
+            if (!pos_list.empty()) count++;
+        }
+        return count;
     }
 };
 
@@ -406,9 +523,53 @@ public:
         }
         strat->current_regime = new_regime;
 
-        // Generate signals
+        // Generate buy signals
         if (engine_.can_trade() && !world->is_halted()) {
             check_signal(id, world, strat, bid, ask);
+        }
+
+        // Check target/stop-loss for this symbol
+        double bid_usd = static_cast<double>(bid) / risk::PRICE_SCALE;
+        auto pos_it = portfolio_.positions.find(id);
+        if (pos_it != portfolio_.positions.end()) {
+            auto& positions = pos_it->second;
+            for (auto it = positions.begin(); it != positions.end(); ) {
+                auto& pos = *it;
+
+                // TARGET HIT: price went UP to our target
+                if (bid_usd >= pos.target_price) {
+                    double profit = (bid_usd - pos.entry_price) * pos.quantity;
+                    portfolio_.cash += bid_usd * pos.quantity;
+                    if (args_.verbose) {
+                        std::cout << "[TARGET] " << strat->ticker << " SELL " << pos.quantity
+                                  << " @ $" << std::fixed << std::setprecision(2) << bid_usd
+                                  << " (entry=$" << pos.entry_price
+                                  << ", profit=$" << std::setprecision(2) << profit << ")\n";
+                    }
+                    it = positions.erase(it);
+                    continue;
+                }
+
+                // STOP-LOSS HIT: price went DOWN to our stop
+                if (bid_usd <= pos.stop_loss_price) {
+                    double loss = (pos.entry_price - bid_usd) * pos.quantity;
+                    portfolio_.cash += bid_usd * pos.quantity;
+                    if (args_.verbose) {
+                        std::cout << "[STOP] " << strat->ticker << " SELL " << pos.quantity
+                                  << " @ $" << std::fixed << std::setprecision(2) << bid_usd
+                                  << " (entry=$" << pos.entry_price
+                                  << ", loss=$" << std::setprecision(2) << loss << ")\n";
+                    }
+                    it = positions.erase(it);
+                    continue;
+                }
+
+                ++it;
+            }
+            // Clean up empty position list
+            if (positions.empty()) {
+                portfolio_.positions.erase(pos_it);
+            }
         }
     }
 
@@ -449,11 +610,13 @@ public:
         });
 
         s.holdings_value = 0;
-        for (auto& [sym, qty] : portfolio_.holdings) {
+        for (auto& [sym, pos_list] : portfolio_.positions) {
             auto it = prices.find(sym);
             if (it != prices.end()) {
-                s.holdings_value += qty * it->second;
-                s.positions++;
+                for (const auto& pos : pos_list) {
+                    s.holdings_value += pos.quantity * it->second;
+                }
+                if (!pos_list.empty()) s.positions++;
             }
         }
 
@@ -583,6 +746,45 @@ private:
         world->on_our_fill(id, qty);
     }
 
+    // Check and execute target sells (price went up to our target)
+    void check_targets_and_stops(const std::map<Symbol, double>& prices) {
+        // Check take-profit targets
+        auto targets = portfolio_.check_targets(prices);
+        for (auto& [sym, qty] : targets) {
+            auto price_it = prices.find(sym);
+            if (price_it == prices.end()) continue;
+
+            double sell_price = price_it->second;
+            portfolio_.sell(sym, sell_price, qty);
+
+            if (args_.verbose) {
+                auto it = strategies_.find(sym);
+                std::string ticker = it != strategies_.end() ? it->second->ticker : "???";
+                std::cout << "[TARGET HIT] " << ticker << " SELL " << qty
+                          << " @ $" << std::fixed << std::setprecision(2) << sell_price
+                          << " (PROFIT!)\n";
+            }
+        }
+
+        // Check stop-losses
+        auto stops = portfolio_.check_stop_losses(prices);
+        for (auto& [sym, qty] : stops) {
+            auto price_it = prices.find(sym);
+            if (price_it == prices.end()) continue;
+
+            double sell_price = price_it->second;
+            portfolio_.sell(sym, sell_price, qty);
+
+            if (args_.verbose) {
+                auto it = strategies_.find(sym);
+                std::string ticker = it != strategies_.end() ? it->second->ticker : "???";
+                std::cout << "[STOP LOSS] " << ticker << " SELL " << qty
+                          << " @ $" << std::fixed << std::setprecision(2) << sell_price
+                          << " (CUT LOSS)\n";
+            }
+        }
+    }
+
     void check_signal(Symbol id, SymbolWorld* world, SymbolStrategy* strat, Price bid, Price ask) {
         uint64_t now = std::chrono::steady_clock::now().time_since_epoch().count();
         if (now - strat->last_signal_time < 300'000'000) return;  // 300ms cooldown
@@ -596,49 +798,43 @@ private:
         if (!strat->indicators.ready()) return;
 
         double ask_usd = static_cast<double>(ask) / risk::PRICE_SCALE;
+        double bid_usd = static_cast<double>(bid) / risk::PRICE_SCALE;
         double holding = portfolio_.get_holding(id);
 
-        bool buy = false, sell = false;
+        // NEW LOGIC:
+        // - BUY based on regime + indicators
+        // - SELL handled by target/stop-loss (not here!)
 
-        // Get composite signals from technical indicators
+        bool should_buy = false;
+
         auto buy_strength = strat->indicators.buy_signal();
-        auto sell_strength = strat->indicators.sell_signal();
-
-        // SPOT TRADING: No shorting allowed!
-        // Regime determines which signals we act on and required strength
-
         using SS = TechnicalIndicators::SignalStrength;
 
         switch (strat->current_regime) {
             case MarketRegime::TrendingUp:
-                // Trend following: buy on EMA bullish + dip signals
-                // More aggressive - accept Medium strength
+                // Uptrend: Buy on medium signal, let target take profit
                 if (buy_strength >= SS::Medium && holding < args_.max_position) {
-                    buy = true;
+                    should_buy = true;
                 }
                 break;
 
             case MarketRegime::TrendingDown:
-                // Exit positions - sell on any bearish signal
-                if (sell_strength >= SS::Weak && holding > 0) {
-                    sell = true;
-                }
+                // Downtrend: DON'T BUY! Stop-loss will handle exits
+                // Just wait for trend reversal
                 break;
 
             case MarketRegime::Ranging:
             case MarketRegime::LowVolatility:
-                // Mean reversion: need Strong signals (multiple indicators agree)
-                if (buy_strength >= SS::Strong && holding < args_.max_position) {
-                    buy = true;
-                } else if (sell_strength >= SS::Strong && holding > 0) {
-                    sell = true;
+                // Mean reversion: Buy on dips (oversold signals)
+                if (buy_strength >= SS::Medium && holding < args_.max_position) {
+                    should_buy = true;
                 }
                 break;
 
             case MarketRegime::HighVolatility:
-                // Risk reduction: only sell on Strong signal, no buying
-                if (sell_strength >= SS::Medium && holding > 0) {
-                    sell = true;
+                // High vol: Be careful, only buy on very strong signals
+                if (buy_strength >= SS::Strong && holding < args_.max_position) {
+                    should_buy = true;
                 }
                 break;
 
@@ -646,14 +842,21 @@ private:
                 break;
         }
 
-        // Check portfolio constraints (SPOT: no leverage, no shorting)
-        if (buy && !portfolio_.can_buy(ask_usd, 1)) {
-            buy = false;  // Not enough cash
-        }
-        if (sell) {
-            if (!portfolio_.can_sell(id, 1)) {
-                sell = false;  // No holdings to sell (this is normal, not an error)
+        // Price check: Only buy if price is attractive (below slow EMA)
+        double ema = strat->indicators.ema_slow();
+        if (should_buy && ema > 0) {
+            double deviation = (ask_usd - ema) / ema;
+            // Only buy if price is at or below EMA (deviation <= 0)
+            // Or at most slightly above (small positive deviation OK in uptrend)
+            double max_deviation = (strat->current_regime == MarketRegime::TrendingUp) ? 0.001 : 0.0;
+            if (deviation > max_deviation) {
+                should_buy = false;  // Price too high relative to EMA
             }
+        }
+
+        // Portfolio constraint
+        if (should_buy && !portfolio_.can_buy(ask_usd, 1)) {
+            should_buy = false;
         }
 
         auto signal_str = [](TechnicalIndicators::SignalStrength s) {
@@ -665,25 +868,19 @@ private:
             }
         };
 
-        if (buy && world->can_trade(Side::Buy, 1)) {
+        // Execute buy if conditions met
+        if (should_buy && world->can_trade(Side::Buy, 1)) {
             if (args_.verbose) {
-                std::cout << "[SIGNAL] " << strat->ticker << " BUY @ $" << ask_usd
-                          << " (strength=" << signal_str(buy_strength)
-                          << ", RSI=" << std::fixed << std::setprecision(1) << strat->indicators.rsi()
-                          << ", EMA=" << (strat->indicators.ema_bullish() ? "BULL" : "BEAR") << ")\n";
+                std::cout << "[BUY] " << strat->ticker << " @ $" << std::fixed << std::setprecision(2) << ask_usd
+                          << " (signal=" << signal_str(buy_strength)
+                          << ", RSI=" << std::setprecision(0) << strat->indicators.rsi()
+                          << ", target=$" << std::setprecision(2) << ask_usd * (1.0 + portfolio_.profit_margin_pct)
+                          << ", stop=$" << ask_usd * (1.0 - portfolio_.stop_loss_pct) << ")\n";
             }
             engine_.send_order(id, Side::Buy, 1, true);
             strat->last_signal_time = now;
-        } else if (sell && world->can_trade(Side::Sell, 1)) {
-            if (args_.verbose) {
-                std::cout << "[SIGNAL] " << strat->ticker << " SELL"
-                          << " (strength=" << signal_str(sell_strength)
-                          << ", RSI=" << std::fixed << std::setprecision(1) << strat->indicators.rsi()
-                          << ", EMA=" << (strat->indicators.ema_bullish() ? "BULL" : "BEAR") << ")\n";
-            }
-            engine_.send_order(id, Side::Sell, 1, true);
-            strat->last_signal_time = now;
         }
+        // NOTE: Selling is handled by check_targets_and_stops(), not here!
     }
 };
 
