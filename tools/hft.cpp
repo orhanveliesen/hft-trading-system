@@ -35,6 +35,8 @@
 #include <random>
 #include <sstream>
 #include <algorithm>
+#include <sched.h>   // For CPU affinity
+#include <cstring>   // For strncpy
 
 using namespace hft;
 using namespace hft::exchange;
@@ -143,7 +145,7 @@ struct CLIArgs {
     bool paper_mode = false;
     bool help = false;
     bool verbose = false;
-    bool quiet = false;       // No dashboard, minimal output (for observer mode)
+    int cpu_affinity = -1;    // CPU core to pin to (-1 = no pinning)
     std::vector<std::string> symbols;
     int duration = 0;  // 0 = unlimited
     double capital = 100000.0;
@@ -152,8 +154,8 @@ struct CLIArgs {
 
 void print_help() {
     std::cout << R"(
-HFT Trading System
-==================
+HFT Trading System (Lock-Free)
+==============================
 
 Usage: hft [options]
 
@@ -166,16 +168,17 @@ Options:
   -d, --duration SECS    Duration in seconds (0 = unlimited)
   -c, --capital USD      Initial capital (default: 100000)
   -m, --max-pos N        Max position per symbol (default: 10)
+  --cpu N                Pin to CPU core N (reduces latency)
   -v, --verbose          Verbose output (fills, targets, stops)
-  -q, --quiet            No dashboard, minimal output (use with observer)
   -h, --help             Show this help
 
 Examples:
-  hft                              # Production, all symbols
   hft --paper                      # Paper trading, all symbols
-  hft -s BTCUSDT                   # Production, single symbol
   hft --paper -s BTCUSDT,ETHUSDT   # Paper, two symbols
-  hft --paper -d 300 -c 50000      # Paper, 5 min, $50k capital
+  hft --paper -d 300 --cpu 2       # Paper, 5 min, pinned to CPU 2
+
+Monitoring:
+  Use hft_observer for real-time dashboard (separate process, lock-free IPC)
 
 WARNING: Without --paper flag, REAL orders will be sent!
 )";
@@ -210,9 +213,6 @@ bool parse_args(int argc, char* argv[], CLIArgs& args) {
         else if (arg == "--verbose" || arg == "-v") {
             args.verbose = true;
         }
-        else if (arg == "--quiet" || arg == "-q") {
-            args.quiet = true;
-        }
         else if ((arg == "--symbols" || arg == "-s") && i + 1 < argc) {
             args.symbols = split_symbols(argv[++i]);
         }
@@ -224,6 +224,9 @@ bool parse_args(int argc, char* argv[], CLIArgs& args) {
         }
         else if ((arg == "--max-pos" || arg == "-m") && i + 1 < argc) {
             args.max_position = std::stoi(argv[++i]);
+        }
+        else if (arg == "--cpu" && i + 1 < argc) {
+            args.cpu_affinity = std::stoi(argv[++i]);
         }
         else {
             std::cerr << "Unknown option: " << arg << "\n";
@@ -353,11 +356,18 @@ struct SymbolStrategy {
     MarketRegime current_regime = MarketRegime::Unknown;
     Price last_mid = 0;
     uint64_t last_signal_time = 0;
-    std::string ticker;  // for logging
+    char ticker[16] = {0};  // Fixed size, no std::string allocation
+    bool active = false;    // Is this slot in use?
 
     // Dynamic spread tracking (EMA of spread)
     double ema_spread_pct = 0.001;  // Start with 0.1% default
     static constexpr double SPREAD_ALPHA = 0.1;  // EMA decay
+
+    void init(const std::string& symbol) {
+        active = true;
+        std::strncpy(ticker, symbol.c_str(), sizeof(ticker) - 1);
+        ticker[sizeof(ticker) - 1] = '\0';
+    }
 
     void update_spread(Price bid, Price ask) {
         if (bid > 0 && ask > bid) {
@@ -639,8 +649,7 @@ public:
     }
 
     void add_symbol(const std::string& ticker) {
-        std::lock_guard<std::mutex> lock(mutex_);
-
+        // Called during init only, before trading starts
         if (engine_.lookup_symbol(ticker).has_value()) return;
 
         SymbolConfig cfg;
@@ -649,22 +658,23 @@ public:
         cfg.max_loss = 1000 * risk::PRICE_SCALE;
 
         Symbol id = engine_.add_symbol(cfg);
-        auto strat = std::make_unique<SymbolStrategy>();
-        strat->ticker = ticker;
-        strategies_[id] = std::move(strat);
+        if (id < MAX_SYMBOLS) {
+            strategies_[id].init(ticker);
+        }
     }
 
     void on_quote(const std::string& ticker, Price bid, Price ask) {
-        std::lock_guard<std::mutex> lock(mutex_);
-
+        // Hot path - no locks, O(1) array access
         auto opt = engine_.lookup_symbol(ticker);
         if (!opt) return;
 
         Symbol id = *opt;
+        if (id >= MAX_SYMBOLS) return;
+
         auto* world = engine_.get_symbol_world(id);
         if (!world) return;
 
-        total_ticks_++;
+        total_ticks_.fetch_add(1, std::memory_order_relaxed);
 
         // Update L1 - order: bid_price, bid_size, ask_price, ask_size
         L1Snapshot snap;
@@ -679,39 +689,41 @@ public:
             sender_.process_fills(id, bid, ask);
         }
 
-        // Update regime and spread
-        auto* strat = strategies_[id].get();
-        if (!strat) return;
+        // Update regime and spread - O(1) array access
+        auto& strat = strategies_[id];
+        if (!strat.active) return;
 
         // Track spread for dynamic thresholds
-        strat->update_spread(bid, ask);
+        strat.update_spread(bid, ask);
 
         double mid = (bid + ask) / 2.0 / risk::PRICE_SCALE;
-        strat->regime.update(mid);
-        strat->indicators.update(mid);  // Update technical indicators
+        strat.regime.update(mid);
+        strat.indicators.update(mid);  // Update technical indicators
 
-        MarketRegime new_regime = strat->regime.current_regime();
-        if (new_regime != strat->current_regime && strat->current_regime != MarketRegime::Unknown) {
-            // Regime changed - log it
-            add_log(strat->ticker, strat->current_regime, new_regime);
+        MarketRegime new_regime = strat.regime.current_regime();
+        if (new_regime != strat.current_regime) {
+            // Regime changed - publish to observer
+            if (strat.current_regime != MarketRegime::Unknown) {
+                publisher_.regime_change(id, strat.ticker, static_cast<uint8_t>(new_regime));
+            }
+            strat.current_regime = new_regime;
         }
-        strat->current_regime = new_regime;
 
         // Generate buy signals
         if (engine_.can_trade() && !world->is_halted()) {
-            check_signal(id, world, strat, bid, ask);
+            check_signal(id, world, &strat, bid, ask);
         }
 
         // Check target/stop-loss for this symbol - O(n), no allocation
-        if (id < MAX_SYMBOLS && portfolio_.symbol_active[id]) {
+        if (portfolio_.symbol_active[id]) {
             double bid_usd = static_cast<double>(bid) / risk::PRICE_SCALE;
-            const std::string& ticker = strat->ticker;
+            const char* ticker = strat.ticker;
 
             portfolio_.check_and_close(id, bid_usd,
                 // On target hit (profit)
                 [&](double qty, double entry, double exit) {
                     // Publish to observer (~5ns)
-                    publisher_.target_hit(id, ticker.c_str(), entry, exit, qty);
+                    publisher_.target_hit(id, ticker, entry, exit, qty);
 
                     if (args_.verbose) {
                         double profit = (exit - entry) * qty;
@@ -724,7 +736,7 @@ public:
                 // On stop-loss hit (cut loss)
                 [&](double qty, double entry, double exit) {
                     // Publish to observer (~5ns)
-                    publisher_.stop_loss(id, ticker.c_str(), entry, exit, qty);
+                    publisher_.stop_loss(id, ticker, entry, exit, qty);
 
                     if (args_.verbose) {
                         double loss = (entry - exit) * qty;
@@ -738,6 +750,7 @@ public:
         }
     }
 
+    // Stats for final summary (called after trading stops, not on hot path)
     struct Stats {
         size_t symbols = 0;
         uint64_t ticks = 0;
@@ -747,16 +760,15 @@ public:
         double holdings_value = 0;
         double equity = 0;
         double pnl = 0;
-        int positions = 0;  // symbols with holdings
+        int positions = 0;
         bool halted = false;
     };
 
     Stats get_stats() {
-        std::lock_guard<std::mutex> lock(mutex_);
-
+        // Called after trading stops - not performance critical
         Stats s;
         s.symbols = engine_.symbol_count();
-        s.ticks = total_ticks_;
+        s.ticks = total_ticks_.load(std::memory_order_relaxed);
         s.halted = !engine_.can_trade();
         s.cash = portfolio_.cash;
 
@@ -765,11 +777,11 @@ public:
             s.fills = sender_.total_fills();
         }
 
-        // Calculate holdings value at current prices
-        std::map<Symbol, double> prices;
+        // Calculate holdings value using fixed array (no std::map)
+        std::array<double, MAX_SYMBOLS> prices{};
         engine_.for_each_symbol([&](const SymbolWorld& w) {
             Price mid = w.top().mid_price();
-            if (mid > 0) {
+            if (mid > 0 && w.id() < MAX_SYMBOLS) {
                 prices[w.id()] = static_cast<double>(mid) / risk::PRICE_SCALE;
             }
         });
@@ -777,14 +789,11 @@ public:
         s.holdings_value = 0;
         s.positions = 0;
         for (size_t sym = 0; sym < MAX_SYMBOLS; sym++) {
-            if (!portfolio_.symbol_active[sym]) continue;
-
-            auto it = prices.find(static_cast<Symbol>(sym));
-            if (it == prices.end()) continue;
+            if (!portfolio_.symbol_active[sym] || prices[sym] <= 0) continue;
 
             double sym_qty = portfolio_.positions[sym].total_quantity();
             if (sym_qty > 0) {
-                s.holdings_value += sym_qty * it->second;
+                s.holdings_value += sym_qty * prices[sym];
                 s.positions++;
             }
         }
@@ -794,101 +803,17 @@ public:
         return s;
     }
 
-    std::map<MarketRegime, int> get_regimes() {
-        std::lock_guard<std::mutex> lock(mutex_);
-        std::map<MarketRegime, int> dist;
-        for (auto& [id, strat] : strategies_) {
-            dist[strat->current_regime]++;
-        }
-        return dist;
-    }
-
-    struct SymbolInfo {
-        std::string ticker;
-        MarketRegime regime;
-        double holding;     // quantity held (0 = no position)
-        double value;       // holding * price
-        double mid_price;
-        double spread_pct;  // current spread as percentage
-        double rsi;         // RSI value
-        bool ema_bullish;   // EMA crossover state
-    };
-
-    std::vector<SymbolInfo> get_symbol_details() {
-        std::lock_guard<std::mutex> lock(mutex_);
-        std::vector<SymbolInfo> result;
-
-        engine_.for_each_symbol([&](const SymbolWorld& w) {
-            SymbolInfo info;
-            info.ticker = w.ticker();
-            info.holding = portfolio_.get_holding(w.id());
-
-            Price mid = w.top().mid_price();
-            info.mid_price = mid > 0 ? static_cast<double>(mid) / risk::PRICE_SCALE : 0;
-            info.value = info.holding * info.mid_price;
-
-            auto it = strategies_.find(w.id());
-            if (it != strategies_.end()) {
-                info.regime = it->second->current_regime;
-                info.spread_pct = it->second->ema_spread_pct * 100;  // as percentage
-                info.rsi = it->second->indicators.rsi();
-                info.ema_bullish = it->second->indicators.ema_bullish();
-            } else {
-                info.regime = MarketRegime::Unknown;
-                info.spread_pct = 0;
-                info.rsi = 50;
-                info.ema_bullish = false;
-            }
-
-            result.push_back(info);
-        });
-
-        // Sort by value descending (largest holdings first)
-        std::sort(result.begin(), result.end(), [](const SymbolInfo& a, const SymbolInfo& b) {
-            return a.value > b.value;
-        });
-
-        return result;
-    }
-
     bool is_halted() const { return !engine_.can_trade(); }
-
-    struct LogEntry {
-        std::string ticker;
-        MarketRegime from;
-        MarketRegime to;
-        uint64_t timestamp;
-    };
-
-    std::vector<LogEntry> get_recent_logs(size_t max_count = 5) {
-        std::lock_guard<std::mutex> lock(mutex_);
-        std::vector<LogEntry> result;
-        size_t start = logs_.size() > max_count ? logs_.size() - max_count : 0;
-        for (size_t i = start; i < logs_.size(); ++i) {
-            result.push_back(logs_[i]);
-        }
-        return result;
-    }
 
 private:
     CLIArgs args_;
     OrderSender sender_;
     TradingEngine<OrderSender> engine_;
-    std::map<Symbol, std::unique_ptr<SymbolStrategy>> strategies_;
+    std::array<SymbolStrategy, MAX_SYMBOLS> strategies_;  // Fixed array, O(1) access
     std::atomic<uint64_t> total_ticks_;
-    std::mutex mutex_;
-    std::vector<LogEntry> logs_;
+    // No mutex - single-threaded hot path, lock-free design
     Portfolio portfolio_;
     EventPublisher publisher_;  // Lock-free event publishing to observer
-
-    void add_log(const std::string& ticker, MarketRegime from, MarketRegime to) {
-        uint64_t now = static_cast<uint64_t>(std::chrono::steady_clock::now().time_since_epoch().count());
-        logs_.push_back({ticker, from, to, now});
-        // Keep only last 100 entries
-        if (logs_.size() > 100) {
-            logs_.erase(logs_.begin(), logs_.begin() + 50);
-        }
-    }
 
     void on_fill(Symbol symbol, OrderId id, Side side, Quantity qty, Price price) {
         auto* world = engine_.get_symbol_world(symbol);
@@ -920,43 +845,7 @@ private:
         world->on_our_fill(id, qty);
     }
 
-    // Check and execute target sells - NO ALLOCATION, inline callbacks
-    void check_targets_and_stops(const std::map<Symbol, double>& prices) {
-        // Iterate all active symbols, check targets/stops inline
-        for (const auto& [sym, price] : prices) {
-            if (sym >= MAX_SYMBOLS) continue;
-            if (!portfolio_.symbol_active[sym]) continue;
-
-            // Get ticker for logging (only if verbose)
-            std::string ticker;
-            if (args_.verbose) {
-                auto it = strategies_.find(sym);
-                ticker = it != strategies_.end() ? it->second->ticker : "???";
-            }
-
-            // Check and close positions - callbacks executed inline, no allocation
-            portfolio_.check_and_close(sym, price,
-                // On target hit (profit)
-                [&](double qty, double entry, double exit) {
-                    if (args_.verbose) {
-                        double profit = (exit - entry) * qty;
-                        std::cout << "[TARGET HIT] " << ticker << " SELL " << qty
-                                  << " @ $" << std::fixed << std::setprecision(2) << exit
-                                  << " (entry=$" << entry << ", profit=$" << profit << ")\n";
-                    }
-                },
-                // On stop-loss hit (cut loss)
-                [&](double qty, double entry, double exit) {
-                    if (args_.verbose) {
-                        double loss = (entry - exit) * qty;
-                        std::cout << "[STOP LOSS] " << ticker << " SELL " << qty
-                                  << " @ $" << std::fixed << std::setprecision(2) << exit
-                                  << " (entry=$" << entry << ", loss=$" << loss << ")\n";
-                    }
-                }
-            );
-        }
-    }
+    // Note: check_targets_and_stops removed - now handled inline in on_quote
 
     void check_signal(Symbol id, SymbolWorld* world, SymbolStrategy* strat, Price bid, Price ask) {
         uint64_t now = std::chrono::steady_clock::now().time_since_epoch().count();
@@ -1058,128 +947,27 @@ private:
 };
 
 // ============================================================================
-// Display
+// CPU Affinity
 // ============================================================================
 
-void clear_screen() { std::cout << "\033[2J\033[H"; }
+// Pin current thread to specific CPU core
+bool set_cpu_affinity(int cpu) {
+    if (cpu < 0) return true;  // No pinning requested
 
-const char* regime_str(MarketRegime r) {
-    switch (r) {
-        case MarketRegime::TrendingUp: return "TREND-UP";
-        case MarketRegime::TrendingDown: return "TREND-DN";
-        case MarketRegime::Ranging: return "RANGING ";
-        case MarketRegime::HighVolatility: return "HIGH-VOL";
-        case MarketRegime::LowVolatility: return "LOW-VOL ";
-        default: return "UNKNOWN ";
+    cpu_set_t cpuset;
+    CPU_ZERO(&cpuset);
+    CPU_SET(cpu, &cpuset);
+
+    if (sched_setaffinity(0, sizeof(cpu_set_t), &cpuset) != 0) {
+        std::cerr << "[WARN] Could not pin to CPU " << cpu << ": " << strerror(errno) << "\n";
+        return false;
     }
+    std::cout << "[CPU] Pinned to core " << cpu << "\n";
+    return true;
 }
 
-const char* regime_short(MarketRegime r) {
-    switch (r) {
-        case MarketRegime::TrendingUp: return "UP  ";
-        case MarketRegime::TrendingDown: return "DOWN";
-        case MarketRegime::Ranging: return "RANG";
-        case MarketRegime::HighVolatility: return "HVOL";
-        case MarketRegime::LowVolatility: return "LVOL";
-        default: return "??? ";
-    }
-}
-
-const char* strategy_for_regime(MarketRegime r) {
-    switch (r) {
-        case MarketRegime::TrendingUp: return "MOMENTUM (buy dips)";
-        case MarketRegime::TrendingDown: return "MOMENTUM (sell rallies)";
-        case MarketRegime::Ranging: return "MEAN-REVERT";
-        case MarketRegime::HighVolatility: return "REDUCE-RISK";
-        case MarketRegime::LowVolatility: return "MEAN-REVERT";
-        default: return "WAIT";
-    }
-}
-
-// Short strategy name for table display
-const char* strategy_short(MarketRegime r) {
-    switch (r) {
-        case MarketRegime::TrendingUp: return "MOM-BUY";
-        case MarketRegime::TrendingDown: return "MOM-SEL";
-        case MarketRegime::Ranging: return "MR     ";
-        case MarketRegime::HighVolatility: return "REDUCE ";
-        case MarketRegime::LowVolatility: return "MR     ";
-        default: return "WAIT   ";
-    }
-}
-
-template<typename App>
-void print_status(App& app, int elapsed, bool paper_mode, double capital) {
-    auto stats = app.get_stats();
-    auto symbols = app.get_symbol_details();
-
-    clear_screen();
-    std::cout << "HFT Trading System - " << (paper_mode ? "PAPER" : "PRODUCTION") << " MODE\n";
-    std::cout << "================================================================\n\n";
-
-    std::cout << "  Time: " << elapsed << "s  |  Symbols: " << stats.symbols
-              << "  |  Ticks: " << stats.ticks << "  |  Fills: " << stats.fills
-              << "  |  " << (stats.halted ? "HALTED" : "ACTIVE") << "\n\n";
-
-    std::cout << std::fixed << std::setprecision(2);
-    std::cout << "  Cash: $" << stats.cash
-              << "  |  Holdings: $" << stats.holdings_value
-              << "  |  Equity: $" << stats.equity << "\n";
-    double pnl_pct = capital > 0 ? (stats.pnl / capital * 100) : 0;
-    std::cout << "  P&L: $" << (stats.pnl >= 0 ? "+" : "") << stats.pnl
-              << "  (" << (pnl_pct >= 0 ? "+" : "") << pnl_pct << "%)"
-              << "  |  Positions: " << stats.positions << " symbols\n\n";
-
-    // Regime distribution summary
-    std::map<MarketRegime, int> regime_counts;
-    for (const auto& s : symbols) {
-        regime_counts[s.regime]++;
-    }
-    std::cout << "  Regimes: ";
-    for (auto& [r, c] : regime_counts) {
-        if (r != MarketRegime::Unknown) {
-            std::cout << regime_short(r) << ":" << c << "  ";
-        }
-    }
-    std::cout << "\n\n";
-
-    // Symbol details table with individual strategy (top 15 by value)
-    std::cout << "  SYMBOL      REGIME  STRATEGY  RSI   EMA   SPREAD   QTY      VALUE\n";
-    std::cout << "  ---------------------------------------------------------------------------\n";
-
-    size_t show_count = std::min(symbols.size(), size_t(15));
-    for (size_t i = 0; i < show_count; ++i) {
-        const auto& s = symbols[i];
-        if (s.holding > 0 || i < 5) {  // Show holdings or at least top 5
-            std::cout << "  " << std::left << std::setw(10) << s.ticker
-                      << "  " << regime_short(s.regime)
-                      << "  " << strategy_short(s.regime)
-                      << "  " << std::right << std::setw(4) << std::fixed << std::setprecision(0) << s.rsi
-                      << "  " << (s.ema_bullish ? " UP " : " DN ")
-                      << "  " << std::setw(5) << std::setprecision(3) << s.spread_pct << "%"
-                      << "  " << std::setw(5) << std::setprecision(2) << s.holding
-                      << "  $" << std::setw(9) << s.value
-                      << "\n";
-        }
-    }
-
-    if (symbols.size() > 15) {
-        std::cout << "  ... and " << (symbols.size() - 15) << " more symbols\n";
-    }
-
-    // Recent regime changes
-    auto logs = app.get_recent_logs(5);
-    if (!logs.empty()) {
-        std::cout << "\n  Recent Regime Changes:\n";
-        for (const auto& log : logs) {
-            std::cout << "    " << std::left << std::setw(10) << log.ticker
-                      << ": " << regime_short(log.from) << " -> " << regime_short(log.to) << "\n";
-        }
-    }
-
-    std::cout << "\n================================================================\n";
-    std::cout << "  Press Ctrl+C to stop\n";
-}
+// Note: Dashboard removed - use hft_observer for real-time monitoring
+// This keeps HFT process lean with zero display overhead
 
 // ============================================================================
 // Main
@@ -1187,6 +975,9 @@ void print_status(App& app, int elapsed, bool paper_mode, double capital) {
 
 template<typename OrderSender>
 int run(const CLIArgs& args) {
+    // Pin to CPU core if requested (reduces latency variance)
+    set_cpu_affinity(args.cpu_affinity);
+
     std::cout << "\nHFT Trading System - " << (args.paper_mode ? "PAPER" : "PRODUCTION") << " MODE\n";
     std::cout << "================================================================\n\n";
 
@@ -1241,44 +1032,27 @@ int run(const CLIArgs& args) {
 
         if (args.duration > 0 && elapsed >= args.duration) break;
 
-        if (!args.quiet) {
-            print_status(app, static_cast<int>(elapsed), args.paper_mode, args.capital);
-        }
-
         if (app.is_halted()) {
             std::cout << "\n  TRADING HALTED - Risk limit breached\n";
             break;
         }
 
-        std::this_thread::sleep_for(std::chrono::seconds(2));
+        // No dashboard here - use hft_observer for real-time monitoring
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
 
     ws.disconnect();
 
-    // Summary
+    // Final summary
     auto stats = app.get_stats();
     auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
         std::chrono::steady_clock::now() - start).count();
 
-    if (!args.quiet) {
-        clear_screen();
-        std::cout << "\nFINAL SUMMARY\n";
-        std::cout << "================================================================\n";
-        std::cout << "  Mode:      " << (args.paper_mode ? "PAPER" : "PRODUCTION") << "\n";
-        std::cout << "  Duration:  " << elapsed << " seconds\n";
-        std::cout << "  Symbols:   " << stats.symbols << "\n";
-        std::cout << "  Ticks:     " << stats.ticks << "\n";
-        std::cout << "  Fills:     " << stats.fills << "\n";
-        std::cout << "  Capital:   $" << std::fixed << std::setprecision(2) << args.capital << "\n";
-        std::cout << "  Equity:    $" << stats.equity << "\n";
-        std::cout << "  P&L:       $" << (stats.pnl >= 0 ? "+" : "") << stats.pnl << "\n";
-        std::cout << "  Status:    " << (stats.halted ? "HALTED" : "OK") << "\n";
-        std::cout << "================================================================\n\n";
-    } else {
-        // Quiet mode: minimal one-line summary
-        std::cout << "[DONE] " << elapsed << "s, " << stats.fills << " fills, P&L: $"
-                  << std::fixed << std::setprecision(2) << (stats.pnl >= 0 ? "+" : "") << stats.pnl << "\n";
-    }
+    std::cout << "\n[DONE] " << elapsed << "s | "
+              << stats.ticks << " ticks | "
+              << stats.fills << " fills | P&L: $"
+              << std::fixed << std::setprecision(2)
+              << (stats.pnl >= 0 ? "+" : "") << stats.pnl << "\n";
 
     return 0;
 }
