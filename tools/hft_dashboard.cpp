@@ -630,6 +630,9 @@ int main(int argc, char* argv[]) {
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 
         glfwSwapBuffers(window);
+
+        // WSL2'de VSync düzgün çalışmayabilir, CPU'yu rahatlatmak için
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
 
     // Cleanup
