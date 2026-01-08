@@ -1,16 +1,10 @@
 /**
  * HFT Observer - Real-time Dashboard for HFT Engine
  *
- * Beautiful TUI dashboard showing:
- * - Live event stream
- * - P&L tracking
- * - Position summary
- * - Statistics
- *
- * Usage:
- *   hft_observer              # Dashboard mode (default)
- *   hft_observer --stream     # Event stream only
- *   hft_observer --log FILE   # Log to file
+ * MVC Architecture:
+ * - Model: Data objects (StatsModel, PnLModel, EventsModel)
+ * - View: Screen regions with position info
+ * - Controller: Updates views when models change (dirty flag)
  */
 
 #include "../include/ipc/trade_event.hpp"
@@ -25,79 +19,607 @@
 #include <atomic>
 #include <cstring>
 #include <deque>
-#include <map>
-#include <cmath>
+#include <vector>
+#include <functional>
 #include <sys/ioctl.h>
 #include <unistd.h>
 
 using namespace hft::ipc;
 
 // ============================================================================
-// ANSI Terminal Colors & Control
+// Terminal Utilities
 // ============================================================================
 
 namespace term {
-    // Colors
-    constexpr const char* RESET     = "\033[0m";
-    constexpr const char* BOLD      = "\033[1m";
-    constexpr const char* DIM       = "\033[2m";
-
-    // Foreground
-    constexpr const char* RED       = "\033[31m";
-    constexpr const char* GREEN     = "\033[32m";
-    constexpr const char* YELLOW    = "\033[33m";
-    constexpr const char* BLUE      = "\033[34m";
-    constexpr const char* MAGENTA   = "\033[35m";
-    constexpr const char* CYAN      = "\033[36m";
-    constexpr const char* WHITE     = "\033[37m";
-
-    // Bright foreground
-    constexpr const char* BRED      = "\033[91m";
-    constexpr const char* BGREEN    = "\033[92m";
-    constexpr const char* BYELLOW   = "\033[93m";
-    constexpr const char* BBLUE     = "\033[94m";
-    constexpr const char* BCYAN     = "\033[96m";
-    constexpr const char* BWHITE    = "\033[97m";
-
-    // Background
-    constexpr const char* BG_BLACK  = "\033[40m";
-    constexpr const char* BG_RED    = "\033[41m";
-    constexpr const char* BG_GREEN  = "\033[42m";
-    constexpr const char* BG_BLUE   = "\033[44m";
-
-    // Control
-    constexpr const char* CLEAR     = "\033[2J";
-    constexpr const char* HOME      = "\033[H";
+    constexpr const char* RESET      = "\033[0m";
+    constexpr const char* BOLD       = "\033[1m";
+    constexpr const char* DIM        = "\033[2m";
+    constexpr const char* RED        = "\033[31m";
+    constexpr const char* GREEN      = "\033[32m";
+    constexpr const char* YELLOW     = "\033[33m";
+    constexpr const char* CYAN       = "\033[36m";
+    constexpr const char* BRED       = "\033[91m";
+    constexpr const char* BGREEN     = "\033[92m";
+    constexpr const char* BYELLOW    = "\033[93m";
+    constexpr const char* BCYAN      = "\033[96m";
+    constexpr const char* BWHITE     = "\033[97m";
+    constexpr const char* CLEAR      = "\033[2J";
+    constexpr const char* HOME       = "\033[H";
     constexpr const char* HIDE_CURSOR = "\033[?25l";
     constexpr const char* SHOW_CURSOR = "\033[?25h";
-    constexpr const char* CLEAR_LINE = "\033[K";  // Clear from cursor to end of line
+    constexpr const char* CLEAR_LINE = "\033[K";
 
-    void clear_screen() { std::cout << CLEAR << HOME; }
-    void home() { std::cout << HOME; }  // Move cursor to top-left (no clear)
-    void move_to(int row, int col) { std::cout << "\033[" << row << ";" << col << "H"; }
+    void move_to(int row, int col) {
+        std::cout << "\033[" << row << ";" << col << "H";
+    }
 }
-
-// ============================================================================
-// Box Drawing Characters (Unicode)
-// ============================================================================
 
 namespace box {
-    constexpr const char* TL = "╔";  // Top left
-    constexpr const char* TR = "╗";  // Top right
-    constexpr const char* BL = "╚";  // Bottom left
-    constexpr const char* BR = "╝";  // Bottom right
-    constexpr const char* H  = "═";  // Horizontal
-    constexpr const char* V  = "║";  // Vertical
-    constexpr const char* LT = "╠";  // Left T
-    constexpr const char* RT = "╣";  // Right T
-    constexpr const char* TT = "╦";  // Top T
-    constexpr const char* BT = "╩";  // Bottom T
-    constexpr const char* X  = "╬";  // Cross
-
-    // Single line
-    constexpr const char* HL = "─";  // Horizontal light
-    constexpr const char* VL = "│";  // Vertical light
+    constexpr const char* TL = "╔";
+    constexpr const char* TR = "╗";
+    constexpr const char* BL = "╚";
+    constexpr const char* BR = "╝";
+    constexpr const char* H  = "═";
+    constexpr const char* V  = "║";
+    constexpr const char* LT = "╠";
+    constexpr const char* RT = "╣";
 }
+
+// ============================================================================
+// MODELS - Pure data, no rendering logic
+// ============================================================================
+
+struct StatsModel {
+    uint64_t total_events = 0;
+    int64_t elapsed_seconds = 0;
+    double rate = 0.0;
+    bool dirty = true;
+
+    void update(uint64_t events, int64_t elapsed) {
+        if (total_events != events || elapsed_seconds != elapsed) {
+            total_events = events;
+            elapsed_seconds = elapsed;
+            rate = elapsed > 0 ? (double)events / elapsed : 0.0;
+            dirty = true;
+        }
+    }
+};
+
+struct PnLModel {
+    double realized_pnl = 0.0;
+    double total_profit = 0.0;
+    double total_loss = 0.0;
+    int winning_trades = 0;
+    int losing_trades = 0;
+    bool dirty = true;
+
+    double win_rate() const {
+        int total = winning_trades + losing_trades;
+        return total > 0 ? (double)winning_trades / total * 100 : 0;
+    }
+
+    void add_win(double pnl) {
+        winning_trades++;
+        realized_pnl += pnl;
+        total_profit += pnl;
+        dirty = true;
+    }
+
+    void add_loss(double pnl) {
+        losing_trades++;
+        realized_pnl += pnl;
+        total_loss += std::abs(pnl);
+        dirty = true;
+    }
+};
+
+struct TradeStatsModel {
+    uint64_t fills = 0;
+    uint64_t targets = 0;
+    uint64_t stops = 0;
+    bool dirty = true;
+
+    void add_fill() { fills++; dirty = true; }
+    void add_target() { targets++; dirty = true; }
+    void add_stop() { stops++; dirty = true; }
+};
+
+struct EventEntry {
+    std::string text;
+    std::string color;
+};
+
+struct EventsModel {
+    std::deque<EventEntry> events;
+    static constexpr size_t MAX_EVENTS = 100;
+    bool dirty = true;
+
+    void add(const std::string& text, const std::string& color) {
+        events.push_front({text, color});
+        if (events.size() > MAX_EVENTS) {
+            events.pop_back();
+        }
+        dirty = true;
+    }
+};
+
+// ============================================================================
+// VIEW - Screen region with position, knows how to render itself
+// ============================================================================
+
+class View {
+protected:
+    int start_row_;
+    int width_;
+    std::vector<std::string> lines_;  // Cached rendered lines
+
+    std::string pad(const std::string& s, int w) const {
+        if ((int)s.length() >= w) return s.substr(0, w);
+        return s + std::string(w - s.length(), ' ');
+    }
+
+    std::string hline(bool is_top = false, bool is_bottom = false) const {
+        std::ostringstream ss;
+        ss << term::BCYAN;
+        if (is_top) ss << box::TL;
+        else if (is_bottom) ss << box::BL;
+        else ss << box::LT;
+        for (int i = 0; i < width_ - 2; i++) ss << box::H;
+        if (is_top) ss << box::TR;
+        else if (is_bottom) ss << box::BR;
+        else ss << box::RT;
+        ss << term::RESET;
+        return ss.str();
+    }
+
+    std::string row(const std::string& content) const {
+        std::ostringstream ss;
+        ss << term::BCYAN << box::V << term::RESET;
+        ss << "  " << pad(content, width_ - 4);
+        ss << term::BCYAN << box::V << term::RESET;
+        return ss.str();
+    }
+
+public:
+    View(int start_row, int width) : start_row_(start_row), width_(width) {}
+    virtual ~View() = default;
+
+    int start_row() const { return start_row_; }
+    int height() const { return lines_.size(); }
+    void set_start_row(int r) { start_row_ = r; }
+
+    // Render to screen (only changed lines)
+    void render_to_screen(const std::vector<std::string>& prev_lines) {
+        std::cout << term::HIDE_CURSOR;
+        for (size_t i = 0; i < lines_.size(); i++) {
+            bool need_update = (i >= prev_lines.size()) || (lines_[i] != prev_lines[i]);
+            if (need_update) {
+                term::move_to(start_row_ + i, 1);
+                std::cout << lines_[i] << term::CLEAR_LINE;
+            }
+        }
+    }
+
+    const std::vector<std::string>& get_lines() const { return lines_; }
+};
+
+// Header View
+class HeaderView : public View {
+public:
+    HeaderView(int row, int width) : View(row, width) {}
+
+    void update() {
+        lines_.clear();
+        lines_.push_back(hline(true));
+
+        std::ostringstream ss;
+        ss << term::BCYAN << box::V << term::RESET;
+        ss << term::BOLD << term::BWHITE << "  HFT OBSERVER " << term::RESET;
+        ss << term::DIM << "- Real-time Monitor" << term::RESET;
+        ss << std::string(std::max(0, width_ - 37), ' ');
+        ss << term::BCYAN << box::V << term::RESET;
+        lines_.push_back(ss.str());
+
+        lines_.push_back(hline());
+    }
+};
+
+// Stats View
+class StatsView : public View {
+    std::vector<std::string> prev_lines_;
+public:
+    StatsView(int row, int width) : View(row, width) {}
+
+    void update(const StatsModel& model) {
+        prev_lines_ = lines_;
+        lines_.clear();
+
+        int hours = model.elapsed_seconds / 3600;
+        int mins = (model.elapsed_seconds % 3600) / 60;
+        int secs = model.elapsed_seconds % 60;
+
+        std::ostringstream ss;
+        ss << term::BCYAN << box::V << term::RESET << "  ";
+        ss << "Runtime: " << std::setfill('0') << std::setw(2) << hours << ":"
+           << std::setw(2) << mins << ":" << std::setw(2) << secs << std::setfill(' ');
+        ss << "  |  Events: " << std::setw(8) << model.total_events;
+        ss << "  |  Rate: " << std::fixed << std::setprecision(1) << std::setw(8) << model.rate << "/s";
+        ss << std::string(std::max(0, width_ - 68), ' ');
+        ss << term::BCYAN << box::V << term::RESET;
+        lines_.push_back(ss.str());
+
+        lines_.push_back(hline());
+    }
+
+    void render_if_dirty(bool dirty) {
+        if (dirty) render_to_screen(prev_lines_);
+    }
+};
+
+// P&L View
+class PnLView : public View {
+    std::vector<std::string> prev_lines_;
+public:
+    PnLView(int row, int width) : View(row, width) {}
+
+    void update(const PnLModel& model) {
+        prev_lines_ = lines_;
+        lines_.clear();
+
+        // Header
+        std::ostringstream ss;
+        ss << term::BCYAN << box::V << term::RESET;
+        ss << term::BOLD << "  P&L SUMMARY" << term::RESET;
+        ss << std::string(std::max(0, width_ - 15), ' ');
+        ss << term::BCYAN << box::V << term::RESET;
+        lines_.push_back(ss.str());
+
+        // P&L value row
+        ss.str(""); ss.clear();
+        ss << term::BCYAN << box::V << term::RESET << "  ";
+
+        std::ostringstream pnl_ss;
+        pnl_ss << std::fixed << std::setprecision(2) << (model.realized_pnl >= 0 ? "+" : "") << "$" << std::abs(model.realized_pnl);
+
+        if (model.realized_pnl >= 0) {
+            ss << term::BGREEN << term::BOLD << std::setw(12) << pnl_ss.str() << term::RESET;
+        } else {
+            ss << term::BRED << term::BOLD << std::setw(12) << pnl_ss.str() << term::RESET;
+        }
+        ss << "  |  ";
+        ss << term::GREEN << "W:" << std::setw(4) << model.winning_trades << term::RESET << " ";
+        ss << term::RED << "L:" << std::setw(4) << model.losing_trades << term::RESET;
+        ss << "  |  WinRate: " << std::fixed << std::setprecision(0) << std::setw(3) << model.win_rate() << "%";
+        ss << std::string(std::max(0, width_ - 60), ' ');
+        ss << term::BCYAN << box::V << term::RESET;
+        lines_.push_back(ss.str());
+
+        // Profit/Loss breakdown
+        ss.str(""); ss.clear();
+        ss << term::BCYAN << box::V << term::RESET << "  ";
+        ss << term::GREEN << "Profit: +$" << std::fixed << std::setprecision(2) << std::setw(10) << model.total_profit << term::RESET << "  ";
+        ss << term::RED << "Loss: -$" << std::fixed << std::setprecision(2) << std::setw(10) << model.total_loss << term::RESET;
+        ss << std::string(std::max(0, width_ - 52), ' ');
+        ss << term::BCYAN << box::V << term::RESET;
+        lines_.push_back(ss.str());
+
+        lines_.push_back(hline());
+    }
+
+    void render_if_dirty(bool dirty) {
+        if (dirty) render_to_screen(prev_lines_);
+    }
+};
+
+// Trade Stats View
+class TradeStatsView : public View {
+    std::vector<std::string> prev_lines_;
+public:
+    TradeStatsView(int row, int width) : View(row, width) {}
+
+    void update(const TradeStatsModel& model) {
+        prev_lines_ = lines_;
+        lines_.clear();
+
+        std::ostringstream ss;
+        ss << term::BCYAN << box::V << term::RESET << "  ";
+        ss << term::BGREEN << "Fills: " << std::setw(6) << model.fills << term::RESET << "  |  ";
+        ss << term::GREEN << "Targets: " << std::setw(6) << model.targets << term::RESET << "  |  ";
+        ss << term::RED << "Stops: " << std::setw(6) << model.stops << term::RESET;
+        ss << std::string(std::max(0, width_ - 57), ' ');
+        ss << term::BCYAN << box::V << term::RESET;
+        lines_.push_back(ss.str());
+
+        lines_.push_back(hline());
+    }
+
+    void render_if_dirty(bool dirty) {
+        if (dirty) render_to_screen(prev_lines_);
+    }
+};
+
+// Events View
+class EventsView : public View {
+    std::vector<std::string> prev_lines_;
+    int visible_rows_;
+public:
+    EventsView(int row, int width, int visible_rows)
+        : View(row, width), visible_rows_(visible_rows) {}
+
+    void set_visible_rows(int rows) { visible_rows_ = rows; }
+
+    void update(const EventsModel& model) {
+        prev_lines_ = lines_;
+        lines_.clear();
+
+        // Header
+        std::ostringstream ss;
+        ss << term::BCYAN << box::V << term::RESET;
+        ss << term::BOLD << "  LIVE EVENTS (" << visible_rows_ << " rows)" << term::RESET;
+        ss << std::string(std::max(0, width_ - 24), ' ');
+        ss << term::BCYAN << box::V << term::RESET;
+        lines_.push_back(ss.str());
+
+        // Events
+        int displayed = 0;
+        for (const auto& ev : model.events) {
+            if (displayed >= visible_rows_) break;
+
+            ss.str(""); ss.clear();
+            ss << term::BCYAN << box::V << term::RESET;
+            ss << ev.color << "  " << pad(ev.text, width_ - 4) << term::RESET;
+            ss << term::BCYAN << box::V << term::RESET;
+            lines_.push_back(ss.str());
+            displayed++;
+        }
+
+        // Fill empty rows
+        while (displayed < visible_rows_) {
+            ss.str(""); ss.clear();
+            ss << term::BCYAN << box::V << term::RESET;
+            ss << std::string(width_ - 2, ' ');
+            ss << term::BCYAN << box::V << term::RESET;
+            lines_.push_back(ss.str());
+            displayed++;
+        }
+    }
+
+    void render_if_dirty(bool dirty) {
+        if (dirty) render_to_screen(prev_lines_);
+    }
+};
+
+// Footer View
+class FooterView : public View {
+public:
+    FooterView(int row, int width) : View(row, width) {}
+
+    void update(int term_width, int term_height) {
+        lines_.clear();
+        lines_.push_back(hline(false, true));
+
+        std::ostringstream ss;
+        ss << term::DIM << "  Press Ctrl+C to exit  |  Terminal: " << term_width << "x" << term_height << term::RESET;
+        lines_.push_back(ss.str());
+    }
+};
+
+// ============================================================================
+// CONTROLLER - Connects models to views, manages updates
+// ============================================================================
+
+class DashboardController {
+    // Models
+    StatsModel stats_;
+    PnLModel pnl_;
+    TradeStatsModel trade_stats_;
+    EventsModel events_;
+
+    // Views
+    HeaderView header_view_;
+    StatsView stats_view_;
+    PnLView pnl_view_;
+    TradeStatsView trade_stats_view_;
+    EventsView events_view_;
+    FooterView footer_view_;
+
+    // State
+    int term_width_ = 80;
+    int term_height_ = 24;
+    std::chrono::steady_clock::time_point start_time_;
+    uint64_t first_event_ts_ = 0;
+    bool first_render_ = true;
+
+    void update_term_size() {
+        struct winsize w;
+        if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &w) == 0) {
+            term_width_ = std::max(60, (int)w.ws_col);
+            term_height_ = std::max(20, (int)w.ws_row);
+        }
+    }
+
+    void layout_views() {
+        // Calculate positions
+        // Header: 3 rows, Stats: 2 rows, PnL: 4 rows, TradeStats: 2 rows, Footer: 2 rows = 13 fixed
+        int event_rows = std::max(5, term_height_ - 14);
+        events_view_.set_visible_rows(event_rows);
+
+        int row = 1;
+        header_view_.set_start_row(row); row += 3;
+        stats_view_.set_start_row(row); row += 2;
+        pnl_view_.set_start_row(row); row += 4;
+        trade_stats_view_.set_start_row(row); row += 2;
+        events_view_.set_start_row(row); row += event_rows + 1;
+        footer_view_.set_start_row(row);
+    }
+
+public:
+    DashboardController()
+        : header_view_(1, 80)
+        , stats_view_(4, 80)
+        , pnl_view_(6, 80)
+        , trade_stats_view_(10, 80)
+        , events_view_(12, 80, 10)
+        , footer_view_(23, 80)
+        , start_time_(std::chrono::steady_clock::now())
+    {}
+
+    void process_event(const TradeEvent& e) {
+        if (first_event_ts_ == 0) first_event_ts_ = e.timestamp_ns;
+
+        double rel_sec = (e.timestamp_ns - first_event_ts_) / 1e9;
+        std::ostringstream ss;
+
+        switch (e.type) {
+            case EventType::Fill: {
+                trade_stats_.add_fill();
+                std::string ticker(e.ticker, 3);
+                ss << std::fixed << std::setprecision(1) << std::setw(6) << rel_sec << "s  "
+                   << (e.side == 0 ? "BUY  " : "SELL ")
+                   << std::setw(4) << ticker << "  "
+                   << std::setw(5) << e.quantity << " @ $"
+                   << std::setprecision(2) << e.price;
+                events_.add(ss.str(), (e.side == 0) ? term::BGREEN : term::BYELLOW);
+                break;
+            }
+            case EventType::TargetHit: {
+                trade_stats_.add_target();
+                double pnl = e.pnl_cents / 100.0;
+                pnl_.add_win(pnl);
+
+                std::string ticker(e.ticker, 3);
+                ss << std::fixed << std::setprecision(1) << std::setw(6) << rel_sec << "s  "
+                   << "TARGET " << std::setw(4) << ticker << "  +"
+                   << std::setprecision(2) << "$" << pnl;
+                events_.add(ss.str(), term::BGREEN);
+                break;
+            }
+            case EventType::StopLoss: {
+                trade_stats_.add_stop();
+                double pnl = e.pnl_cents / 100.0;
+                pnl_.add_loss(pnl);
+
+                std::string ticker(e.ticker, 3);
+                ss << std::fixed << std::setprecision(1) << std::setw(6) << rel_sec << "s  "
+                   << "STOP   " << std::setw(4) << ticker << "  "
+                   << std::setprecision(2) << "$" << pnl;
+                events_.add(ss.str(), term::BRED);
+                break;
+            }
+            case EventType::Signal: {
+                std::string ticker(e.ticker, 3);
+                ss << std::fixed << std::setprecision(1) << std::setw(6) << rel_sec << "s  "
+                   << "SIGNAL " << std::setw(4) << ticker << "  "
+                   << (e.side == 0 ? "BUY" : "SELL");
+                events_.add(ss.str(), term::BCYAN);
+                break;
+            }
+            default:
+                return;
+        }
+    }
+
+    void render() {
+        update_term_size();
+
+        // Update stats model
+        auto now = std::chrono::steady_clock::now();
+        auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - start_time_).count();
+        stats_.update(
+            trade_stats_.fills + trade_stats_.targets + trade_stats_.stops,
+            elapsed
+        );
+
+        // First render - full screen clear and draw
+        if (first_render_) {
+            std::cout << term::CLEAR << term::HOME << term::HIDE_CURSOR;
+
+            // Set widths
+            header_view_ = HeaderView(1, term_width_);
+            stats_view_ = StatsView(4, term_width_);
+            pnl_view_ = PnLView(6, term_width_);
+            trade_stats_view_ = TradeStatsView(10, term_width_);
+            events_view_ = EventsView(12, term_width_, 10);
+            footer_view_ = FooterView(23, term_width_);
+
+            layout_views();
+
+            // Update all views
+            header_view_.update();
+            stats_view_.update(stats_);
+            pnl_view_.update(pnl_);
+            trade_stats_view_.update(trade_stats_);
+            events_view_.update(events_);
+            footer_view_.update(term_width_, term_height_);
+
+            // Render all
+            for (const auto& line : header_view_.get_lines()) {
+                std::cout << line << term::CLEAR_LINE << "\n";
+            }
+            for (const auto& line : stats_view_.get_lines()) {
+                std::cout << line << term::CLEAR_LINE << "\n";
+            }
+            for (const auto& line : pnl_view_.get_lines()) {
+                std::cout << line << term::CLEAR_LINE << "\n";
+            }
+            for (const auto& line : trade_stats_view_.get_lines()) {
+                std::cout << line << term::CLEAR_LINE << "\n";
+            }
+            for (const auto& line : events_view_.get_lines()) {
+                std::cout << line << term::CLEAR_LINE << "\n";
+            }
+            for (const auto& line : footer_view_.get_lines()) {
+                std::cout << line << term::CLEAR_LINE << "\n";
+            }
+
+            // Clear dirty flags
+            stats_.dirty = false;
+            pnl_.dirty = false;
+            trade_stats_.dirty = false;
+            events_.dirty = false;
+            first_render_ = false;
+        } else {
+            // Differential update - only dirty views
+            layout_views();
+
+            if (stats_.dirty) {
+                stats_view_.update(stats_);
+                stats_view_.render_if_dirty(true);
+                stats_.dirty = false;
+            }
+
+            if (pnl_.dirty) {
+                pnl_view_.update(pnl_);
+                pnl_view_.render_if_dirty(true);
+                pnl_.dirty = false;
+            }
+
+            if (trade_stats_.dirty) {
+                trade_stats_view_.update(trade_stats_);
+                trade_stats_view_.render_if_dirty(true);
+                trade_stats_.dirty = false;
+            }
+
+            if (events_.dirty) {
+                events_view_.update(events_);
+                events_view_.render_if_dirty(true);
+                events_.dirty = false;
+            }
+        }
+
+        std::cout << std::flush;
+    }
+
+    void cleanup() {
+        std::cout << term::SHOW_CURSOR << term::RESET;
+    }
+
+    // Getters for final summary
+    uint64_t total_events() const { return trade_stats_.fills + trade_stats_.targets + trade_stats_.stops; }
+    double realized_pnl() const { return pnl_.realized_pnl; }
+    int wins() const { return pnl_.winning_trades; }
+    int losses() const { return pnl_.losing_trades; }
+};
 
 // ============================================================================
 // Global State
@@ -110,335 +632,20 @@ void signal_handler(int) {
 }
 
 // ============================================================================
-// Event Display Entry
-// ============================================================================
-
-struct DisplayEvent {
-    uint64_t timestamp;
-    std::string text;
-    std::string color;
-};
-
-// ============================================================================
-// Dashboard State
-// ============================================================================
-
-class Dashboard {
-public:
-    // Dynamic terminal size
-    int term_width = 80;
-    int term_height = 24;
-    int inner_width = 76;      // Content width (excluding borders)
-    int event_rows = 10;       // Rows for event panel
-    static constexpr int MAX_EVENTS = 100;
-
-    // Get terminal size
-    void update_term_size() {
-        struct winsize w;
-        if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &w) == 0) {
-            term_width = std::max(60, (int)w.ws_col);
-            term_height = std::max(20, (int)w.ws_row);
-        }
-        inner_width = term_width - 4;
-        // Header(3) + Stats(2) + P&L(4) + TradeStats(2) + EventHeader(1) + Footer(2) = 14 fixed rows
-        event_rows = std::max(5, term_height - 14);
-    }
-
-    // Helper: pad string to exact width
-    std::string pad(const std::string& s, int width) const {
-        if ((int)s.length() >= width) return s.substr(0, width);
-        return s + std::string(width - s.length(), ' ');
-    }
-
-    // Helper: create horizontal line
-    void hline(bool is_middle = true) const {
-        std::cout << term::BCYAN;
-        std::cout << (is_middle ? box::LT : box::TL);
-        for (int i = 0; i < term_width - 2; i++) std::cout << box::H;
-        std::cout << (is_middle ? box::RT : box::TR);
-        std::cout << term::RESET << term::CLEAR_LINE << "\n";
-    }
-
-    // Helper: print row with borders (clears rest of line)
-    void row(const std::string& content) const {
-        std::cout << term::BCYAN << box::V << term::RESET;
-        std::cout << "  " << pad(content, inner_width);
-        std::cout << term::BCYAN << box::V << term::RESET << term::CLEAR_LINE << "\n";
-    }
-
-    // Statistics
-    uint64_t total_events = 0;
-    uint64_t fills = 0;
-    uint64_t targets = 0;
-    uint64_t stops = 0;
-
-    // P&L
-    double realized_pnl = 0;
-    double total_profit = 0;
-    double total_loss = 0;
-    int winning_trades = 0;
-    int losing_trades = 0;
-
-    // Positions (symbol -> quantity, value)
-    std::map<std::string, std::pair<double, double>> positions;
-
-    // Recent events
-    std::deque<DisplayEvent> recent_events;
-
-    // Timing
-    std::chrono::steady_clock::time_point start_time;
-    uint64_t first_event_ts = 0;
-
-    Dashboard() : start_time(std::chrono::steady_clock::now()) {}
-
-    void add_event(const TradeEvent& e) {
-        total_events++;
-
-        if (first_event_ts == 0) first_event_ts = e.timestamp_ns;
-
-        DisplayEvent de;
-        de.timestamp = e.timestamp_ns;
-
-        std::ostringstream ss;
-        double rel_sec = (e.timestamp_ns - first_event_ts) / 1e9;
-
-        switch (e.type) {
-            case EventType::Fill: {
-                fills++;
-                std::string ticker(e.ticker, 3);
-                std::string side = e.side == 0 ? "BUY " : "SELL";
-                ss << std::fixed << std::setprecision(1) << std::setw(6) << rel_sec << "s  "
-                   << (e.side == 0 ? "BUY  " : "SELL ")
-                   << std::setw(4) << ticker << "  "
-                   << std::setw(5) << e.quantity << " @ $"
-                   << std::setprecision(2) << e.price;
-                de.color = (e.side == 0) ? term::BGREEN : term::BYELLOW;
-
-                // Update position tracking
-                if (e.side == 0) {  // Buy
-                    positions[ticker].first += e.quantity;
-                    positions[ticker].second += e.quantity * e.price;
-                }
-                break;
-            }
-
-            case EventType::TargetHit: {
-                targets++;
-                winning_trades++;
-                double pnl = e.pnl_cents / 100.0;
-                realized_pnl += pnl;
-                total_profit += pnl;
-
-                std::string ticker(e.ticker, 3);
-                ss << std::fixed << std::setprecision(1) << std::setw(6) << rel_sec << "s  "
-                   << "TARGET " << std::setw(4) << ticker << "  +"
-                   << std::setprecision(2) << "$" << pnl
-                   << "  (entry:$" << e.price2 << " exit:$" << e.price << ")";
-                de.color = term::BGREEN;
-
-                // Update position
-                positions[ticker].first -= e.quantity;
-                positions[ticker].second -= e.quantity * e.price2;
-                break;
-            }
-
-            case EventType::StopLoss: {
-                stops++;
-                losing_trades++;
-                double pnl = e.pnl_cents / 100.0;
-                realized_pnl += pnl;
-                total_loss += std::abs(pnl);
-
-                std::string ticker(e.ticker, 3);
-                ss << std::fixed << std::setprecision(1) << std::setw(6) << rel_sec << "s  "
-                   << "STOP   " << std::setw(4) << ticker << "  "
-                   << std::setprecision(2) << "$" << pnl
-                   << "  (entry:$" << e.price2 << " exit:$" << e.price << ")";
-                de.color = term::BRED;
-
-                // Update position
-                positions[ticker].first -= e.quantity;
-                positions[ticker].second -= e.quantity * e.price2;
-                break;
-            }
-
-            case EventType::Signal: {
-                std::string ticker(e.ticker, 3);
-                ss << std::fixed << std::setprecision(1) << std::setw(6) << rel_sec << "s  "
-                   << "SIGNAL " << std::setw(4) << ticker << "  "
-                   << (e.side == 0 ? "BUY" : "SELL")
-                   << " strength:" << (int)e.signal_strength;
-                de.color = term::BCYAN;
-                break;
-            }
-
-            default:
-                return;  // Don't display other events
-        }
-
-        de.text = ss.str();
-        recent_events.push_front(de);
-
-        if (recent_events.size() > MAX_EVENTS) {
-            recent_events.pop_back();
-        }
-    }
-
-    void render() {
-        // Update terminal size
-        update_term_size();
-
-        // Flicker-free: move cursor to home, don't clear screen
-        std::cout << term::HOME << term::HIDE_CURSOR;
-
-        auto now = std::chrono::steady_clock::now();
-        auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - start_time).count();
-        int hours = elapsed / 3600;
-        int mins = (elapsed % 3600) / 60;
-        int secs = elapsed % 60;
-
-        std::ostringstream ss;
-
-        // ═══════════════════════════════════════════════════════════════════
-        // Header
-        // ═══════════════════════════════════════════════════════════════════
-        hline(false);
-
-        std::cout << term::BCYAN << box::V << term::RESET;
-        std::cout << term::BOLD << term::BWHITE << "  HFT OBSERVER " << term::RESET << term::DIM << "- Real-time Monitor" << term::RESET;
-        std::cout << std::string(std::max(0, inner_width - 33), ' ');
-        std::cout << term::BCYAN << box::V << term::RESET << term::CLEAR_LINE << "\n";
-
-        hline();
-
-        // ═══════════════════════════════════════════════════════════════════
-        // Stats Row
-        // ═══════════════════════════════════════════════════════════════════
-        ss.str(""); ss.clear();
-        ss << "Runtime: " << std::setfill('0') << std::setw(2) << hours << ":"
-           << std::setw(2) << mins << ":" << std::setw(2) << secs << std::setfill(' ')
-           << "  |  Events: " << std::setw(8) << total_events
-           << "  |  Rate: " << std::fixed << std::setprecision(1) << std::setw(8)
-           << (elapsed > 0 ? (double)total_events / elapsed : 0.0) << "/s";
-        row(ss.str());
-
-        hline();
-
-        // ═══════════════════════════════════════════════════════════════════
-        // P&L Section
-        // ═══════════════════════════════════════════════════════════════════
-        std::cout << term::BCYAN << box::V << term::RESET;
-        std::cout << term::BOLD << "  P&L SUMMARY" << term::RESET;
-        std::cout << std::string(std::max(0, inner_width - 11), ' ');
-        std::cout << term::BCYAN << box::V << term::RESET << term::CLEAR_LINE << "\n";
-
-        int total_trades = winning_trades + losing_trades;
-        double win_rate = total_trades > 0 ? (double)winning_trades / total_trades * 100 : 0;
-
-        // P&L value row
-        std::cout << term::BCYAN << box::V << term::RESET << "  ";
-        ss.str(""); ss.clear();
-        ss << std::fixed << std::setprecision(2) << (realized_pnl >= 0 ? "+" : "") << "$" << std::abs(realized_pnl);
-        if (realized_pnl >= 0) {
-            std::cout << term::BGREEN << term::BOLD << std::setw(12) << ss.str() << term::RESET;
-        } else {
-            std::cout << term::BRED << term::BOLD << std::setw(12) << ss.str() << term::RESET;
-        }
-        std::cout << "  |  ";
-        std::cout << term::GREEN << "W:" << std::setw(4) << winning_trades << term::RESET << " ";
-        std::cout << term::RED << "L:" << std::setw(4) << losing_trades << term::RESET;
-        std::cout << "  |  WinRate: " << std::fixed << std::setprecision(0) << std::setw(3) << win_rate << "%";
-        std::cout << std::string(std::max(0, inner_width - 56), ' ');
-        std::cout << term::BCYAN << box::V << term::RESET << term::CLEAR_LINE << "\n";
-
-        // Profit/Loss breakdown
-        std::cout << term::BCYAN << box::V << term::RESET << "  ";
-        ss.str(""); ss.clear();
-        ss << "Profit: +$" << std::fixed << std::setprecision(2) << std::setw(12) << total_profit;
-        std::cout << term::GREEN << ss.str() << term::RESET << "  ";
-        ss.str(""); ss.clear();
-        ss << "Loss: -$" << std::fixed << std::setprecision(2) << std::setw(12) << total_loss;
-        std::cout << term::RED << ss.str() << term::RESET;
-        std::cout << std::string(std::max(0, inner_width - 52), ' ');
-        std::cout << term::BCYAN << box::V << term::RESET << term::CLEAR_LINE << "\n";
-
-        hline();
-
-        // ═══════════════════════════════════════════════════════════════════
-        // Trade Stats
-        // ═══════════════════════════════════════════════════════════════════
-        std::cout << term::BCYAN << box::V << term::RESET << "  ";
-        std::cout << term::BGREEN << "Fills: " << std::setw(6) << fills << term::RESET << "  |  ";
-        std::cout << term::GREEN << "Targets: " << std::setw(6) << targets << term::RESET << "  |  ";
-        std::cout << term::RED << "Stops: " << std::setw(6) << stops << term::RESET;
-        std::cout << std::string(std::max(0, inner_width - 53), ' ');
-        std::cout << term::BCYAN << box::V << term::RESET << term::CLEAR_LINE << "\n";
-
-        hline();
-
-        // ═══════════════════════════════════════════════════════════════════
-        // Event Stream
-        // ═══════════════════════════════════════════════════════════════════
-        std::cout << term::BCYAN << box::V << term::RESET;
-        std::cout << term::BOLD << "  LIVE EVENTS (" << event_rows << " rows)" << term::RESET;
-        std::cout << std::string(std::max(0, inner_width - 20), ' ');
-        std::cout << term::BCYAN << box::V << term::RESET << term::CLEAR_LINE << "\n";
-
-        // Events
-        int displayed = 0;
-        for (const auto& ev : recent_events) {
-            if (displayed >= event_rows) break;
-
-            std::cout << term::BCYAN << box::V << term::RESET;
-            std::cout << ev.color << "  " << pad(ev.text, inner_width) << term::RESET;
-            std::cout << term::BCYAN << box::V << term::RESET << term::CLEAR_LINE << "\n";
-            displayed++;
-        }
-
-        // Fill empty rows
-        while (displayed < event_rows) {
-            std::cout << term::BCYAN << box::V << term::RESET;
-            std::cout << std::string(inner_width + 2, ' ');
-            std::cout << term::BCYAN << box::V << term::RESET << term::CLEAR_LINE << "\n";
-            displayed++;
-        }
-
-        // ═══════════════════════════════════════════════════════════════════
-        // Footer
-        // ═══════════════════════════════════════════════════════════════════
-        std::cout << term::BCYAN << box::BL;
-        for (int i = 0; i < term_width - 2; i++) std::cout << box::H;
-        std::cout << box::BR << term::RESET << term::CLEAR_LINE << "\n";
-
-        std::cout << term::DIM << "  Press Ctrl+C to exit  |  Terminal: " << term_width << "x" << term_height << term::RESET << term::CLEAR_LINE << "\n";
-
-        std::cout << std::flush;
-    }
-
-    void cleanup() {
-        std::cout << term::SHOW_CURSOR << term::RESET;
-    }
-};
-
-// ============================================================================
 // Main
 // ============================================================================
 
 void print_help() {
-    std::cout << "Usage: hft_observer [options]\n";
-    std::cout << "\n";
+    std::cout << "Usage: hft_observer [options]\n\n";
     std::cout << "Options:\n";
     std::cout << "  -h, --help       Show this help\n";
-    std::cout << "  -s, --stream     Stream mode (no dashboard, just events)\n";
+    std::cout << "  -s, --stream     Stream mode (no dashboard)\n";
     std::cout << "  -l, --log FILE   Log events to CSV file\n";
-    std::cout << "  -f, --filter T   Filter by event type (FILL, TARGET, STOP)\n";
-    std::cout << "\n";
 }
 
 int main(int argc, char* argv[]) {
     bool stream_mode = false;
     std::string log_file;
-    std::string filter_type;
 
     for (int i = 1; i < argc; i++) {
         std::string arg = argv[i];
@@ -449,9 +656,6 @@ int main(int argc, char* argv[]) {
             stream_mode = true;
         } else if ((arg == "-l" || arg == "--log") && i + 1 < argc) {
             log_file = argv[++i];
-        } else if ((arg == "-f" || arg == "--filter") && i + 1 < argc) {
-            filter_type = argv[++i];
-            stream_mode = true;  // Filter implies stream mode
         }
     }
 
@@ -466,35 +670,26 @@ int main(int argc, char* argv[]) {
         std::cout << "╚══════════════════════════════════════════╝\n";
         std::cout << term::RESET;
     } else {
-        std::cout << "HFT Observer - Stream Mode\n";
-        std::cout << "Connecting to shared memory...\n";
+        std::cout << "HFT Observer - Stream Mode\nConnecting...\n";
     }
 
     // Connect to shared memory
     SharedRingBuffer<TradeEvent>* buffer = nullptr;
     int retries = 0;
-    const int max_retries = 30;
 
-    while (!buffer && retries < max_retries && g_running) {
+    while (!buffer && retries < 30 && g_running) {
         try {
             buffer = new SharedRingBuffer<TradeEvent>("/hft_events", false);
-            if (!stream_mode) {
-                std::cout << term::BGREEN << "Connected!" << term::RESET << "\n";
-            } else {
-                std::cout << "Connected! Buffer: " << buffer->capacity() << " events\n";
-            }
+            std::cout << term::BGREEN << "Connected!" << term::RESET << "\n";
         } catch (...) {
             retries++;
-            if (!stream_mode) {
-                std::cout << term::YELLOW << "  Waiting for HFT engine... ("
-                          << retries << "/" << max_retries << ")\r" << term::RESET << std::flush;
-            }
+            std::cout << term::YELLOW << "  Waiting... (" << retries << "/30)\r" << term::RESET << std::flush;
             std::this_thread::sleep_for(std::chrono::seconds(1));
         }
     }
 
     if (!buffer) {
-        std::cerr << term::RED << "ERROR: Could not connect. Is HFT engine running?\n" << term::RESET;
+        std::cerr << term::RED << "ERROR: Could not connect.\n" << term::RESET;
         return 1;
     }
 
@@ -502,18 +697,13 @@ int main(int argc, char* argv[]) {
     std::ofstream log_stream;
     if (!log_file.empty()) {
         log_stream.open(log_file, std::ios::app);
-        if (!log_stream) {
-            std::cerr << "ERROR: Could not open log file: " << log_file << "\n";
-            return 1;
-        }
-        // CSV header
-        log_stream << "timestamp,type,symbol,side,price,price2,quantity,pnl,order_id\n";
+        log_stream << "timestamp,type,symbol,side,price,quantity,pnl\n";
     }
 
     std::this_thread::sleep_for(std::chrono::milliseconds(500));
 
     // Main loop
-    Dashboard dashboard;
+    DashboardController controller;
     TradeEvent event;
     auto last_render = std::chrono::steady_clock::now();
 
@@ -522,50 +712,40 @@ int main(int argc, char* argv[]) {
 
         while (buffer->pop(event)) {
             got_event = true;
-            dashboard.add_event(event);
+            controller.process_event(event);
 
-            // Log to file
-            if (log_stream) {
+            // Stream mode
+            if (stream_mode) {
                 const char* type_str = "";
                 switch (event.type) {
                     case EventType::Fill: type_str = "FILL"; break;
                     case EventType::TargetHit: type_str = "TARGET"; break;
                     case EventType::StopLoss: type_str = "STOP"; break;
-                    case EventType::Signal: type_str = "SIGNAL"; break;
-                    default: type_str = "OTHER"; break;
+                    default: continue;
                 }
+                std::cout << type_str << " " << std::string(event.ticker, 3)
+                          << " " << event.price << "\n";
+            }
 
+            // Log
+            if (log_stream) {
                 log_stream << event.timestamp_ns << ","
-                           << type_str << ","
+                           << (int)event.type << ","
                            << std::string(event.ticker, 3) << ","
                            << (int)event.side << ","
                            << event.price << ","
-                           << event.price2 << ","
                            << event.quantity << ","
-                           << event.pnl_cents << ","
-                           << event.order_id << "\n";
-            }
-
-            // Stream mode: print immediately
-            if (stream_mode && !dashboard.recent_events.empty()) {
-                const auto& ev = dashboard.recent_events.front();
-
-                // Filter check
-                if (!filter_type.empty()) {
-                    if (ev.text.find(filter_type) == std::string::npos) continue;
-                }
-
-                std::cout << ev.color << ev.text << term::RESET << "\n";
+                           << event.pnl_cents << "\n";
             }
         }
 
-        // Dashboard mode: render periodically
+        // Dashboard mode: render at fixed interval
         if (!stream_mode) {
             auto now = std::chrono::steady_clock::now();
             auto since_render = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_render).count();
 
-            if (since_render >= 10 || got_event) {  // 100 FPS max refresh
-                dashboard.render();
+            if (since_render >= 100) {  // 10 FPS
+                controller.render();
                 last_render = now;
             }
         }
@@ -576,19 +756,19 @@ int main(int argc, char* argv[]) {
     }
 
     // Cleanup
-    dashboard.cleanup();
+    controller.cleanup();
 
     // Final summary
     std::cout << "\n" << term::BOLD << "Final Summary:" << term::RESET << "\n";
-    std::cout << "  Events: " << dashboard.total_events << "\n";
+    std::cout << "  Events: " << controller.total_events() << "\n";
     std::cout << "  P&L: ";
-    if (dashboard.realized_pnl >= 0) {
-        std::cout << term::GREEN << "+$" << std::fixed << std::setprecision(2) << dashboard.realized_pnl;
+    if (controller.realized_pnl() >= 0) {
+        std::cout << term::GREEN << "+$" << std::fixed << std::setprecision(2) << controller.realized_pnl();
     } else {
-        std::cout << term::RED << "-$" << std::fixed << std::setprecision(2) << std::abs(dashboard.realized_pnl);
+        std::cout << term::RED << "-$" << std::fixed << std::setprecision(2) << std::abs(controller.realized_pnl());
     }
     std::cout << term::RESET << "\n";
-    std::cout << "  Win Rate: " << dashboard.winning_trades << "W / " << dashboard.losing_trades << "L\n";
+    std::cout << "  Win Rate: " << controller.wins() << "W / " << controller.losses() << "L\n";
 
     delete buffer;
     return 0;

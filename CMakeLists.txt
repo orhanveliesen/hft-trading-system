@@ -122,3 +122,23 @@ target_link_libraries(optimize_strategies hft_core)
 # === Benchmarks ===
 add_executable(bench_orderbook benchmarks/bench_orderbook.cpp)
 target_link_libraries(bench_orderbook hft_core)
+
+add_executable(bench_lockfree benchmarks/bench_lockfree.cpp)
+target_link_libraries(bench_lockfree pthread)
+
+# === ImGui Dashboard ===
+set(IMGUI_DIR ${CMAKE_SOURCE_DIR}/external/imgui)
+add_executable(hft_dashboard
+    tools/hft_dashboard.cpp
+    ${IMGUI_DIR}/imgui.cpp
+    ${IMGUI_DIR}/imgui_draw.cpp
+    ${IMGUI_DIR}/imgui_tables.cpp
+    ${IMGUI_DIR}/imgui_widgets.cpp
+    ${IMGUI_DIR}/backends/imgui_impl_glfw.cpp
+    ${IMGUI_DIR}/backends/imgui_impl_opengl3.cpp
+)
+target_include_directories(hft_dashboard PRIVATE
+    ${IMGUI_DIR}
+    ${IMGUI_DIR}/backends
+)
+target_link_libraries(hft_dashboard glfw GL pthread rt)
