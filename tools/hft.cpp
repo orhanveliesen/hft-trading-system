@@ -1001,6 +1001,11 @@ int run(const CLIArgs& args) {
 
     ws.set_connect_callback([](bool c) {
         if (c) std::cout << "[OK] Connected to Binance\n\n";
+        else std::cout << "[DISCONNECTED] from Binance\n";
+    });
+
+    ws.set_error_callback([](const std::string& err) {
+        std::cerr << "[WS ERROR] " << err << "\n";
     });
 
     ws.set_book_ticker_callback([&](const BookTicker& bt) {

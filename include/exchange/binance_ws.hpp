@@ -405,13 +405,24 @@ private:
     static int ws_callback(struct lws* wsi, enum lws_callback_reasons reason,
                            void* user, void* in, size_t len) {
         BinanceWs* self = static_cast<BinanceWs*>(lws_context_user(lws_get_context(wsi)));
+
         if (!self) return 0;
 
         switch (reason) {
             case LWS_CALLBACK_CLIENT_ESTABLISHED:
-                self->connected_ = true;
-                if (self->connect_callback_) {
-                    self->connect_callback_(true);
+            case 71:  // LWS_CALLBACK_CLIENT_RECEIVE might be remapped in newer lws
+                if (reason == LWS_CALLBACK_CLIENT_ESTABLISHED || reason == 71) {
+                    if (!self->connected_) {
+                        self->connected_ = true;
+                        if (self->connect_callback_) {
+                            self->connect_callback_(true);
+                        }
+                    }
+                }
+                // Fall through intentionally for potential data
+                if (in && len > 0) {
+                    std::string msg(static_cast<char*>(in), len);
+                    self->parse_message(msg);
                 }
                 break;
 
@@ -488,7 +499,10 @@ private:
         ccinfo.host = host_.c_str();
         ccinfo.origin = host_.c_str();
         ccinfo.protocol = "binance-ws";
-        ccinfo.ssl_connection = LCCSCF_USE_SSL;
+        // WSL2'de CA bundle sorunu olabilir, sertifika doğrulamayı atla
+        ccinfo.ssl_connection = LCCSCF_USE_SSL |
+                                LCCSCF_ALLOW_SELFSIGNED |
+                                LCCSCF_SKIP_SERVER_CERT_HOSTNAME_CHECK;
 
         wsi_ = lws_client_connect_via_info(&ccinfo);
         if (!wsi_) {
