@@ -26,6 +26,7 @@
 #include <thread>
 #include <atomic>
 #include <csignal>
+#include <array>
 #include <map>
 #include <vector>
 #include <mutex>
@@ -36,6 +37,13 @@
 using namespace hft;
 using namespace hft::exchange;
 using namespace hft::strategy;
+
+// ============================================================================
+// Pre-allocation Constants (HFT: no new/delete on hot path)
+// ============================================================================
+
+constexpr size_t MAX_SYMBOLS = 64;              // Max symbols we can track
+constexpr size_t MAX_POSITIONS_PER_SYMBOL = 32; // Max open positions per symbol
 
 // ============================================================================
 // Global State
@@ -288,18 +296,84 @@ struct SymbolStrategy {
 };
 
 // OpenPosition: tracks a single buy with entry price and targets
+// Pre-allocated slot - uses 'active' flag instead of dynamic allocation
 struct OpenPosition {
-    double entry_price;      // What we paid
-    double quantity;         // How much we hold
-    double target_price;     // Sell limit price (entry + profit margin)
-    double stop_loss_price;  // Cut loss price (entry - max loss)
-    uint64_t timestamp;      // When we bought
+    double entry_price = 0;      // What we paid
+    double quantity = 0;         // How much we hold
+    double target_price = 0;     // Sell limit price (entry + profit margin)
+    double stop_loss_price = 0;  // Cut loss price (entry - max loss)
+    uint64_t timestamp = 0;      // When we bought
+    bool active = false;         // Is this slot in use?
+
+    void clear() {
+        entry_price = 0;
+        quantity = 0;
+        target_price = 0;
+        stop_loss_price = 0;
+        timestamp = 0;
+        active = false;
+    }
 };
 
-// Portfolio: tracks cash and positions with entry prices
+// SymbolPositions: pre-allocated position storage for one symbol
+// No std::vector, no dynamic allocation
+struct SymbolPositions {
+    std::array<OpenPosition, MAX_POSITIONS_PER_SYMBOL> slots;
+    size_t count = 0;  // Number of active positions
+
+    // Add a new position - O(1)
+    bool add(double entry, double qty, double target, double stop_loss) {
+        if (count >= MAX_POSITIONS_PER_SYMBOL) return false;
+
+        // Find first inactive slot
+        for (auto& slot : slots) {
+            if (!slot.active) {
+                slot.entry_price = entry;
+                slot.quantity = qty;
+                slot.target_price = target;
+                slot.stop_loss_price = stop_loss;
+                slot.timestamp = std::chrono::steady_clock::now().time_since_epoch().count();
+                slot.active = true;
+                count++;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // Get total quantity held
+    double total_quantity() const {
+        double total = 0;
+        for (const auto& slot : slots) {
+            if (slot.active) total += slot.quantity;
+        }
+        return total;
+    }
+
+    // Get average entry price
+    double avg_entry() const {
+        double total_cost = 0, total_qty = 0;
+        for (const auto& slot : slots) {
+            if (slot.active) {
+                total_cost += slot.entry_price * slot.quantity;
+                total_qty += slot.quantity;
+            }
+        }
+        return total_qty > 0 ? total_cost / total_qty : 0;
+    }
+
+    void clear_all() {
+        for (auto& slot : slots) slot.clear();
+        count = 0;
+    }
+};
+
+// Portfolio: tracks cash and positions with pre-allocated storage
+// No std::map, no std::vector, no new/delete
 struct Portfolio {
     double cash = 0;
-    std::map<Symbol, std::vector<OpenPosition>> positions;  // Multiple positions per symbol
+    std::array<SymbolPositions, MAX_SYMBOLS> positions;  // Pre-allocated!
+    std::array<bool, MAX_SYMBOLS> symbol_active;         // Track which symbols have positions
 
     // Config
     double profit_margin_pct = 0.002;   // 0.2% profit target
@@ -307,17 +381,15 @@ struct Portfolio {
 
     void init(double capital) {
         cash = capital;
-        positions.clear();
+        for (size_t i = 0; i < MAX_SYMBOLS; i++) {
+            positions[i].clear_all();
+            symbol_active[i] = false;
+        }
     }
 
     double get_holding(Symbol s) const {
-        auto it = positions.find(s);
-        if (it == positions.end()) return 0;
-        double total = 0;
-        for (const auto& pos : it->second) {
-            total += pos.quantity;
-        }
-        return total;
+        if (s >= MAX_SYMBOLS) return 0;
+        return positions[s].total_quantity();
     }
 
     bool can_buy(double price, double qty) const {
@@ -328,105 +400,114 @@ struct Portfolio {
         return get_holding(s) >= qty;
     }
 
-    // Buy and create position with target/stop-loss
+    // Buy and create position with target/stop-loss - O(1) no allocation
     void buy(Symbol s, double price, double qty) {
         if (qty <= 0 || price <= 0) return;
-        cash -= price * qty;
+        if (s >= MAX_SYMBOLS) return;
 
-        OpenPosition pos;
-        pos.entry_price = price;
-        pos.quantity = qty;
-        pos.target_price = price * (1.0 + profit_margin_pct);
-        pos.stop_loss_price = price * (1.0 - stop_loss_pct);
-        pos.timestamp = std::chrono::steady_clock::now().time_since_epoch().count();
+        double target = price * (1.0 + profit_margin_pct);
+        double stop_loss = price * (1.0 - stop_loss_pct);
 
-        positions[s].push_back(pos);
+        if (positions[s].add(price, qty, target, stop_loss)) {
+            cash -= price * qty;
+            symbol_active[s] = true;
+        }
     }
 
-    // Sell specific quantity, FIFO order
+    // Sell specific quantity, FIFO order - O(n) where n = positions for symbol
     void sell(Symbol s, double price, double qty) {
         if (qty <= 0 || price <= 0) return;
-
-        auto it = positions.find(s);
-        if (it == positions.end()) return;
+        if (s >= MAX_SYMBOLS) return;
 
         double remaining = qty;
-        auto& pos_list = it->second;
+        auto& sym_pos = positions[s];
 
-        while (remaining > 0 && !pos_list.empty()) {
-            auto& pos = pos_list.front();
-            double sell_qty = std::min(remaining, pos.quantity);
+        for (auto& slot : sym_pos.slots) {
+            if (!slot.active || remaining <= 0) continue;
 
+            double sell_qty = std::min(remaining, slot.quantity);
             cash += price * sell_qty;
-            pos.quantity -= sell_qty;
+            slot.quantity -= sell_qty;
             remaining -= sell_qty;
 
-            if (pos.quantity <= 0.0001) {
-                pos_list.erase(pos_list.begin());
+            if (slot.quantity <= 0.0001) {
+                slot.clear();
+                sym_pos.count--;
             }
         }
 
-        if (pos_list.empty()) {
-            positions.erase(s);
+        if (sym_pos.count == 0) {
+            symbol_active[s] = false;
         }
-    }
-
-    // Check if any position hit target (price went UP)
-    std::vector<std::pair<Symbol, double>> check_targets(const std::map<Symbol, double>& prices) {
-        std::vector<std::pair<Symbol, double>> to_sell;  // symbol, qty
-
-        for (auto& [sym, pos_list] : positions) {
-            auto price_it = prices.find(sym);
-            if (price_it == prices.end()) continue;
-            double current_price = price_it->second;
-
-            for (auto& pos : pos_list) {
-                if (current_price >= pos.target_price) {
-                    to_sell.push_back({sym, pos.quantity});
-                }
-            }
-        }
-        return to_sell;
-    }
-
-    // Check if any position hit stop-loss (price went DOWN)
-    std::vector<std::pair<Symbol, double>> check_stop_losses(const std::map<Symbol, double>& prices) {
-        std::vector<std::pair<Symbol, double>> to_sell;
-
-        for (auto& [sym, pos_list] : positions) {
-            auto price_it = prices.find(sym);
-            if (price_it == prices.end()) continue;
-            double current_price = price_it->second;
-
-            for (auto& pos : pos_list) {
-                if (current_price <= pos.stop_loss_price) {
-                    to_sell.push_back({sym, pos.quantity});
-                }
-            }
-        }
-        return to_sell;
     }
 
     // Get average entry price for a symbol
     double avg_entry_price(Symbol s) const {
-        auto it = positions.find(s);
-        if (it == positions.end()) return 0;
-
-        double total_cost = 0, total_qty = 0;
-        for (const auto& pos : it->second) {
-            total_cost += pos.entry_price * pos.quantity;
-            total_qty += pos.quantity;
-        }
-        return total_qty > 0 ? total_cost / total_qty : 0;
+        if (s >= MAX_SYMBOLS) return 0;
+        return positions[s].avg_entry();
     }
 
+    // Callback-based target/stop checking - NO allocation!
+    // Returns number of positions closed
+    template<typename OnTargetHit, typename OnStopHit>
+    int check_and_close(Symbol s, double current_price, OnTargetHit on_target, OnStopHit on_stop) {
+        if (s >= MAX_SYMBOLS) return 0;
+
+        int closed = 0;
+        auto& sym_pos = positions[s];
+
+        for (auto& slot : sym_pos.slots) {
+            if (!slot.active) continue;
+
+            // TARGET HIT: price went UP to our target
+            if (current_price >= slot.target_price) {
+                double qty = slot.quantity;
+                cash += current_price * qty;
+                on_target(qty, slot.entry_price, current_price);
+                slot.clear();
+                sym_pos.count--;
+                closed++;
+                continue;
+            }
+
+            // STOP-LOSS HIT: price went DOWN to our stop
+            if (current_price <= slot.stop_loss_price) {
+                double qty = slot.quantity;
+                cash += current_price * qty;
+                on_stop(qty, slot.entry_price, current_price);
+                slot.clear();
+                sym_pos.count--;
+                closed++;
+            }
+        }
+
+        if (sym_pos.count == 0) {
+            symbol_active[s] = false;
+        }
+
+        return closed;
+    }
+
+    // Calculate total portfolio value (cash + holdings at current prices)
+    // prices array: prices[symbol_id] = current price
+    double total_value(const std::array<double, MAX_SYMBOLS>& prices) const {
+        double value = cash;
+        for (size_t s = 0; s < MAX_SYMBOLS; s++) {
+            if (symbol_active[s] && prices[s] > 0) {
+                value += positions[s].total_quantity() * prices[s];
+            }
+        }
+        return value;
+    }
+
+    // Overload for std::map (backwards compatibility, slightly slower)
     double total_value(const std::map<Symbol, double>& prices) const {
         double value = cash;
-        for (auto& [s, pos_list] : positions) {
-            auto it = prices.find(s);
-            if (it != prices.end()) {
-                for (const auto& pos : pos_list) {
-                    value += pos.quantity * it->second;
+        for (size_t s = 0; s < MAX_SYMBOLS; s++) {
+            if (symbol_active[s]) {
+                auto it = prices.find(static_cast<Symbol>(s));
+                if (it != prices.end()) {
+                    value += positions[s].total_quantity() * it->second;
                 }
             }
         }
@@ -435,8 +516,16 @@ struct Portfolio {
 
     int position_count() const {
         int count = 0;
-        for (auto& [s, pos_list] : positions) {
-            if (!pos_list.empty()) count++;
+        for (size_t s = 0; s < MAX_SYMBOLS; s++) {
+            if (symbol_active[s] && positions[s].count > 0) count++;
+        }
+        return count;
+    }
+
+    int total_position_slots() const {
+        int count = 0;
+        for (size_t s = 0; s < MAX_SYMBOLS; s++) {
+            count += positions[s].count;
         }
         return count;
     }
@@ -528,48 +617,33 @@ public:
             check_signal(id, world, strat, bid, ask);
         }
 
-        // Check target/stop-loss for this symbol
-        double bid_usd = static_cast<double>(bid) / risk::PRICE_SCALE;
-        auto pos_it = portfolio_.positions.find(id);
-        if (pos_it != portfolio_.positions.end()) {
-            auto& positions = pos_it->second;
-            for (auto it = positions.begin(); it != positions.end(); ) {
-                auto& pos = *it;
+        // Check target/stop-loss for this symbol - O(n), no allocation
+        if (id < MAX_SYMBOLS && portfolio_.symbol_active[id]) {
+            double bid_usd = static_cast<double>(bid) / risk::PRICE_SCALE;
+            const std::string& ticker = strat->ticker;
 
-                // TARGET HIT: price went UP to our target
-                if (bid_usd >= pos.target_price) {
-                    double profit = (bid_usd - pos.entry_price) * pos.quantity;
-                    portfolio_.cash += bid_usd * pos.quantity;
+            portfolio_.check_and_close(id, bid_usd,
+                // On target hit (profit)
+                [&](double qty, double entry, double exit) {
                     if (args_.verbose) {
-                        std::cout << "[TARGET] " << strat->ticker << " SELL " << pos.quantity
-                                  << " @ $" << std::fixed << std::setprecision(2) << bid_usd
-                                  << " (entry=$" << pos.entry_price
+                        double profit = (exit - entry) * qty;
+                        std::cout << "[TARGET] " << ticker << " SELL " << qty
+                                  << " @ $" << std::fixed << std::setprecision(2) << exit
+                                  << " (entry=$" << entry
                                   << ", profit=$" << std::setprecision(2) << profit << ")\n";
                     }
-                    it = positions.erase(it);
-                    continue;
-                }
-
-                // STOP-LOSS HIT: price went DOWN to our stop
-                if (bid_usd <= pos.stop_loss_price) {
-                    double loss = (pos.entry_price - bid_usd) * pos.quantity;
-                    portfolio_.cash += bid_usd * pos.quantity;
+                },
+                // On stop-loss hit (cut loss)
+                [&](double qty, double entry, double exit) {
                     if (args_.verbose) {
-                        std::cout << "[STOP] " << strat->ticker << " SELL " << pos.quantity
-                                  << " @ $" << std::fixed << std::setprecision(2) << bid_usd
-                                  << " (entry=$" << pos.entry_price
+                        double loss = (entry - exit) * qty;
+                        std::cout << "[STOP] " << ticker << " SELL " << qty
+                                  << " @ $" << std::fixed << std::setprecision(2) << exit
+                                  << " (entry=$" << entry
                                   << ", loss=$" << std::setprecision(2) << loss << ")\n";
                     }
-                    it = positions.erase(it);
-                    continue;
                 }
-
-                ++it;
-            }
-            // Clean up empty position list
-            if (positions.empty()) {
-                portfolio_.positions.erase(pos_it);
-            }
+            );
         }
     }
 
@@ -610,13 +684,17 @@ public:
         });
 
         s.holdings_value = 0;
-        for (auto& [sym, pos_list] : portfolio_.positions) {
-            auto it = prices.find(sym);
-            if (it != prices.end()) {
-                for (const auto& pos : pos_list) {
-                    s.holdings_value += pos.quantity * it->second;
-                }
-                if (!pos_list.empty()) s.positions++;
+        s.positions = 0;
+        for (size_t sym = 0; sym < MAX_SYMBOLS; sym++) {
+            if (!portfolio_.symbol_active[sym]) continue;
+
+            auto it = prices.find(static_cast<Symbol>(sym));
+            if (it == prices.end()) continue;
+
+            double sym_qty = portfolio_.positions[sym].total_quantity();
+            if (sym_qty > 0) {
+                s.holdings_value += sym_qty * it->second;
+                s.positions++;
             }
         }
 
@@ -746,42 +824,41 @@ private:
         world->on_our_fill(id, qty);
     }
 
-    // Check and execute target sells (price went up to our target)
+    // Check and execute target sells - NO ALLOCATION, inline callbacks
     void check_targets_and_stops(const std::map<Symbol, double>& prices) {
-        // Check take-profit targets
-        auto targets = portfolio_.check_targets(prices);
-        for (auto& [sym, qty] : targets) {
-            auto price_it = prices.find(sym);
-            if (price_it == prices.end()) continue;
+        // Iterate all active symbols, check targets/stops inline
+        for (const auto& [sym, price] : prices) {
+            if (sym >= MAX_SYMBOLS) continue;
+            if (!portfolio_.symbol_active[sym]) continue;
 
-            double sell_price = price_it->second;
-            portfolio_.sell(sym, sell_price, qty);
-
+            // Get ticker for logging (only if verbose)
+            std::string ticker;
             if (args_.verbose) {
                 auto it = strategies_.find(sym);
-                std::string ticker = it != strategies_.end() ? it->second->ticker : "???";
-                std::cout << "[TARGET HIT] " << ticker << " SELL " << qty
-                          << " @ $" << std::fixed << std::setprecision(2) << sell_price
-                          << " (PROFIT!)\n";
+                ticker = it != strategies_.end() ? it->second->ticker : "???";
             }
-        }
 
-        // Check stop-losses
-        auto stops = portfolio_.check_stop_losses(prices);
-        for (auto& [sym, qty] : stops) {
-            auto price_it = prices.find(sym);
-            if (price_it == prices.end()) continue;
-
-            double sell_price = price_it->second;
-            portfolio_.sell(sym, sell_price, qty);
-
-            if (args_.verbose) {
-                auto it = strategies_.find(sym);
-                std::string ticker = it != strategies_.end() ? it->second->ticker : "???";
-                std::cout << "[STOP LOSS] " << ticker << " SELL " << qty
-                          << " @ $" << std::fixed << std::setprecision(2) << sell_price
-                          << " (CUT LOSS)\n";
-            }
+            // Check and close positions - callbacks executed inline, no allocation
+            portfolio_.check_and_close(sym, price,
+                // On target hit (profit)
+                [&](double qty, double entry, double exit) {
+                    if (args_.verbose) {
+                        double profit = (exit - entry) * qty;
+                        std::cout << "[TARGET HIT] " << ticker << " SELL " << qty
+                                  << " @ $" << std::fixed << std::setprecision(2) << exit
+                                  << " (entry=$" << entry << ", profit=$" << profit << ")\n";
+                    }
+                },
+                // On stop-loss hit (cut loss)
+                [&](double qty, double entry, double exit) {
+                    if (args_.verbose) {
+                        double loss = (entry - exit) * qty;
+                        std::cout << "[STOP LOSS] " << ticker << " SELL " << qty
+                                  << " @ $" << std::fixed << std::setprecision(2) << exit
+                                  << " (entry=$" << entry << ", loss=$" << loss << ")\n";
+                    }
+                }
+            );
         }
     }
 
