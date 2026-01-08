@@ -12,6 +12,18 @@ set(CMAKE_CXX_FLAGS_RELEASE "-O3 -march=native -DNDEBUG")
 # Include directories
 include_directories(${CMAKE_SOURCE_DIR}/include)
 
+# === Dependencies ===
+# libwebsockets - version 4.3+ has different callback enum values
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(LWS REQUIRED libwebsockets>=4.0)
+message(STATUS "libwebsockets version: ${LWS_VERSION}")
+
+# Define LWS version for compile-time checks
+if(LWS_VERSION VERSION_GREATER_EQUAL "4.3")
+    add_compile_definitions(LWS_VERSION_4_3_PLUS=1)
+    message(STATUS "Using lws 4.3+ callback enum compatibility")
+endif()
+
 # === Library ===
 add_library(hft_core
     src/orderbook/orderbook.cpp

@@ -402,6 +402,13 @@ private:
     }
 
     // WebSocket callback (static, called by libwebsockets)
+    // NOTE: lws 4.3+ remapped LWS_CALLBACK_CLIENT_RECEIVE from 8 to 71
+#ifdef LWS_VERSION_4_3_PLUS
+    static constexpr int LWS_CLIENT_RECEIVE_COMPAT = 71;
+#else
+    static constexpr int LWS_CLIENT_RECEIVE_COMPAT = LWS_CALLBACK_CLIENT_RECEIVE;
+#endif
+
     static int ws_callback(struct lws* wsi, enum lws_callback_reasons reason,
                            void* user, void* in, size_t len) {
         BinanceWs* self = static_cast<BinanceWs*>(lws_context_user(lws_get_context(wsi)));
@@ -410,23 +417,16 @@ private:
 
         switch (reason) {
             case LWS_CALLBACK_CLIENT_ESTABLISHED:
-            case 71:  // LWS_CALLBACK_CLIENT_RECEIVE might be remapped in newer lws
-                if (reason == LWS_CALLBACK_CLIENT_ESTABLISHED || reason == 71) {
-                    if (!self->connected_) {
-                        self->connected_ = true;
-                        if (self->connect_callback_) {
-                            self->connect_callback_(true);
-                        }
-                    }
-                }
-                // Fall through intentionally for potential data
-                if (in && len > 0) {
-                    std::string msg(static_cast<char*>(in), len);
-                    self->parse_message(msg);
+                self->connected_ = true;
+                if (self->connect_callback_) {
+                    self->connect_callback_(true);
                 }
                 break;
 
             case LWS_CALLBACK_CLIENT_RECEIVE:
+#ifdef LWS_VERSION_4_3_PLUS
+            case 71:  // LWS_CALLBACK_CLIENT_RECEIVE in lws 4.3+
+#endif
                 if (in && len > 0) {
                     std::string msg(static_cast<char*>(in), len);
                     self->parse_message(msg);
