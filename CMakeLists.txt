@@ -102,10 +102,13 @@ add_test(NAME PaperPortfolioTests COMMAND test_paper_portfolio)
 
 # === Tools ===
 add_executable(hft tools/hft.cpp)
-target_link_libraries(hft hft_core websockets pthread)
+target_link_libraries(hft hft_core websockets pthread rt)
 
 add_executable(hft_control tools/hft_control.cpp)
 target_link_libraries(hft_control pthread rt)
+
+add_executable(hft_observer tools/hft_observer.cpp)
+target_link_libraries(hft_observer pthread rt)
 
 add_executable(fetch_klines tools/fetch_klines.cpp)
 target_link_libraries(fetch_klines curl)

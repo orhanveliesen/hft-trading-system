@@ -20,6 +20,8 @@
 #include "../include/strategy/technical_indicators.hpp"
 #include "../include/symbol_config.hpp"
 #include "../include/risk/enhanced_risk_manager.hpp"
+#include "../include/ipc/trade_event.hpp"
+#include "../include/ipc/shared_ring_buffer.hpp"
 #include <iostream>
 #include <iomanip>
 #include <chrono>
@@ -55,6 +57,83 @@ void signal_handler(int) {
     std::cout << "\n\n[SHUTDOWN] Stopping...\n";
     g_running = false;
 }
+
+// ============================================================================
+// Event Publisher (lock-free IPC to observer)
+// ============================================================================
+
+using namespace hft::ipc;
+
+/**
+ * EventPublisher - Publishes trading events to shared memory
+ *
+ * Used by HFT engine to send events to observer process.
+ * Lock-free, ~5ns per publish, no allocation.
+ */
+class EventPublisher {
+public:
+    explicit EventPublisher(bool enabled = true) : enabled_(enabled) {
+        if (enabled_) {
+            try {
+                buffer_ = std::make_unique<SharedRingBuffer<TradeEvent>>("/hft_events", true);
+                std::cout << "[IPC] Event publisher initialized (buffer: "
+                          << buffer_->capacity() << " events)\n";
+            } catch (const std::exception& e) {
+                std::cerr << "[IPC] Warning: Could not create shared memory: " << e.what() << "\n";
+                enabled_ = false;
+            }
+        }
+    }
+
+    // Publish fill event
+    void fill(uint32_t sym, const char* ticker, uint8_t side, double price, double qty, uint32_t oid) {
+        if (!enabled_) return;
+        auto ts = now_ns();
+        buffer_->push(TradeEvent::fill(seq_++, ts, sym, ticker, side, price, qty, oid));
+    }
+
+    // Publish target hit event
+    void target_hit(uint32_t sym, const char* ticker, double entry, double exit, double qty) {
+        if (!enabled_) return;
+        auto ts = now_ns();
+        int64_t pnl_cents = static_cast<int64_t>((exit - entry) * qty * 100);
+        buffer_->push(TradeEvent::target_hit(seq_++, ts, sym, ticker, entry, exit, qty, pnl_cents));
+    }
+
+    // Publish stop loss event
+    void stop_loss(uint32_t sym, const char* ticker, double entry, double exit, double qty) {
+        if (!enabled_) return;
+        auto ts = now_ns();
+        int64_t pnl_cents = static_cast<int64_t>((exit - entry) * qty * 100);  // Negative for loss
+        buffer_->push(TradeEvent::stop_loss(seq_++, ts, sym, ticker, entry, exit, qty, pnl_cents));
+    }
+
+    // Publish signal event
+    void signal(uint32_t sym, const char* ticker, uint8_t side, uint8_t strength, double price) {
+        if (!enabled_) return;
+        auto ts = now_ns();
+        buffer_->push(TradeEvent::signal(seq_++, ts, sym, ticker, side, strength, price));
+    }
+
+    // Publish regime change event
+    void regime_change(uint32_t sym, const char* ticker, uint8_t new_regime) {
+        if (!enabled_) return;
+        auto ts = now_ns();
+        buffer_->push(TradeEvent::regime_change(seq_++, ts, sym, ticker, new_regime));
+    }
+
+    bool enabled() const { return enabled_; }
+    uint32_t sequence() const { return seq_; }
+
+private:
+    bool enabled_ = false;
+    std::unique_ptr<SharedRingBuffer<TradeEvent>> buffer_;
+    std::atomic<uint32_t> seq_{0};
+
+    static uint64_t now_ns() {
+        return std::chrono::steady_clock::now().time_since_epoch().count();
+    }
+};
 
 // ============================================================================
 // CLI Arguments
@@ -543,6 +622,7 @@ public:
         , sender_()
         , engine_(sender_)
         , total_ticks_(0)
+        , publisher_(args.paper_mode)  // Only publish events in paper mode
     {
         portfolio_.init(args.capital);
 
@@ -625,6 +705,9 @@ public:
             portfolio_.check_and_close(id, bid_usd,
                 // On target hit (profit)
                 [&](double qty, double entry, double exit) {
+                    // Publish to observer (~5ns)
+                    publisher_.target_hit(id, ticker.c_str(), entry, exit, qty);
+
                     if (args_.verbose) {
                         double profit = (exit - entry) * qty;
                         std::cout << "[TARGET] " << ticker << " SELL " << qty
@@ -635,6 +718,9 @@ public:
                 },
                 // On stop-loss hit (cut loss)
                 [&](double qty, double entry, double exit) {
+                    // Publish to observer (~5ns)
+                    publisher_.stop_loss(id, ticker.c_str(), entry, exit, qty);
+
                     if (args_.verbose) {
                         double loss = (entry - exit) * qty;
                         std::cout << "[STOP] " << ticker << " SELL " << qty
@@ -788,6 +874,7 @@ private:
     std::mutex mutex_;
     std::vector<LogEntry> logs_;
     Portfolio portfolio_;
+    EventPublisher publisher_;  // Lock-free event publishing to observer
 
     void add_log(const std::string& ticker, MarketRegime from, MarketRegime to) {
         uint64_t now = static_cast<uint64_t>(std::chrono::steady_clock::now().time_since_epoch().count());
@@ -811,6 +898,10 @@ private:
         } else {
             portfolio_.sell(symbol, price_usd, qty_d);
         }
+
+        // Publish fill event to observer (~5ns, lock-free)
+        publisher_.fill(symbol, world->ticker().c_str(),
+                       side == Side::Buy ? 0 : 1, price_usd, qty_d, id);
 
         // Debug: log fill details
         if (args_.verbose) {
