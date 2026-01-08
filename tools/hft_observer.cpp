@@ -1,29 +1,99 @@
 /**
- * HFT Observer - Real-time event monitoring for HFT engine
+ * HFT Observer - Real-time Dashboard for HFT Engine
  *
- * Reads events from shared memory ring buffer (published by hft engine)
- * and displays/logs them without impacting the hot path.
+ * Beautiful TUI dashboard showing:
+ * - Live event stream
+ * - P&L tracking
+ * - Position summary
+ * - Statistics
  *
  * Usage:
- *   hft_observer              # Real-time event stream
- *   hft_observer --stats      # Show statistics only
- *   hft_observer --log FILE   # Log events to file
- *   hft_observer -h           # Help
+ *   hft_observer              # Dashboard mode (default)
+ *   hft_observer --stream     # Event stream only
+ *   hft_observer --log FILE   # Log to file
  */
 
 #include "../include/ipc/trade_event.hpp"
 #include "../include/ipc/shared_ring_buffer.hpp"
 #include <iostream>
 #include <iomanip>
+#include <sstream>
 #include <fstream>
 #include <chrono>
 #include <thread>
 #include <csignal>
 #include <atomic>
 #include <cstring>
+#include <deque>
 #include <map>
+#include <cmath>
 
 using namespace hft::ipc;
+
+// ============================================================================
+// ANSI Terminal Colors & Control
+// ============================================================================
+
+namespace term {
+    // Colors
+    constexpr const char* RESET     = "\033[0m";
+    constexpr const char* BOLD      = "\033[1m";
+    constexpr const char* DIM       = "\033[2m";
+
+    // Foreground
+    constexpr const char* RED       = "\033[31m";
+    constexpr const char* GREEN     = "\033[32m";
+    constexpr const char* YELLOW    = "\033[33m";
+    constexpr const char* BLUE      = "\033[34m";
+    constexpr const char* MAGENTA   = "\033[35m";
+    constexpr const char* CYAN      = "\033[36m";
+    constexpr const char* WHITE     = "\033[37m";
+
+    // Bright foreground
+    constexpr const char* BRED      = "\033[91m";
+    constexpr const char* BGREEN    = "\033[92m";
+    constexpr const char* BYELLOW   = "\033[93m";
+    constexpr const char* BBLUE     = "\033[94m";
+    constexpr const char* BCYAN     = "\033[96m";
+    constexpr const char* BWHITE    = "\033[97m";
+
+    // Background
+    constexpr const char* BG_BLACK  = "\033[40m";
+    constexpr const char* BG_RED    = "\033[41m";
+    constexpr const char* BG_GREEN  = "\033[42m";
+    constexpr const char* BG_BLUE   = "\033[44m";
+
+    // Control
+    constexpr const char* CLEAR     = "\033[2J";
+    constexpr const char* HOME      = "\033[H";
+    constexpr const char* HIDE_CURSOR = "\033[?25l";
+    constexpr const char* SHOW_CURSOR = "\033[?25h";
+
+    void clear_screen() { std::cout << CLEAR << HOME; }
+    void move_to(int row, int col) { std::cout << "\033[" << row << ";" << col << "H"; }
+}
+
+// ============================================================================
+// Box Drawing Characters (Unicode)
+// ============================================================================
+
+namespace box {
+    constexpr const char* TL = "╔";  // Top left
+    constexpr const char* TR = "╗";  // Top right
+    constexpr const char* BL = "╚";  // Bottom left
+    constexpr const char* BR = "╝";  // Bottom right
+    constexpr const char* H  = "═";  // Horizontal
+    constexpr const char* V  = "║";  // Vertical
+    constexpr const char* LT = "╠";  // Left T
+    constexpr const char* RT = "╣";  // Right T
+    constexpr const char* TT = "╦";  // Top T
+    constexpr const char* BT = "╩";  // Bottom T
+    constexpr const char* X  = "╬";  // Cross
+
+    // Single line
+    constexpr const char* HL = "─";  // Horizontal light
+    constexpr const char* VL = "│";  // Vertical light
+}
 
 // ============================================================================
 // Global State
@@ -32,356 +102,472 @@ using namespace hft::ipc;
 std::atomic<bool> g_running{true};
 
 void signal_handler(int) {
-    std::cout << "\n[SHUTDOWN] Stopping observer...\n";
     g_running = false;
 }
 
 // ============================================================================
-// Statistics
+// Event Display Entry
 // ============================================================================
 
-struct ObserverStats {
-    uint64_t total_events = 0;
-    uint64_t quotes = 0;
-    uint64_t signals = 0;
-    uint64_t orders = 0;
-    uint64_t fills = 0;
-    uint64_t targets = 0;
-    uint64_t stops = 0;
-    uint64_t regime_changes = 0;
-    uint64_t errors = 0;
-
-    int64_t total_pnl_cents = 0;
-    int64_t realized_profit = 0;
-    int64_t realized_loss = 0;
-
-    std::map<uint32_t, std::string> symbols;  // symbol_id -> ticker
-
-    void record(const TradeEvent& e) {
-        total_events++;
-
-        switch (e.type) {
-            case EventType::Quote:
-                quotes++;
-                break;
-            case EventType::Signal:
-                signals++;
-                break;
-            case EventType::OrderSent:
-                orders++;
-                break;
-            case EventType::Fill:
-                fills++;
-                break;
-            case EventType::TargetHit:
-                targets++;
-                total_pnl_cents += e.pnl_cents;
-                realized_profit += e.pnl_cents;
-                break;
-            case EventType::StopLoss:
-                stops++;
-                total_pnl_cents += e.pnl_cents;
-                realized_loss += std::abs(e.pnl_cents);
-                break;
-            case EventType::RegimeChange:
-                regime_changes++;
-                break;
-            case EventType::Error:
-                errors++;
-                break;
-            default:
-                break;
-        }
-
-        // Track symbols
-        if (e.symbol_id > 0 && e.ticker[0] != '\0') {
-            symbols[e.symbol_id] = std::string(e.ticker, 3);
-        }
-    }
-
-    void print() const {
-        std::cout << "\n";
-        std::cout << "================================================================\n";
-        std::cout << "  OBSERVER STATISTICS\n";
-        std::cout << "================================================================\n";
-        std::cout << "  Total Events:    " << total_events << "\n";
-        std::cout << "  --------------------------------\n";
-        std::cout << "  Quotes:          " << quotes << "\n";
-        std::cout << "  Signals:         " << signals << "\n";
-        std::cout << "  Orders:          " << orders << "\n";
-        std::cout << "  Fills:           " << fills << "\n";
-        std::cout << "  Targets Hit:     " << targets << "\n";
-        std::cout << "  Stop Losses:     " << stops << "\n";
-        std::cout << "  Regime Changes:  " << regime_changes << "\n";
-        std::cout << "  Errors:          " << errors << "\n";
-        std::cout << "  --------------------------------\n";
-        std::cout << "  Realized P&L:    $" << std::fixed << std::setprecision(2)
-                  << (total_pnl_cents / 100.0) << "\n";
-        std::cout << "    Profit:        $" << (realized_profit / 100.0) << "\n";
-        std::cout << "    Loss:          $" << (realized_loss / 100.0) << "\n";
-        std::cout << "  Symbols Seen:    " << symbols.size() << "\n";
-        std::cout << "================================================================\n";
-    }
+struct DisplayEvent {
+    uint64_t timestamp;
+    std::string text;
+    std::string color;
 };
 
 // ============================================================================
-// Event Formatting
+// Dashboard State
 // ============================================================================
 
-const char* event_type_str(EventType type) {
-    switch (type) {
-        case EventType::None:         return "NONE";
-        case EventType::Quote:        return "QUOTE";
-        case EventType::Signal:       return "SIGNAL";
-        case EventType::OrderSent:    return "ORDER";
-        case EventType::Fill:         return "FILL";
-        case EventType::TargetHit:    return "TARGET";
-        case EventType::StopLoss:     return "STOP";
-        case EventType::RegimeChange: return "REGIME";
-        case EventType::Error:        return "ERROR";
-        default:                      return "???";
+class Dashboard {
+public:
+    static constexpr int WIDTH = 80;
+    static constexpr int EVENT_PANEL_HEIGHT = 15;
+    static constexpr int MAX_EVENTS = 50;
+
+    // Statistics
+    uint64_t total_events = 0;
+    uint64_t fills = 0;
+    uint64_t targets = 0;
+    uint64_t stops = 0;
+
+    // P&L
+    double realized_pnl = 0;
+    double total_profit = 0;
+    double total_loss = 0;
+    int winning_trades = 0;
+    int losing_trades = 0;
+
+    // Positions (symbol -> quantity, value)
+    std::map<std::string, std::pair<double, double>> positions;
+
+    // Recent events
+    std::deque<DisplayEvent> recent_events;
+
+    // Timing
+    std::chrono::steady_clock::time_point start_time;
+    uint64_t first_event_ts = 0;
+
+    Dashboard() : start_time(std::chrono::steady_clock::now()) {}
+
+    void add_event(const TradeEvent& e) {
+        total_events++;
+
+        if (first_event_ts == 0) first_event_ts = e.timestamp_ns;
+
+        DisplayEvent de;
+        de.timestamp = e.timestamp_ns;
+
+        std::ostringstream ss;
+        double rel_sec = (e.timestamp_ns - first_event_ts) / 1e9;
+
+        switch (e.type) {
+            case EventType::Fill: {
+                fills++;
+                std::string ticker(e.ticker, 3);
+                std::string side = e.side == 0 ? "BUY " : "SELL";
+                ss << std::fixed << std::setprecision(1) << std::setw(6) << rel_sec << "s  "
+                   << (e.side == 0 ? "BUY  " : "SELL ")
+                   << std::setw(4) << ticker << "  "
+                   << std::setw(5) << e.quantity << " @ $"
+                   << std::setprecision(2) << e.price;
+                de.color = (e.side == 0) ? term::BGREEN : term::BYELLOW;
+
+                // Update position tracking
+                if (e.side == 0) {  // Buy
+                    positions[ticker].first += e.quantity;
+                    positions[ticker].second += e.quantity * e.price;
+                }
+                break;
+            }
+
+            case EventType::TargetHit: {
+                targets++;
+                winning_trades++;
+                double pnl = e.pnl_cents / 100.0;
+                realized_pnl += pnl;
+                total_profit += pnl;
+
+                std::string ticker(e.ticker, 3);
+                ss << std::fixed << std::setprecision(1) << std::setw(6) << rel_sec << "s  "
+                   << "TARGET " << std::setw(4) << ticker << "  +"
+                   << std::setprecision(2) << "$" << pnl
+                   << "  (entry:$" << e.price2 << " exit:$" << e.price << ")";
+                de.color = term::BGREEN;
+
+                // Update position
+                positions[ticker].first -= e.quantity;
+                positions[ticker].second -= e.quantity * e.price2;
+                break;
+            }
+
+            case EventType::StopLoss: {
+                stops++;
+                losing_trades++;
+                double pnl = e.pnl_cents / 100.0;
+                realized_pnl += pnl;
+                total_loss += std::abs(pnl);
+
+                std::string ticker(e.ticker, 3);
+                ss << std::fixed << std::setprecision(1) << std::setw(6) << rel_sec << "s  "
+                   << "STOP   " << std::setw(4) << ticker << "  "
+                   << std::setprecision(2) << "$" << pnl
+                   << "  (entry:$" << e.price2 << " exit:$" << e.price << ")";
+                de.color = term::BRED;
+
+                // Update position
+                positions[ticker].first -= e.quantity;
+                positions[ticker].second -= e.quantity * e.price2;
+                break;
+            }
+
+            case EventType::Signal: {
+                std::string ticker(e.ticker, 3);
+                ss << std::fixed << std::setprecision(1) << std::setw(6) << rel_sec << "s  "
+                   << "SIGNAL " << std::setw(4) << ticker << "  "
+                   << (e.side == 0 ? "BUY" : "SELL")
+                   << " strength:" << (int)e.signal_strength;
+                de.color = term::BCYAN;
+                break;
+            }
+
+            default:
+                return;  // Don't display other events
+        }
+
+        de.text = ss.str();
+        recent_events.push_front(de);
+
+        if (recent_events.size() > MAX_EVENTS) {
+            recent_events.pop_back();
+        }
     }
-}
 
-const char* side_str(uint8_t side) {
-    return side == 0 ? "BUY" : "SELL";
-}
+    void render() {
+        std::cout << term::CLEAR << term::HOME << term::HIDE_CURSOR;
 
-const char* regime_str(uint8_t regime) {
-    switch (regime) {
-        case 0: return "Unknown";
-        case 1: return "TrendUp";
-        case 2: return "TrendDn";
-        case 3: return "Ranging";
-        case 4: return "HighVol";
-        case 5: return "LowVol";
-        default: return "???";
+        auto now = std::chrono::steady_clock::now();
+        auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - start_time).count();
+        int hours = elapsed / 3600;
+        int mins = (elapsed % 3600) / 60;
+        int secs = elapsed % 60;
+
+        // ═══════════════════════════════════════════════════════════════════
+        // Header
+        // ═══════════════════════════════════════════════════════════════════
+        std::cout << term::BOLD << term::BCYAN;
+        std::cout << box::TL;
+        for (int i = 0; i < WIDTH - 2; i++) std::cout << box::H;
+        std::cout << box::TR << "\n";
+
+        std::cout << box::V << term::BWHITE << "  HFT OBSERVER ";
+        std::cout << term::DIM << "- Real-time Trading Monitor";
+        std::cout << std::string(WIDTH - 44, ' ');
+        std::cout << term::RESET << term::BCYAN << box::V << "\n";
+
+        std::cout << box::LT;
+        for (int i = 0; i < WIDTH - 2; i++) std::cout << box::H;
+        std::cout << box::RT << "\n";
+        std::cout << term::RESET;
+
+        // ═══════════════════════════════════════════════════════════════════
+        // Stats Row
+        // ═══════════════════════════════════════════════════════════════════
+        std::cout << term::BCYAN << box::V << term::RESET;
+        std::cout << "  Runtime: " << term::BWHITE
+                  << std::setfill('0') << std::setw(2) << hours << ":"
+                  << std::setw(2) << mins << ":"
+                  << std::setw(2) << secs << term::RESET;
+        std::cout << "  " << term::DIM << "|" << term::RESET;
+        std::cout << "  Events: " << term::BWHITE << total_events << term::RESET;
+        std::cout << "  " << term::DIM << "|" << term::RESET;
+        double eps = elapsed > 0 ? (double)total_events / elapsed : 0;
+        std::cout << "  Rate: " << term::BWHITE << std::fixed << std::setprecision(1) << eps << "/s" << term::RESET;
+        std::cout << std::string(15, ' ');
+        std::cout << term::BCYAN << box::V << term::RESET << "\n";
+
+        // Separator
+        std::cout << term::BCYAN << box::LT;
+        for (int i = 0; i < WIDTH - 2; i++) std::cout << box::H;
+        std::cout << box::RT << term::RESET << "\n";
+
+        // ═══════════════════════════════════════════════════════════════════
+        // P&L Section
+        // ═══════════════════════════════════════════════════════════════════
+        std::cout << term::BCYAN << box::V << term::RESET;
+        std::cout << term::BOLD << "  P&L SUMMARY" << term::RESET;
+        std::cout << std::string(WIDTH - 16, ' ');
+        std::cout << term::BCYAN << box::V << term::RESET << "\n";
+
+        // P&L value with color
+        std::cout << term::BCYAN << box::V << term::RESET << "  ";
+        if (realized_pnl >= 0) {
+            std::cout << term::BGREEN << term::BOLD << "+$" << std::fixed << std::setprecision(2) << realized_pnl;
+        } else {
+            std::cout << term::BRED << term::BOLD << "-$" << std::fixed << std::setprecision(2) << std::abs(realized_pnl);
+        }
+        std::cout << term::RESET;
+
+        // Win/Loss stats
+        int total_trades = winning_trades + losing_trades;
+        double win_rate = total_trades > 0 ? (double)winning_trades / total_trades * 100 : 0;
+        std::cout << "  " << term::DIM << "|" << term::RESET;
+        std::cout << "  " << term::GREEN << "W:" << winning_trades << term::RESET;
+        std::cout << " " << term::RED << "L:" << losing_trades << term::RESET;
+        std::cout << "  " << term::DIM << "|" << term::RESET;
+        std::cout << "  WinRate: " << term::BWHITE << std::fixed << std::setprecision(0) << win_rate << "%" << term::RESET;
+        std::cout << std::string(20, ' ');
+        std::cout << term::BCYAN << box::V << term::RESET << "\n";
+
+        // Profit/Loss breakdown
+        std::cout << term::BCYAN << box::V << term::RESET;
+        std::cout << "  " << term::GREEN << "Profit: +$" << std::fixed << std::setprecision(2) << total_profit << term::RESET;
+        std::cout << "  " << term::RED << "Loss: -$" << std::fixed << std::setprecision(2) << total_loss << term::RESET;
+        std::cout << std::string(WIDTH - 42, ' ');
+        std::cout << term::BCYAN << box::V << term::RESET << "\n";
+
+        // Separator
+        std::cout << term::BCYAN << box::LT;
+        for (int i = 0; i < WIDTH - 2; i++) std::cout << box::H;
+        std::cout << box::RT << term::RESET << "\n";
+
+        // ═══════════════════════════════════════════════════════════════════
+        // Trade Stats
+        // ═══════════════════════════════════════════════════════════════════
+        std::cout << term::BCYAN << box::V << term::RESET;
+        std::cout << "  " << term::BGREEN << "Fills: " << fills << term::RESET;
+        std::cout << "  " << term::DIM << "|" << term::RESET;
+        std::cout << "  " << term::GREEN << "Targets: " << targets << term::RESET;
+        std::cout << "  " << term::DIM << "|" << term::RESET;
+        std::cout << "  " << term::RED << "Stops: " << stops << term::RESET;
+        std::cout << std::string(WIDTH - 48, ' ');
+        std::cout << term::BCYAN << box::V << term::RESET << "\n";
+
+        // Separator
+        std::cout << term::BCYAN << box::LT;
+        for (int i = 0; i < WIDTH - 2; i++) std::cout << box::H;
+        std::cout << box::RT << term::RESET << "\n";
+
+        // ═══════════════════════════════════════════════════════════════════
+        // Event Stream
+        // ═══════════════════════════════════════════════════════════════════
+        std::cout << term::BCYAN << box::V << term::RESET;
+        std::cout << term::BOLD << "  LIVE EVENTS" << term::RESET;
+        std::cout << std::string(WIDTH - 16, ' ');
+        std::cout << term::BCYAN << box::V << term::RESET << "\n";
+
+        // Events
+        int displayed = 0;
+        for (const auto& ev : recent_events) {
+            if (displayed >= EVENT_PANEL_HEIGHT) break;
+
+            std::cout << term::BCYAN << box::V << term::RESET;
+            std::cout << "  " << ev.color << ev.text << term::RESET;
+
+            // Pad to width
+            int text_len = ev.text.length();
+            int padding = WIDTH - text_len - 5;
+            if (padding > 0) std::cout << std::string(padding, ' ');
+
+            std::cout << term::BCYAN << box::V << term::RESET << "\n";
+            displayed++;
+        }
+
+        // Fill empty rows
+        while (displayed < EVENT_PANEL_HEIGHT) {
+            std::cout << term::BCYAN << box::V << term::RESET;
+            std::cout << std::string(WIDTH - 2, ' ');
+            std::cout << term::BCYAN << box::V << term::RESET << "\n";
+            displayed++;
+        }
+
+        // ═══════════════════════════════════════════════════════════════════
+        // Footer
+        // ═══════════════════════════════════════════════════════════════════
+        std::cout << term::BCYAN << box::BL;
+        for (int i = 0; i < WIDTH - 2; i++) std::cout << box::H;
+        std::cout << box::BR << term::RESET << "\n";
+
+        std::cout << term::DIM << "  Press Ctrl+C to exit" << term::RESET << "\n";
+
+        std::cout << std::flush;
     }
-}
 
-void print_event(const TradeEvent& e, bool verbose = true) {
-    // Timestamp (relative, in ms)
-    static uint64_t first_ts = 0;
-    if (first_ts == 0) first_ts = e.timestamp_ns;
-    double rel_ms = (e.timestamp_ns - first_ts) / 1'000'000.0;
-
-    std::cout << std::fixed << std::setprecision(1);
-    std::cout << "[" << std::setw(10) << rel_ms << "ms] ";
-    std::cout << std::setw(7) << event_type_str(e.type) << " ";
-    std::cout << std::setw(4) << std::string(e.ticker, 3) << " ";
-
-    switch (e.type) {
-        case EventType::Quote:
-            std::cout << "bid=" << std::setprecision(2) << e.price
-                      << " ask=" << e.price2;
-            break;
-
-        case EventType::Signal:
-            std::cout << side_str(e.side) << " strength=" << (int)e.signal_strength
-                      << " @ $" << std::setprecision(2) << e.price;
-            break;
-
-        case EventType::OrderSent:
-            std::cout << side_str(e.side) << " " << e.quantity
-                      << " @ $" << std::setprecision(2) << e.price
-                      << " (order#" << e.order_id << ")";
-            break;
-
-        case EventType::Fill:
-            std::cout << side_str(e.side) << " " << e.quantity
-                      << " @ $" << std::setprecision(2) << e.price
-                      << " (order#" << e.order_id << ")";
-            break;
-
-        case EventType::TargetHit:
-            std::cout << "PROFIT! qty=" << e.quantity
-                      << " entry=$" << std::setprecision(2) << e.price2
-                      << " exit=$" << e.price
-                      << " pnl=$" << (e.pnl_cents / 100.0);
-            break;
-
-        case EventType::StopLoss:
-            std::cout << "LOSS! qty=" << e.quantity
-                      << " entry=$" << std::setprecision(2) << e.price2
-                      << " exit=$" << e.price
-                      << " pnl=$" << (e.pnl_cents / 100.0);
-            break;
-
-        case EventType::RegimeChange:
-            std::cout << "-> " << regime_str(e.regime);
-            break;
-
-        case EventType::Error:
-            std::cout << "ERROR";
-            break;
-
-        default:
-            break;
+    void cleanup() {
+        std::cout << term::SHOW_CURSOR << term::RESET;
     }
-
-    std::cout << "\n";
-}
+};
 
 // ============================================================================
 // Main
 // ============================================================================
 
-void print_usage() {
+void print_help() {
     std::cout << "Usage: hft_observer [options]\n";
     std::cout << "\n";
     std::cout << "Options:\n";
     std::cout << "  -h, --help       Show this help\n";
-    std::cout << "  -s, --stats      Show statistics only (no event stream)\n";
-    std::cout << "  -q, --quiet      Quiet mode (stats only, less output)\n";
-    std::cout << "  -l, --log FILE   Log events to file\n";
-    std::cout << "  -f, --filter T   Filter by event type (FILL, TARGET, STOP, etc.)\n";
+    std::cout << "  -s, --stream     Stream mode (no dashboard, just events)\n";
+    std::cout << "  -l, --log FILE   Log events to CSV file\n";
+    std::cout << "  -f, --filter T   Filter by event type (FILL, TARGET, STOP)\n";
     std::cout << "\n";
-    std::cout << "The observer connects to shared memory created by the hft engine.\n";
-    std::cout << "Make sure hft is running with --paper mode before starting observer.\n";
 }
 
 int main(int argc, char* argv[]) {
-    // Parse arguments
-    bool stats_only = false;
-    bool quiet = false;
+    bool stream_mode = false;
     std::string log_file;
     std::string filter_type;
 
     for (int i = 1; i < argc; i++) {
         std::string arg = argv[i];
         if (arg == "-h" || arg == "--help") {
-            print_usage();
+            print_help();
             return 0;
-        } else if (arg == "-s" || arg == "--stats") {
-            stats_only = true;
-        } else if (arg == "-q" || arg == "--quiet") {
-            quiet = true;
+        } else if (arg == "-s" || arg == "--stream") {
+            stream_mode = true;
         } else if ((arg == "-l" || arg == "--log") && i + 1 < argc) {
             log_file = argv[++i];
         } else if ((arg == "-f" || arg == "--filter") && i + 1 < argc) {
             filter_type = argv[++i];
+            stream_mode = true;  // Filter implies stream mode
         }
     }
 
-    // Setup signal handler
     std::signal(SIGINT, signal_handler);
     std::signal(SIGTERM, signal_handler);
 
-    std::cout << "================================================================\n";
-    std::cout << "  HFT OBSERVER - Real-time Event Monitor\n";
-    std::cout << "================================================================\n";
-    std::cout << "  Connecting to shared memory...\n";
+    if (!stream_mode) {
+        std::cout << term::CLEAR << term::HOME;
+        std::cout << term::BOLD << term::BCYAN;
+        std::cout << "╔══════════════════════════════════════════╗\n";
+        std::cout << "║     HFT OBSERVER - Connecting...         ║\n";
+        std::cout << "╚══════════════════════════════════════════╝\n";
+        std::cout << term::RESET;
+    } else {
+        std::cout << "HFT Observer - Stream Mode\n";
+        std::cout << "Connecting to shared memory...\n";
+    }
 
-    // Open shared memory (consumer mode)
+    // Connect to shared memory
     SharedRingBuffer<TradeEvent>* buffer = nullptr;
     int retries = 0;
-    const int max_retries = 10;
+    const int max_retries = 30;
 
     while (!buffer && retries < max_retries && g_running) {
         try {
             buffer = new SharedRingBuffer<TradeEvent>("/hft_events", false);
-            std::cout << "  Connected! Buffer capacity: " << buffer->capacity() << " events\n";
-        } catch (const std::exception& e) {
+            if (!stream_mode) {
+                std::cout << term::BGREEN << "Connected!" << term::RESET << "\n";
+            } else {
+                std::cout << "Connected! Buffer: " << buffer->capacity() << " events\n";
+            }
+        } catch (...) {
             retries++;
-            std::cout << "  Waiting for hft engine... (" << retries << "/" << max_retries << ")\n";
+            if (!stream_mode) {
+                std::cout << term::YELLOW << "  Waiting for HFT engine... ("
+                          << retries << "/" << max_retries << ")\r" << term::RESET << std::flush;
+            }
             std::this_thread::sleep_for(std::chrono::seconds(1));
         }
     }
 
     if (!buffer) {
-        std::cerr << "  ERROR: Could not connect to hft engine. Is it running?\n";
+        std::cerr << term::RED << "ERROR: Could not connect. Is HFT engine running?\n" << term::RESET;
         return 1;
     }
 
-    // Open log file if specified
+    // Open log file
     std::ofstream log_stream;
     if (!log_file.empty()) {
         log_stream.open(log_file, std::ios::app);
         if (!log_stream) {
-            std::cerr << "  ERROR: Could not open log file: " << log_file << "\n";
+            std::cerr << "ERROR: Could not open log file: " << log_file << "\n";
             return 1;
         }
-        std::cout << "  Logging to: " << log_file << "\n";
+        // CSV header
+        log_stream << "timestamp,type,symbol,side,price,price2,quantity,pnl,order_id\n";
     }
 
-    std::cout << "================================================================\n";
-    if (!stats_only) {
-        std::cout << "  Press Ctrl+C to stop\n";
-        std::cout << "================================================================\n\n";
-    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
 
     // Main loop
-    ObserverStats stats;
+    Dashboard dashboard;
     TradeEvent event;
-    uint64_t last_stats_print = 0;
-    auto start_time = std::chrono::steady_clock::now();
+    auto last_render = std::chrono::steady_clock::now();
 
     while (g_running) {
-        // Try to read events
         bool got_event = false;
+
         while (buffer->pop(event)) {
             got_event = true;
-            stats.record(event);
-
-            // Filter if specified
-            if (!filter_type.empty()) {
-                std::string type_str = event_type_str(event.type);
-                if (type_str.find(filter_type) == std::string::npos) {
-                    continue;
-                }
-            }
-
-            // Print event
-            if (!stats_only && !quiet) {
-                print_event(event);
-            }
+            dashboard.add_event(event);
 
             // Log to file
             if (log_stream) {
+                const char* type_str = "";
+                switch (event.type) {
+                    case EventType::Fill: type_str = "FILL"; break;
+                    case EventType::TargetHit: type_str = "TARGET"; break;
+                    case EventType::StopLoss: type_str = "STOP"; break;
+                    case EventType::Signal: type_str = "SIGNAL"; break;
+                    default: type_str = "OTHER"; break;
+                }
+
                 log_stream << event.timestamp_ns << ","
-                           << event_type_str(event.type) << ","
-                           << event.symbol_id << ","
+                           << type_str << ","
                            << std::string(event.ticker, 3) << ","
-                           << event.side << ","
+                           << (int)event.side << ","
                            << event.price << ","
                            << event.price2 << ","
                            << event.quantity << ","
                            << event.pnl_cents << ","
                            << event.order_id << "\n";
             }
+
+            // Stream mode: print immediately
+            if (stream_mode && !dashboard.recent_events.empty()) {
+                const auto& ev = dashboard.recent_events.front();
+
+                // Filter check
+                if (!filter_type.empty()) {
+                    if (ev.text.find(filter_type) == std::string::npos) continue;
+                }
+
+                std::cout << ev.color << ev.text << term::RESET << "\n";
+            }
         }
 
-        // Print stats periodically
-        auto now = std::chrono::steady_clock::now();
-        auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - start_time).count();
+        // Dashboard mode: render periodically
+        if (!stream_mode) {
+            auto now = std::chrono::steady_clock::now();
+            auto since_render = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_render).count();
 
-        if (stats_only && elapsed > last_stats_print + 2) {
-            last_stats_print = elapsed;
-            // Clear screen and print stats
-            std::cout << "\033[2J\033[H";  // ANSI clear screen
-            stats.print();
-            std::cout << "\n  Running for " << elapsed << " seconds...\n";
-            std::cout << "  Buffer: " << buffer->size() << "/" << buffer->capacity()
-                      << " (" << buffer->total_produced() << " produced, "
-                      << buffer->total_consumed() << " consumed)\n";
+            if (since_render >= 200 || got_event) {  // 5 FPS or on new event
+                dashboard.render();
+                last_render = now;
+            }
         }
 
-        // Sleep if no events (avoid busy spinning)
         if (!got_event) {
-            std::this_thread::sleep_for(std::chrono::microseconds(100));
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
         }
     }
 
-    // Final stats
-    stats.print();
-
-    auto end_time = std::chrono::steady_clock::now();
-    auto duration = std::chrono::duration_cast<std::chrono::seconds>(end_time - start_time).count();
-    std::cout << "\n  Duration: " << duration << " seconds\n";
-    std::cout << "  Events/sec: " << (duration > 0 ? stats.total_events / duration : 0) << "\n";
-
     // Cleanup
-    delete buffer;
+    dashboard.cleanup();
 
+    // Final summary
+    std::cout << "\n" << term::BOLD << "Final Summary:" << term::RESET << "\n";
+    std::cout << "  Events: " << dashboard.total_events << "\n";
+    std::cout << "  P&L: ";
+    if (dashboard.realized_pnl >= 0) {
+        std::cout << term::GREEN << "+$" << std::fixed << std::setprecision(2) << dashboard.realized_pnl;
+    } else {
+        std::cout << term::RED << "-$" << std::fixed << std::setprecision(2) << std::abs(dashboard.realized_pnl);
+    }
+    std::cout << term::RESET << "\n";
+    std::cout << "  Win Rate: " << dashboard.winning_trades << "W / " << dashboard.losing_trades << "L\n";
+
+    delete buffer;
     return 0;
 }
