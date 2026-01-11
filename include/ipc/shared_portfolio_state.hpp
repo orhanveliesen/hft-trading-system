@@ -224,6 +224,36 @@ struct SharedPortfolioState {
         }
     }
 
+    // Fast path: Direct index access (no search) - use when symbol_id is known
+    void update_last_price_fast(size_t symbol_id, double price) {
+        if (symbol_id < MAX_PORTFOLIO_SYMBOLS) {
+            positions[symbol_id].last_price_x8.store(static_cast<int64_t>(price * 1e8));
+        }
+    }
+
+    void update_position_fast(size_t symbol_id, double qty, double avg_price,
+                              double last_price, double realized = 0) {
+        if (symbol_id >= MAX_PORTFOLIO_SYMBOLS) return;
+        auto& pos = positions[symbol_id];
+        pos.quantity_x8.store(static_cast<int64_t>(qty * 1e8));
+        pos.avg_price_x8.store(static_cast<int64_t>(avg_price * 1e8));
+        pos.last_price_x8.store(static_cast<int64_t>(last_price * 1e8));
+        if (realized != 0) {
+            pos.realized_pnl_x8.fetch_add(static_cast<int64_t>(realized * 1e8));
+        }
+        sequence.fetch_add(1);
+    }
+
+    // Initialize slot with symbol name (call once at startup)
+    void init_slot(size_t symbol_id, const char* symbol) {
+        if (symbol_id >= MAX_PORTFOLIO_SYMBOLS) return;
+        auto& pos = positions[symbol_id];
+        pos.clear();
+        std::strncpy(pos.symbol, symbol, 15);
+        pos.symbol[15] = '\0';
+        pos.active.store(1);
+    }
+
     void update_regime(const char* symbol, uint8_t regime) {
         PositionSlot* pos = get_or_create_position(symbol);
         if (pos) {

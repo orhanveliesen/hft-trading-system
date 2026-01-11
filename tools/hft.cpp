@@ -779,10 +779,10 @@ public:
 
         double mid = (bid + ask) / 2.0 / risk::PRICE_SCALE;
 
-        // Update last price in shared state for dashboard charts (~2ns)
-        // Always update price for tracked symbols, not just those with positions
+        // Update last price in shared state for dashboard charts
+        // Fast path: direct index access, no string search (~5 cycles vs ~18)
         if (portfolio_state_) {
-            portfolio_state_->update_last_price(strat.ticker, mid);
+            portfolio_state_->update_last_price_fast(static_cast<size_t>(id), mid);
         }
         strat.regime.update(mid);
         strat.indicators.update(mid);  // Update technical indicators
