@@ -780,9 +780,10 @@ public:
         double mid = (bid + ask) / 2.0 / risk::PRICE_SCALE;
 
         // Update last price in shared state for dashboard charts
-        // Fast path: direct index access, no string search (~5 cycles vs ~18)
+        // Ultra-low latency: relaxed memory ordering (~1 cycle vs ~15)
         if (portfolio_state_) {
-            portfolio_state_->update_last_price_fast(static_cast<size_t>(id), mid);
+            portfolio_state_->update_last_price_relaxed(
+                static_cast<size_t>(id), static_cast<int64_t>(mid * 1e8));
         }
         strat.regime.update(mid);
         strat.indicators.update(mid);  // Update technical indicators

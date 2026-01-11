@@ -244,6 +244,32 @@ struct SharedPortfolioState {
         sequence.fetch_add(1);
     }
 
+    // === Ultra-low latency path (relaxed memory ordering) ===
+    // For single-writer scenarios where dashboard doesn't need strict consistency
+    // Price update: ~1 cycle instead of ~15 cycles
+
+    void update_last_price_relaxed(size_t symbol_id, int64_t price_x8) {
+        if (symbol_id < MAX_PORTFOLIO_SYMBOLS) {
+            positions[symbol_id].last_price_x8.store(price_x8, std::memory_order_relaxed);
+        }
+    }
+
+    void update_position_relaxed(size_t symbol_id, int64_t qty_x8, int64_t avg_price_x8,
+                                 int64_t last_price_x8) {
+        if (symbol_id >= MAX_PORTFOLIO_SYMBOLS) return;
+        auto& pos = positions[symbol_id];
+        pos.quantity_x8.store(qty_x8, std::memory_order_relaxed);
+        pos.avg_price_x8.store(avg_price_x8, std::memory_order_relaxed);
+        pos.last_price_x8.store(last_price_x8, std::memory_order_relaxed);
+        // Use release on sequence so reader with acquire sees all prior stores
+        sequence.store(sequence.load(std::memory_order_relaxed) + 1, std::memory_order_release);
+    }
+
+    // Readers should use acquire ordering
+    uint32_t get_sequence_acquire() const {
+        return sequence.load(std::memory_order_acquire);
+    }
+
     // Initialize slot with symbol name (call once at startup)
     void init_slot(size_t symbol_id, const char* symbol) {
         if (symbol_id >= MAX_PORTFOLIO_SYMBOLS) return;
