@@ -94,6 +94,9 @@ add_executable(test_simple_mr tests/test_simple_mr.cpp)
 target_link_libraries(test_simple_mr hft_core)
 add_test(NAME SimpleMRTests COMMAND test_simple_mr)
 
+add_executable(test_overfitting tests/test_overfitting.cpp)
+add_test(NAME OverfittingTests COMMAND test_overfitting)
+
 add_executable(test_all_strategies tests/test_all_strategies.cpp)
 add_test(NAME AllStrategiesTests COMMAND test_all_strategies)
 
