@@ -657,7 +657,7 @@ void render_dashboard(DashboardData& data, const SharedPortfolioState* portfolio
                 ImGui::SameLine();
                 ImGui::TextDisabled("(%.8s)", config->get_build_hash());
                 if (ImGui::IsItemHovered()) {
-                    ImGui::SetTooltip("Git commit: %.8s\nPID: %d\nKodu görmek için: git show %.8s",
+                    ImGui::SetTooltip("Git commit: %.8s\nPID: %d\nView code: git show %.8s",
                                       config->get_build_hash(), config->get_hft_pid(), config->get_build_hash());
                 }
             } else if (hft_status == 0 || !is_alive) {
@@ -729,10 +729,10 @@ void render_dashboard(DashboardData& data, const SharedPortfolioState* portfolio
         if (ImGui::IsItemHovered()) {
             ImGui::SetTooltip(
                 "MASTER SWITCH\n\n"
-                "OFF: Sadece izle, trade yapma\n"
-                "ON:  Sinyallere gore trade yap\n\n"
-                "Kullanim: Piyasayi izlerken veya\n"
-                "strateji test ederken kapat");
+                "OFF: Watch only, no trades\n"
+                "ON:  Execute trades on signals\n\n"
+                "Use: Disable when observing market\n"
+                "or testing strategy changes");
         }
 
         // Force Mode dropdown
@@ -744,22 +744,22 @@ void render_dashboard(DashboardData& data, const SharedPortfolioState* portfolio
         }
         if (ImGui::IsItemHovered()) {
             ImGui::SetTooltip(
-                "STRATEJI MODU\n\n"
-                "AUTO: Sistem otomatik secer (onerilen)\n"
-                "AGGRESSIVE: Max pozisyon, dar stoplar\n"
-                "NORMAL: Standart parametreler\n"
-                "CAUTIOUS: Kucuk pozisyon, genis stoplar\n"
-                "DEFENSIVE: Sadece mevcut pozisyonlari koru\n"
-                "EXIT_ONLY: Sadece cikis yap, yeni trade yok\n\n"
-                "Kullanim: Piyasa kosullarina gore\n"
-                "manuel override yapabilirsin");
+                "STRATEGY MODE\n\n"
+                "AUTO: System auto-selects (recommended)\n"
+                "AGGRESSIVE: Max position, tight stops\n"
+                "NORMAL: Standard parameters\n"
+                "CAUTIOUS: Small position, wide stops\n"
+                "DEFENSIVE: Protect existing positions only\n"
+                "EXIT_ONLY: Close positions, no new trades\n\n"
+                "Use: Manual override based on\n"
+                "market conditions");
         }
 
         ImGui::Spacing();
 
         // ===== REVIEW GATE (Collapsible) =====
         if (ImGui::TreeNode("Review Gate")) {
-            ImGui::TextDisabled("Lazy evaluation - sadece zarar edince kontrol");
+            ImGui::TextDisabled("Lazy evaluation - checks only on losses");
 
             // Spread multiplier
             float spread_mult = config->spread_multiplier();
@@ -768,14 +768,14 @@ void render_dashboard(DashboardData& data, const SharedPortfolioState* portfolio
             }
             if (ImGui::IsItemHovered()) {
                 ImGui::SetTooltip(
-                    "REGIME KONTROL ESIGI\n\n"
-                    "Formul: PnL < -(spread * multiplier)\n\n"
-                    "1.0x: Cok hassas, her kucuk zararda kontrol\n"
-                    "1.5x: Dengeli (onerilen)\n"
-                    "2.0x: Toleransli, buyuk zararlarda kontrol\n"
-                    "3.0x: Cok toleransli, sadece ciddi zararlarda\n\n"
-                    "Ornek: spread=$10, mult=1.5x\n"
-                    "PnL < -$15 olunca regime kontrol edilir");
+                    "REGIME CHECK THRESHOLD\n\n"
+                    "Formula: PnL < -(spread * multiplier)\n\n"
+                    "1.0x: Very sensitive, check on small losses\n"
+                    "1.5x: Balanced (recommended)\n"
+                    "2.0x: Tolerant, check on larger losses\n"
+                    "3.0x: Very tolerant, only severe losses\n\n"
+                    "Example: spread=$10, mult=1.5x\n"
+                    "Regime checked when PnL < -$15");
             }
 
             // Drawdown threshold
@@ -785,13 +785,13 @@ void render_dashboard(DashboardData& data, const SharedPortfolioState* portfolio
             }
             if (ImGui::IsItemHovered()) {
                 ImGui::SetTooltip(
-                    "MAX DRAWDOWN LIMITI\n\n"
-                    "Portfolio peak'ten bu kadar duserse\n"
-                    "strateji DEFENSIVE moda gecer.\n\n"
-                    "2%%: Agresif koruma (onerilen)\n"
-                    "5%%: Normal koruma\n"
-                    "10%%: Rahat, swing trading icin\n\n"
-                    "Ornek: $10K portfolio, 2%% = $200 max DD");
+                    "MAX DRAWDOWN LIMIT\n\n"
+                    "If portfolio drops this much from peak,\n"
+                    "strategy switches to DEFENSIVE mode.\n\n"
+                    "2%%: Aggressive protection (recommended)\n"
+                    "5%%: Normal protection\n"
+                    "10%%: Relaxed, for swing trading\n\n"
+                    "Example: $10K portfolio, 2%% = $200 max DD");
             }
 
             // Loss streak
@@ -801,14 +801,14 @@ void render_dashboard(DashboardData& data, const SharedPortfolioState* portfolio
             }
             if (ImGui::IsItemHovered()) {
                 ImGui::SetTooltip(
-                    "UST USTE KAYIP LIMITI\n\n"
-                    "Bu kadar ust uste zarar olursa\n"
-                    "strateji CAUTIOUS moda gecer.\n\n"
-                    "2: Hassas, hizli tepki (onerilen)\n"
+                    "CONSECUTIVE LOSS LIMIT\n\n"
+                    "After this many losses in a row,\n"
+                    "strategy switches to CAUTIOUS mode.\n\n"
+                    "2: Sensitive, fast reaction (recommended)\n"
                     "3: Normal\n"
-                    "5: Toleransli, trend takibi icin\n\n"
-                    "Neden: Ust uste kayiplar genellikle\n"
-                    "regime degisiminin habercisidir");
+                    "5: Tolerant, for trend following\n\n"
+                    "Why: Consecutive losses often signal\n"
+                    "a regime change");
             }
 
             ImGui::TreePop();
@@ -816,7 +816,7 @@ void render_dashboard(DashboardData& data, const SharedPortfolioState* portfolio
 
         // ===== POSITION SIZING (Collapsible) =====
         if (ImGui::TreeNode("Position Sizing")) {
-            ImGui::TextDisabled("Kelly Criterion bazli dinamik boyutlandirma");
+            ImGui::TextDisabled("Kelly Criterion based dynamic sizing");
 
             // Base position
             float base_pos = config->base_position_pct() * 100;
@@ -825,12 +825,12 @@ void render_dashboard(DashboardData& data, const SharedPortfolioState* portfolio
             }
             if (ImGui::IsItemHovered()) {
                 ImGui::SetTooltip(
-                    "MINIMUM POZISYON\n\n"
-                    "Dusuk guvenli sinyallerde kullanilir.\n\n"
-                    "1%%: Konservatif\n"
-                    "2%%: Normal (onerilen)\n"
-                    "3-5%%: Agresif\n\n"
-                    "Ornek: $10K portfolio, 2%% = $200/trade");
+                    "MINIMUM POSITION\n\n"
+                    "Used for low-confidence signals.\n\n"
+                    "1%%: Conservative\n"
+                    "2%%: Normal (recommended)\n"
+                    "3-5%%: Aggressive\n\n"
+                    "Example: $10K portfolio, 2%% = $200/trade");
             }
 
             // Max position
@@ -840,13 +840,13 @@ void render_dashboard(DashboardData& data, const SharedPortfolioState* portfolio
             }
             if (ImGui::IsItemHovered()) {
                 ImGui::SetTooltip(
-                    "MAXIMUM POZISYON\n\n"
-                    "Yuksek guvenli sinyallerde kullanilir.\n"
-                    "Asla bu degerin ustune cikilmaz.\n\n"
-                    "3%%: Konservatif\n"
-                    "5%%: Normal (onerilen)\n"
-                    "10%%: Agresif, sadece test icin\n\n"
-                    "Risk: Max > 5%% tek trade'de buyuk kayip");
+                    "MAXIMUM POSITION\n\n"
+                    "Used for high-confidence signals.\n"
+                    "Never exceeds this value.\n\n"
+                    "3%%: Conservative\n"
+                    "5%%: Normal (recommended)\n"
+                    "10%%: Aggressive, testing only\n\n"
+                    "Risk: Max > 5%% = large single trade loss");
             }
 
             // Show current sizing formula
@@ -857,7 +857,7 @@ void render_dashboard(DashboardData& data, const SharedPortfolioState* portfolio
 
         // ===== TARGET / STOP (Collapsible) =====
         if (ImGui::TreeNode("Target / Stop")) {
-            ImGui::TextDisabled("Take Profit ve Stop Loss seviyeleri");
+            ImGui::TextDisabled("Take Profit and Stop Loss levels");
 
             // Target
             float target = config->target_pct() * 100;
@@ -867,11 +867,11 @@ void render_dashboard(DashboardData& data, const SharedPortfolioState* portfolio
             if (ImGui::IsItemHovered()) {
                 ImGui::SetTooltip(
                     "TAKE PROFIT\n\n"
-                    "Fiyat bu kadar yukselince kar al.\n\n"
-                    "0.5-1%%: Scalping, yuksek win rate\n"
-                    "1.5%%: Day trading (onerilen)\n"
+                    "Close position when price rises this much.\n\n"
+                    "0.5-1%%: Scalping, high win rate\n"
+                    "1.5%%: Day trading (recommended)\n"
                     "3-5%%: Swing trading\n\n"
-                    "Ornek: $100 entry, 1.5%% = $101.50 target");
+                    "Example: $100 entry, 1.5%% = $101.50 target");
             }
 
             // Stop
@@ -882,12 +882,12 @@ void render_dashboard(DashboardData& data, const SharedPortfolioState* portfolio
             if (ImGui::IsItemHovered()) {
                 ImGui::SetTooltip(
                     "STOP LOSS\n\n"
-                    "Fiyat bu kadar dusunce zarar kes.\n\n"
+                    "Close position when price drops this much.\n\n"
                     "0.25-0.5%%: Tight stop, scalping\n"
-                    "1%%: Normal (onerilen)\n"
+                    "1%%: Normal (recommended)\n"
                     "2-3%%: Loose stop, swing trading\n\n"
-                    "Dikkat: Tight = whipsaw riski\n"
-                    "Loose = buyuk kayip riski");
+                    "Warning: Tight = whipsaw risk\n"
+                    "Loose = large loss risk");
             }
 
             // Risk:Reward display with color coding
@@ -895,10 +895,10 @@ void render_dashboard(DashboardData& data, const SharedPortfolioState* portfolio
             const char* rr_label;
             ImVec4 rr_color;
             if (rr < 1.0f) {
-                rr_label = "KOTU";
+                rr_label = "BAD";
                 rr_color = ImVec4(1.0f, 0.2f, 0.2f, 1.0f);
             } else if (rr < 1.5f) {
-                rr_label = "Dusuk";
+                rr_label = "Low";
                 rr_color = ImVec4(1.0f, 0.5f, 0.0f, 1.0f);
             } else if (rr < 2.0f) {
                 rr_label = "OK";
@@ -916,16 +916,16 @@ void render_dashboard(DashboardData& data, const SharedPortfolioState* portfolio
 
             if (ImGui::IsItemHovered()) {
                 ImGui::SetTooltip(
-                    "RISK:REWARD ORANI\n\n"
-                    "< 1:1  KOTU - Kaybetmeye mahkum\n"
-                    "1:1.5  Dusuk - %%60+ win rate gerekli\n"
-                    "1:2    Ideal - %%40 win rate yeterli\n"
-                    "1:3+   Mukemmel - Trend takibi icin\n\n"
-                    "Matematik:\n"
-                    "  Kar = RR * WinRate\n"
-                    "  Zarar = 1 * LossRate\n"
-                    "  Kar > Zarar olmali\n\n"
-                    "RR=2, WR=%%40 -> 0.8 > 0.6 = KARLI");
+                    "RISK:REWARD RATIO\n\n"
+                    "< 1:1  BAD - Destined to lose\n"
+                    "1:1.5  Low - Needs 60%%+ win rate\n"
+                    "1:2    Ideal - 40%% win rate enough\n"
+                    "1:3+   Excellent - For trend following\n\n"
+                    "Math:\n"
+                    "  Profit = RR * WinRate\n"
+                    "  Loss = 1 * LossRate\n"
+                    "  Profit > Loss required\n\n"
+                    "RR=2, WR=40%% -> 0.8 > 0.6 = PROFITABLE");
             }
 
             // Win rate required calculation
