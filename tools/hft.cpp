@@ -20,33 +20,130 @@
 #include "../include/strategy/technical_indicators.hpp"
 #include "../include/symbol_config.hpp"
 #include "../include/risk/enhanced_risk_manager.hpp"
+#include "../include/ipc/trade_event.hpp"
+#include "../include/ipc/shared_ring_buffer.hpp"
+#include "../include/ipc/shared_portfolio_state.hpp"
+#include "../include/ipc/shared_config.hpp"
 #include <iostream>
 #include <iomanip>
 #include <chrono>
 #include <thread>
 #include <atomic>
 #include <csignal>
+#include <array>
 #include <map>
 #include <vector>
 #include <mutex>
 #include <random>
 #include <sstream>
 #include <algorithm>
+#include <sched.h>   // For CPU affinity
+#include <cstring>   // For strncpy
 
 using namespace hft;
 using namespace hft::exchange;
 using namespace hft::strategy;
 
 // ============================================================================
+// Pre-allocation Constants (HFT: no new/delete on hot path)
+// ============================================================================
+
+constexpr size_t MAX_SYMBOLS = 64;              // Max symbols we can track
+constexpr size_t MAX_POSITIONS_PER_SYMBOL = 32; // Max open positions per symbol
+
+// ============================================================================
 // Global State
 // ============================================================================
 
 std::atomic<bool> g_running{true};
+ipc::SharedConfig* g_shared_config = nullptr;  // For graceful shutdown signaling
 
-void signal_handler(int) {
-    std::cout << "\n\n[SHUTDOWN] Stopping...\n";
+void signal_handler(int sig) {
+    // Mark as shutting down in shared memory (dashboard can see this immediately)
+    if (g_shared_config) {
+        g_shared_config->set_hft_status(3);  // shutting_down
+        g_shared_config->update_heartbeat();
+    }
+    std::cout << "\n\n[SHUTDOWN] Received signal " << sig << ", stopping gracefully...\n";
     g_running = false;
 }
+
+// ============================================================================
+// Event Publisher (lock-free IPC to observer)
+// ============================================================================
+
+using namespace hft::ipc;
+
+/**
+ * EventPublisher - Publishes trading events to shared memory
+ *
+ * Used by HFT engine to send events to observer process.
+ * Lock-free, ~5ns per publish, no allocation.
+ */
+class EventPublisher {
+public:
+    explicit EventPublisher(bool enabled = true) : enabled_(enabled) {
+        if (enabled_) {
+            try {
+                buffer_ = std::make_unique<SharedRingBuffer<TradeEvent>>("/hft_events", true);
+                std::cout << "[IPC] Event publisher initialized (buffer: "
+                          << buffer_->capacity() << " events)\n";
+            } catch (const std::exception& e) {
+                std::cerr << "[IPC] Warning: Could not create shared memory: " << e.what() << "\n";
+                enabled_ = false;
+            }
+        }
+    }
+
+    // Publish fill event
+    void fill(uint32_t sym, const char* ticker, uint8_t side, double price, double qty, uint32_t oid) {
+        if (!enabled_) return;
+        auto ts = now_ns();
+        buffer_->push(TradeEvent::fill(seq_++, ts, sym, ticker, side, price, qty, oid));
+    }
+
+    // Publish target hit event
+    void target_hit(uint32_t sym, const char* ticker, double entry, double exit, double qty) {
+        if (!enabled_) return;
+        auto ts = now_ns();
+        int64_t pnl_cents = static_cast<int64_t>((exit - entry) * qty * 100);
+        buffer_->push(TradeEvent::target_hit(seq_++, ts, sym, ticker, entry, exit, qty, pnl_cents));
+    }
+
+    // Publish stop loss event
+    void stop_loss(uint32_t sym, const char* ticker, double entry, double exit, double qty) {
+        if (!enabled_) return;
+        auto ts = now_ns();
+        int64_t pnl_cents = static_cast<int64_t>((exit - entry) * qty * 100);  // Negative for loss
+        buffer_->push(TradeEvent::stop_loss(seq_++, ts, sym, ticker, entry, exit, qty, pnl_cents));
+    }
+
+    // Publish signal event
+    void signal(uint32_t sym, const char* ticker, uint8_t side, uint8_t strength, double price) {
+        if (!enabled_) return;
+        auto ts = now_ns();
+        buffer_->push(TradeEvent::signal(seq_++, ts, sym, ticker, side, strength, price));
+    }
+
+    // Publish regime change event
+    void regime_change(uint32_t sym, const char* ticker, uint8_t new_regime) {
+        if (!enabled_) return;
+        auto ts = now_ns();
+        buffer_->push(TradeEvent::regime_change(seq_++, ts, sym, ticker, new_regime));
+    }
+
+    bool enabled() const { return enabled_; }
+    uint32_t sequence() const { return seq_; }
+
+private:
+    bool enabled_ = false;
+    std::unique_ptr<SharedRingBuffer<TradeEvent>> buffer_;
+    std::atomic<uint32_t> seq_{0};
+
+    static uint64_t now_ns() {
+        return std::chrono::steady_clock::now().time_since_epoch().count();
+    }
+};
 
 // ============================================================================
 // CLI Arguments
@@ -56,6 +153,7 @@ struct CLIArgs {
     bool paper_mode = false;
     bool help = false;
     bool verbose = false;
+    int cpu_affinity = -1;    // CPU core to pin to (-1 = no pinning)
     std::vector<std::string> symbols;
     int duration = 0;  // 0 = unlimited
     double capital = 100000.0;
@@ -64,8 +162,8 @@ struct CLIArgs {
 
 void print_help() {
     std::cout << R"(
-HFT Trading System
-==================
+HFT Trading System (Lock-Free)
+==============================
 
 Usage: hft [options]
 
@@ -78,15 +176,17 @@ Options:
   -d, --duration SECS    Duration in seconds (0 = unlimited)
   -c, --capital USD      Initial capital (default: 100000)
   -m, --max-pos N        Max position per symbol (default: 10)
-  -v, --verbose          Verbose output
+  --cpu N                Pin to CPU core N (reduces latency)
+  -v, --verbose          Verbose output (fills, targets, stops)
   -h, --help             Show this help
 
 Examples:
-  hft                              # Production, all symbols
   hft --paper                      # Paper trading, all symbols
-  hft -s BTCUSDT                   # Production, single symbol
   hft --paper -s BTCUSDT,ETHUSDT   # Paper, two symbols
-  hft --paper -d 300 -c 50000      # Paper, 5 min, $50k capital
+  hft --paper -d 300 --cpu 2       # Paper, 5 min, pinned to CPU 2
+
+Monitoring:
+  Use hft_observer for real-time dashboard (separate process, lock-free IPC)
 
 WARNING: Without --paper flag, REAL orders will be sent!
 )";
@@ -132,6 +232,9 @@ bool parse_args(int argc, char* argv[], CLIArgs& args) {
         }
         else if ((arg == "--max-pos" || arg == "-m") && i + 1 < argc) {
             args.max_position = std::stoi(argv[++i]);
+        }
+        else if (arg == "--cpu" && i + 1 < argc) {
+            args.cpu_affinity = std::stoi(argv[++i]);
         }
         else {
             std::cerr << "Unknown option: " << arg << "\n";
@@ -261,11 +364,18 @@ struct SymbolStrategy {
     MarketRegime current_regime = MarketRegime::Unknown;
     Price last_mid = 0;
     uint64_t last_signal_time = 0;
-    std::string ticker;  // for logging
+    char ticker[16] = {0};  // Fixed size, no std::string allocation
+    bool active = false;    // Is this slot in use?
 
     // Dynamic spread tracking (EMA of spread)
     double ema_spread_pct = 0.001;  // Start with 0.1% default
     static constexpr double SPREAD_ALPHA = 0.1;  // EMA decay
+
+    void init(const std::string& symbol) {
+        active = true;
+        std::strncpy(ticker, symbol.c_str(), sizeof(ticker) - 1);
+        ticker[sizeof(ticker) - 1] = '\0';
+    }
 
     void update_spread(Price bid, Price ask) {
         if (bid > 0 && ask > bid) {
@@ -274,24 +384,114 @@ struct SymbolStrategy {
         }
     }
 
-    // Threshold = 2x spread (need to make more than spread to profit)
-    double buy_threshold() const { return -ema_spread_pct * 2.0; }
-    double sell_threshold() const { return ema_spread_pct * 2.0; }
+    // Threshold = 3x spread with 0.02% (2 bps) minimum floor
+    // This ensures we only trade when expected profit > spread cost
+    // Math: entry spread + exit spread = 2x spread, so need >2x to profit
+    double buy_threshold() const {
+        double threshold = ema_spread_pct * 3.0;
+        return -std::max(threshold, 0.0002);  // At least -0.02%
+    }
+    double sell_threshold() const {
+        double threshold = ema_spread_pct * 3.0;
+        return std::max(threshold, 0.0002);   // At least +0.02%
+    }
 };
 
-// Portfolio: tracks cash and holdings (no leverage, no shorting)
+// OpenPosition: tracks a single buy with entry price and targets
+// Pre-allocated slot - uses 'active' flag instead of dynamic allocation
+struct OpenPosition {
+    double entry_price = 0;      // What we paid
+    double quantity = 0;         // How much we hold
+    double target_price = 0;     // Sell limit price (entry + profit margin)
+    double stop_loss_price = 0;  // Cut loss price (entry - max loss)
+    uint64_t timestamp = 0;      // When we bought
+    bool active = false;         // Is this slot in use?
+
+    void clear() {
+        entry_price = 0;
+        quantity = 0;
+        target_price = 0;
+        stop_loss_price = 0;
+        timestamp = 0;
+        active = false;
+    }
+};
+
+// SymbolPositions: pre-allocated position storage for one symbol
+// No std::vector, no dynamic allocation
+struct SymbolPositions {
+    std::array<OpenPosition, MAX_POSITIONS_PER_SYMBOL> slots;
+    size_t count = 0;  // Number of active positions
+
+    // Add a new position - O(1)
+    bool add(double entry, double qty, double target, double stop_loss) {
+        if (count >= MAX_POSITIONS_PER_SYMBOL) return false;
+
+        // Find first inactive slot
+        for (auto& slot : slots) {
+            if (!slot.active) {
+                slot.entry_price = entry;
+                slot.quantity = qty;
+                slot.target_price = target;
+                slot.stop_loss_price = stop_loss;
+                slot.timestamp = std::chrono::steady_clock::now().time_since_epoch().count();
+                slot.active = true;
+                count++;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // Get total quantity held
+    double total_quantity() const {
+        double total = 0;
+        for (const auto& slot : slots) {
+            if (slot.active) total += slot.quantity;
+        }
+        return total;
+    }
+
+    // Get average entry price
+    double avg_entry() const {
+        double total_cost = 0, total_qty = 0;
+        for (const auto& slot : slots) {
+            if (slot.active) {
+                total_cost += slot.entry_price * slot.quantity;
+                total_qty += slot.quantity;
+            }
+        }
+        return total_qty > 0 ? total_cost / total_qty : 0;
+    }
+
+    void clear_all() {
+        for (auto& slot : slots) slot.clear();
+        count = 0;
+    }
+};
+
+// Portfolio: tracks cash and positions with pre-allocated storage
+// No std::map, no std::vector, no new/delete
 struct Portfolio {
     double cash = 0;
-    std::map<Symbol, double> holdings;  // symbol -> quantity held
+    std::array<SymbolPositions, MAX_SYMBOLS> positions;  // Pre-allocated!
+    std::array<bool, MAX_SYMBOLS> symbol_active;         // Track which symbols have positions
+
+    // Config
+    double profit_margin_pct = 0.002;   // 0.2% profit target
+    double stop_loss_pct = 0.01;        // 1% max loss
 
     void init(double capital) {
         cash = capital;
-        holdings.clear();
+        for (size_t i = 0; i < MAX_SYMBOLS; i++) {
+            positions[i].clear_all();
+            symbol_active[i] = false;
+        }
     }
 
     double get_holding(Symbol s) const {
-        auto it = holdings.find(s);
-        return it != holdings.end() ? it->second : 0;
+        if (s >= MAX_SYMBOLS) return 0;
+        return positions[s].total_quantity();
     }
 
     bool can_buy(double price, double qty) const {
@@ -302,26 +502,134 @@ struct Portfolio {
         return get_holding(s) >= qty;
     }
 
+    // Buy and create position with target/stop-loss - O(1) no allocation
     void buy(Symbol s, double price, double qty) {
-        cash -= price * qty;
-        holdings[s] += qty;
+        if (qty <= 0 || price <= 0) return;
+        if (s >= MAX_SYMBOLS) return;
+
+        double target = price * (1.0 + profit_margin_pct);
+        double stop_loss = price * (1.0 - stop_loss_pct);
+
+        if (positions[s].add(price, qty, target, stop_loss)) {
+            cash -= price * qty;
+            symbol_active[s] = true;
+        }
     }
 
+    // Sell specific quantity, FIFO order - O(n) where n = positions for symbol
     void sell(Symbol s, double price, double qty) {
-        cash += price * qty;
-        holdings[s] -= qty;
-        if (holdings[s] <= 0) holdings.erase(s);
+        if (qty <= 0 || price <= 0) return;
+        if (s >= MAX_SYMBOLS) return;
+
+        double remaining = qty;
+        auto& sym_pos = positions[s];
+
+        for (auto& slot : sym_pos.slots) {
+            if (!slot.active || remaining <= 0) continue;
+
+            double sell_qty = std::min(remaining, slot.quantity);
+            cash += price * sell_qty;
+            slot.quantity -= sell_qty;
+            remaining -= sell_qty;
+
+            if (slot.quantity <= 0.0001) {
+                slot.clear();
+                sym_pos.count--;
+            }
+        }
+
+        if (sym_pos.count == 0) {
+            symbol_active[s] = false;
+        }
     }
 
-    double total_value(const std::map<Symbol, double>& prices) const {
+    // Get average entry price for a symbol
+    double avg_entry_price(Symbol s) const {
+        if (s >= MAX_SYMBOLS) return 0;
+        return positions[s].avg_entry();
+    }
+
+    // Callback-based target/stop checking - NO allocation!
+    // Returns number of positions closed
+    template<typename OnTargetHit, typename OnStopHit>
+    int check_and_close(Symbol s, double current_price, OnTargetHit on_target, OnStopHit on_stop) {
+        if (s >= MAX_SYMBOLS) return 0;
+
+        int closed = 0;
+        auto& sym_pos = positions[s];
+
+        for (auto& slot : sym_pos.slots) {
+            if (!slot.active) continue;
+
+            // TARGET HIT: price went UP to our target
+            if (current_price >= slot.target_price) {
+                double qty = slot.quantity;
+                cash += current_price * qty;
+                on_target(qty, slot.entry_price, current_price);
+                slot.clear();
+                sym_pos.count--;
+                closed++;
+                continue;
+            }
+
+            // STOP-LOSS HIT: price went DOWN to our stop
+            if (current_price <= slot.stop_loss_price) {
+                double qty = slot.quantity;
+                cash += current_price * qty;
+                on_stop(qty, slot.entry_price, current_price);
+                slot.clear();
+                sym_pos.count--;
+                closed++;
+            }
+        }
+
+        if (sym_pos.count == 0) {
+            symbol_active[s] = false;
+        }
+
+        return closed;
+    }
+
+    // Calculate total portfolio value (cash + holdings at current prices)
+    // prices array: prices[symbol_id] = current price
+    double total_value(const std::array<double, MAX_SYMBOLS>& prices) const {
         double value = cash;
-        for (auto& [s, qty] : holdings) {
-            auto it = prices.find(s);
-            if (it != prices.end()) {
-                value += qty * it->second;
+        for (size_t s = 0; s < MAX_SYMBOLS; s++) {
+            if (symbol_active[s] && prices[s] > 0) {
+                value += positions[s].total_quantity() * prices[s];
             }
         }
         return value;
+    }
+
+    // Overload for std::map (backwards compatibility, slightly slower)
+    double total_value(const std::map<Symbol, double>& prices) const {
+        double value = cash;
+        for (size_t s = 0; s < MAX_SYMBOLS; s++) {
+            if (symbol_active[s]) {
+                auto it = prices.find(static_cast<Symbol>(s));
+                if (it != prices.end()) {
+                    value += positions[s].total_quantity() * it->second;
+                }
+            }
+        }
+        return value;
+    }
+
+    int position_count() const {
+        int count = 0;
+        for (size_t s = 0; s < MAX_SYMBOLS; s++) {
+            if (symbol_active[s] && positions[s].count > 0) count++;
+        }
+        return count;
+    }
+
+    int total_position_slots() const {
+        int count = 0;
+        for (size_t s = 0; s < MAX_SYMBOLS; s++) {
+            count += positions[s].count;
+        }
+        return count;
     }
 };
 
@@ -337,8 +645,51 @@ public:
         , sender_()
         , engine_(sender_)
         , total_ticks_(0)
+        , publisher_(args.paper_mode)  // Only publish events in paper mode
     {
         portfolio_.init(args.capital);
+
+        // Initialize shared portfolio state for dashboard/observer
+        if (args.paper_mode) {
+            // Try to open existing state first (crash recovery) - read-write mode
+            portfolio_state_ = SharedPortfolioState::open_rw("/hft_portfolio");
+            if (portfolio_state_) {
+                std::cout << "[IPC] Recovered existing portfolio state "
+                          << "(cash=$" << portfolio_state_->cash()
+                          << ", fills=" << portfolio_state_->total_fills.load() << ")\n";
+                // Sync local portfolio with shared state
+                portfolio_.cash = portfolio_state_->cash();
+                portfolio_state_->trading_active.store(1);
+            } else {
+                // Create new state
+                portfolio_state_ = SharedPortfolioState::create("/hft_portfolio", args.capital);
+                if (portfolio_state_) {
+                    std::cout << "[IPC] Portfolio state initialized "
+                              << "(session=" << std::hex << std::uppercase << portfolio_state_->session_id
+                              << std::dec << ", cash=$" << args.capital << ")\n";
+                }
+            }
+
+            // Open shared config (dashboard can modify this)
+            // Try to open existing, if version mismatch destroy and recreate
+            shared_config_ = SharedConfig::open_rw("/hft_config");
+            if (!shared_config_) {
+                // Either doesn't exist or version mismatch - destroy and create fresh
+                SharedConfig::destroy("/hft_config");
+                shared_config_ = SharedConfig::create("/hft_config");
+            }
+            if (shared_config_) {
+                last_config_seq_ = shared_config_->sequence.load();
+                std::cout << "[IPC] Config loaded (spread_mult="
+                          << shared_config_->spread_multiplier() << "x)\n";
+
+                // Register HFT lifecycle in shared config
+                shared_config_->set_hft_pid(getpid());
+                shared_config_->set_hft_status(1);  // starting
+                shared_config_->update_heartbeat();
+                g_shared_config = shared_config_;  // For signal handler
+            }
+        }
 
         if constexpr (std::is_same_v<OrderSender, PaperOrderSender>) {
             sender_.set_fill_callback([this](Symbol s, OrderId id, Side side, Quantity q, Price p) {
@@ -347,9 +698,39 @@ public:
         }
     }
 
-    void add_symbol(const std::string& ticker) {
-        std::lock_guard<std::mutex> lock(mutex_);
+    ~TradingApp() {
+        // Normal shutdown - cleanup shared memory
+        if (portfolio_state_) {
+            // Mark trading as inactive
+            portfolio_state_->trading_active.store(0);
 
+            // Print final summary before cleanup
+            std::cout << "\n[CLEANUP] Final portfolio state:\n"
+                      << "  Cash: $" << std::fixed << std::setprecision(2) << portfolio_state_->cash() << "\n"
+                      << "  Realized P&L: $" << portfolio_state_->total_realized_pnl() << "\n"
+                      << "  Fills: " << portfolio_state_->total_fills.load()
+                      << ", Targets: " << portfolio_state_->total_targets.load()
+                      << ", Stops: " << portfolio_state_->total_stops.load() << "\n"
+                      << "  Win rate: " << std::setprecision(1) << portfolio_state_->win_rate() << "%\n";
+
+            // Unmap and unlink shared memory
+            munmap(portfolio_state_, sizeof(SharedPortfolioState));
+            SharedPortfolioState::destroy("/hft_portfolio");
+            std::cout << "[IPC] Portfolio state cleaned up\n";
+        }
+
+        // Cleanup shared config (mark as stopped before unmapping)
+        if (shared_config_) {
+            shared_config_->set_hft_status(0);  // stopped
+            shared_config_->update_heartbeat();
+            g_shared_config = nullptr;
+            munmap(shared_config_, sizeof(SharedConfig));
+            std::cout << "[IPC] Config unmapped, HFT marked as stopped\n";
+        }
+    }
+
+    void add_symbol(const std::string& ticker) {
+        // Called during init only, before trading starts
         if (engine_.lookup_symbol(ticker).has_value()) return;
 
         SymbolConfig cfg;
@@ -358,22 +739,23 @@ public:
         cfg.max_loss = 1000 * risk::PRICE_SCALE;
 
         Symbol id = engine_.add_symbol(cfg);
-        auto strat = std::make_unique<SymbolStrategy>();
-        strat->ticker = ticker;
-        strategies_[id] = std::move(strat);
+        if (id < MAX_SYMBOLS) {
+            strategies_[id].init(ticker);
+        }
     }
 
     void on_quote(const std::string& ticker, Price bid, Price ask) {
-        std::lock_guard<std::mutex> lock(mutex_);
-
+        // Hot path - no locks, O(1) array access
         auto opt = engine_.lookup_symbol(ticker);
         if (!opt) return;
 
         Symbol id = *opt;
+        if (id >= MAX_SYMBOLS) return;
+
         auto* world = engine_.get_symbol_world(id);
         if (!world) return;
 
-        total_ticks_++;
+        total_ticks_.fetch_add(1, std::memory_order_relaxed);
 
         // Update L1 - order: bid_price, bid_size, ask_price, ask_size
         L1Snapshot snap;
@@ -388,30 +770,110 @@ public:
             sender_.process_fills(id, bid, ask);
         }
 
-        // Update regime and spread
-        auto* strat = strategies_[id].get();
-        if (!strat) return;
+        // Update regime and spread - O(1) array access
+        auto& strat = strategies_[id];
+        if (!strat.active) return;
 
         // Track spread for dynamic thresholds
-        strat->update_spread(bid, ask);
+        strat.update_spread(bid, ask);
 
         double mid = (bid + ask) / 2.0 / risk::PRICE_SCALE;
-        strat->regime.update(mid);
-        strat->indicators.update(mid);  // Update technical indicators
 
-        MarketRegime new_regime = strat->regime.current_regime();
-        if (new_regime != strat->current_regime && strat->current_regime != MarketRegime::Unknown) {
-            // Regime changed - log it
-            add_log(strat->ticker, strat->current_regime, new_regime);
+        // Update last price in shared state for dashboard charts
+        // Ultra-low latency: relaxed memory ordering (~1 cycle vs ~15)
+        if (portfolio_state_) {
+            portfolio_state_->update_last_price_relaxed(
+                static_cast<size_t>(id), static_cast<int64_t>(mid * 1e8));
         }
-        strat->current_regime = new_regime;
+        strat.regime.update(mid);
+        strat.indicators.update(mid);  // Update technical indicators
 
-        // Generate signals
+        MarketRegime new_regime = strat.regime.current_regime();
+        if (new_regime != strat.current_regime) {
+            // Regime changed - publish to observer
+            if (strat.current_regime != MarketRegime::Unknown) {
+                publisher_.regime_change(id, strat.ticker, static_cast<uint8_t>(new_regime));
+            }
+            strat.current_regime = new_regime;
+
+            // Update shared state for dashboard (~5ns)
+            if (portfolio_state_) {
+                portfolio_state_->update_regime(strat.ticker, static_cast<uint8_t>(new_regime));
+            }
+        }
+
+        // Generate buy signals
         if (engine_.can_trade() && !world->is_halted()) {
-            check_signal(id, world, strat, bid, ask);
+            check_signal(id, world, &strat, bid, ask);
+        }
+
+        // Check target/stop-loss for this symbol - O(n), no allocation
+        if (portfolio_.symbol_active[id]) {
+            double bid_usd = static_cast<double>(bid) / risk::PRICE_SCALE;
+            const char* ticker = strat.ticker;
+
+            portfolio_.check_and_close(id, bid_usd,
+                // On target hit (profit)
+                [&](double qty, double entry, double exit) {
+                    double profit = (exit - entry) * qty;
+
+                    // Update shared portfolio state (~5ns)
+                    if (portfolio_state_) {
+                        portfolio_state_->set_cash(portfolio_.cash);
+                        portfolio_state_->add_realized_pnl(profit);
+                        portfolio_state_->record_target();
+                        portfolio_state_->record_event();
+                        // Update position (will be 0 qty if fully closed)
+                        auto& pos = portfolio_.positions[id];
+                        portfolio_state_->update_position(ticker, pos.total_quantity(), pos.avg_entry(), exit);
+                    }
+
+                    // Track win streak
+                    record_win();
+
+                    // Publish to observer (~5ns)
+                    publisher_.target_hit(id, ticker, entry, exit, qty);
+
+                    if (args_.verbose) {
+                        std::cout << "[TARGET] " << ticker << " SELL " << qty
+                                  << " @ $" << std::fixed << std::setprecision(2) << exit
+                                  << " (entry=$" << entry
+                                  << ", profit=$" << std::setprecision(2) << profit << ")\n";
+                    }
+                },
+                // On stop-loss hit (cut loss)
+                [&](double qty, double entry, double exit) {
+                    double loss = (exit - entry) * qty;  // Will be negative
+
+                    // Update shared portfolio state (~5ns)
+                    if (portfolio_state_) {
+                        portfolio_state_->set_cash(portfolio_.cash);
+                        portfolio_state_->add_realized_pnl(loss);
+                        portfolio_state_->record_stop();
+                        portfolio_state_->record_event();
+                        // Update position (will be 0 qty if fully closed)
+                        auto& pos = portfolio_.positions[id];
+                        portfolio_state_->update_position(ticker, pos.total_quantity(), pos.avg_entry(), exit);
+                    }
+
+                    // Track loss streak
+                    record_loss();
+
+                    // Publish to observer (~5ns)
+                    publisher_.stop_loss(id, ticker, entry, exit, qty);
+
+                    if (args_.verbose) {
+                        std::cout << "[STOP] " << ticker << " SELL " << qty
+                                  << " @ $" << std::fixed << std::setprecision(2) << exit
+                                  << " (entry=$" << entry
+                                  << ", loss=$" << std::setprecision(2) << -loss << ")\n";
+                    }
+                }
+            );
         }
     }
 
+    // Stats for final summary (called after trading stops, not on hot path)
     struct Stats {
         size_t symbols = 0;
         uint64_t ticks = 0;
@@ -421,16 +883,15 @@ public:
         double holdings_value = 0;
         double equity = 0;
         double pnl = 0;
-        int positions = 0;  // symbols with holdings
+        int positions = 0;
         bool halted = false;
     };
 
     Stats get_stats() {
-        std::lock_guard<std::mutex> lock(mutex_);
-
+        // Called after trading stops - not performance critical
         Stats s;
         s.symbols = engine_.symbol_count();
-        s.ticks = total_ticks_;
+        s.ticks = total_ticks_.load(std::memory_order_relaxed);
         s.halted = !engine_.can_trade();
         s.cash = portfolio_.cash;
 
@@ -439,20 +900,23 @@ public:
             s.fills = sender_.total_fills();
         }
 
-        // Calculate holdings value at current prices
-        std::map<Symbol, double> prices;
+        // Calculate holdings value using fixed array (no std::map)
+        std::array<double, MAX_SYMBOLS> prices{};
         engine_.for_each_symbol([&](const SymbolWorld& w) {
             Price mid = w.top().mid_price();
-            if (mid > 0) {
+            if (mid > 0 && w.id() < MAX_SYMBOLS) {
                 prices[w.id()] = static_cast<double>(mid) / risk::PRICE_SCALE;
             }
         });
 
         s.holdings_value = 0;
-        for (auto& [sym, qty] : portfolio_.holdings) {
-            auto it = prices.find(sym);
-            if (it != prices.end()) {
-                s.holdings_value += qty * it->second;
+        s.positions = 0;
+        for (size_t sym = 0; sym < MAX_SYMBOLS; sym++) {
+            if (!portfolio_.symbol_active[sym] || prices[sym] <= 0) continue;
+
+            double sym_qty = portfolio_.positions[sym].total_quantity();
+            if (sym_qty > 0) {
+                s.holdings_value += sym_qty * prices[sym];
                 s.positions++;
             }
         }
@@ -462,99 +926,64 @@ public:
         return s;
     }
 
-    std::map<MarketRegime, int> get_regimes() {
-        std::lock_guard<std::mutex> lock(mutex_);
-        std::map<MarketRegime, int> dist;
-        for (auto& [id, strat] : strategies_) {
-            dist[strat->current_regime]++;
-        }
-        return dist;
-    }
-
-    struct SymbolInfo {
-        std::string ticker;
-        MarketRegime regime;
-        double holding;     // quantity held (0 = no position)
-        double value;       // holding * price
-        double mid_price;
-        double spread_pct;  // current spread as percentage
-        double rsi;         // RSI value
-        bool ema_bullish;   // EMA crossover state
-    };
-
-    std::vector<SymbolInfo> get_symbol_details() {
-        std::lock_guard<std::mutex> lock(mutex_);
-        std::vector<SymbolInfo> result;
-
-        engine_.for_each_symbol([&](const SymbolWorld& w) {
-            SymbolInfo info;
-            info.ticker = w.ticker();
-            info.holding = portfolio_.get_holding(w.id());
-
-            Price mid = w.top().mid_price();
-            info.mid_price = mid > 0 ? static_cast<double>(mid) / risk::PRICE_SCALE : 0;
-            info.value = info.holding * info.mid_price;
-
-            auto it = strategies_.find(w.id());
-            if (it != strategies_.end()) {
-                info.regime = it->second->current_regime;
-                info.spread_pct = it->second->ema_spread_pct * 100;  // as percentage
-                info.rsi = it->second->indicators.rsi();
-                info.ema_bullish = it->second->indicators.ema_bullish();
-            } else {
-                info.regime = MarketRegime::Unknown;
-                info.spread_pct = 0;
-                info.rsi = 50;
-                info.ema_bullish = false;
-            }
-
-            result.push_back(info);
-        });
-
-        // Sort by value descending (largest holdings first)
-        std::sort(result.begin(), result.end(), [](const SymbolInfo& a, const SymbolInfo& b) {
-            return a.value > b.value;
-        });
-
-        return result;
-    }
-
     bool is_halted() const { return !engine_.can_trade(); }
-
-    struct LogEntry {
-        std::string ticker;
-        MarketRegime from;
-        MarketRegime to;
-        uint64_t timestamp;
-    };
-
-    std::vector<LogEntry> get_recent_logs(size_t max_count = 5) {
-        std::lock_guard<std::mutex> lock(mutex_);
-        std::vector<LogEntry> result;
-        size_t start = logs_.size() > max_count ? logs_.size() - max_count : 0;
-        for (size_t i = start; i < logs_.size(); ++i) {
-            result.push_back(logs_[i]);
-        }
-        return result;
-    }
 
 private:
     CLIArgs args_;
     OrderSender sender_;
     TradingEngine<OrderSender> engine_;
-    std::map<Symbol, std::unique_ptr<SymbolStrategy>> strategies_;
+    std::array<SymbolStrategy, MAX_SYMBOLS> strategies_;  // Fixed array, O(1) access
     std::atomic<uint64_t> total_ticks_;
-    std::mutex mutex_;
-    std::vector<LogEntry> logs_;
+    // No mutex - single-threaded hot path, lock-free design
     Portfolio portfolio_;
+    EventPublisher publisher_;  // Lock-free event publishing to observer
+    SharedPortfolioState* portfolio_state_ = nullptr;  // Shared state for dashboard
+    SharedConfig* shared_config_ = nullptr;           // Shared config from dashboard
+    uint32_t last_config_seq_ = 0;                    // Track config changes
 
-    void add_log(const std::string& ticker, MarketRegime from, MarketRegime to) {
-        uint64_t now = static_cast<uint64_t>(std::chrono::steady_clock::now().time_since_epoch().count());
-        logs_.push_back({ticker, from, to, now});
-        // Keep only last 100 entries
-        if (logs_.size() > 100) {
-            logs_.erase(logs_.begin(), logs_.begin() + 50);
+    // Strategy mode tracking
+    int32_t consecutive_wins_ = 0;
+    int32_t consecutive_losses_ = 0;
+    uint8_t active_mode_ = 2;  // NORMAL by default
+
+    void update_active_mode() {
+        if (!shared_config_) return;
+
+        // Determine mode based on performance and config
+        uint8_t force = shared_config_->get_force_mode();
+        if (force > 0) {
+            // Manual override
+            active_mode_ = force;
+        } else {
+            // Auto mode - adjust based on performance
+            int32_t loss_limit = shared_config_->loss_streak();
+            if (consecutive_losses_ >= loss_limit) {
+                active_mode_ = 3;  // CAUTIOUS
+            } else if (consecutive_losses_ >= loss_limit + 2) {
+                active_mode_ = 4;  // DEFENSIVE
+            } else if (consecutive_wins_ >= 3) {
+                active_mode_ = 1;  // AGGRESSIVE
+            } else {
+                active_mode_ = 2;  // NORMAL
+            }
         }
+
+        // Update shared config for dashboard
+        shared_config_->set_active_mode(active_mode_);
+        shared_config_->set_consecutive_wins(consecutive_wins_);
+        shared_config_->set_consecutive_losses(consecutive_losses_);
+    }
+
+    void record_win() {
+        consecutive_wins_++;
+        consecutive_losses_ = 0;
+        update_active_mode();
+    }
+
+    void record_loss() {
+        consecutive_losses_++;
+        consecutive_wins_ = 0;
+        update_active_mode();
     }
 
     void on_fill(Symbol symbol, OrderId id, Side side, Quantity qty, Price price) {
@@ -571,6 +1000,31 @@ private:
             portfolio_.sell(symbol, price_usd, qty_d);
         }
 
+        // Update shared portfolio state for dashboard (~5ns)
+        if (portfolio_state_) {
+            portfolio_state_->set_cash(portfolio_.cash);
+            portfolio_state_->record_fill();
+            portfolio_state_->record_event();
+
+            auto& pos = portfolio_.positions[symbol];
+            portfolio_state_->update_position(
+                world->ticker().c_str(),
+                pos.total_quantity(),
+                pos.avg_entry(),
+                price_usd
+            );
+
+            if (side == Side::Buy) {
+                portfolio_state_->record_buy(world->ticker().c_str());
+            } else {
+                portfolio_state_->record_sell(world->ticker().c_str());
+            }
+        }
+
+        // Publish fill event to observer (~5ns, lock-free)
+        publisher_.fill(symbol, world->ticker().c_str(),
+                       side == Side::Buy ? 0 : 1, price_usd, qty_d, id);
+
         // Debug: log fill details
         if (args_.verbose) {
             std::cout << "[FILL] " << world->ticker()
@@ -582,6 +1036,8 @@ private:
         world->on_fill(side, qty, price);
         world->on_our_fill(id, qty);
     }
+
+    // Note: check_targets_and_stops removed - now handled inline in on_quote
 
     void check_signal(Symbol id, SymbolWorld* world, SymbolStrategy* strat, Price bid, Price ask) {
         uint64_t now = std::chrono::steady_clock::now().time_since_epoch().count();
@@ -596,49 +1052,43 @@ private:
         if (!strat->indicators.ready()) return;
 
         double ask_usd = static_cast<double>(ask) / risk::PRICE_SCALE;
+        double bid_usd = static_cast<double>(bid) / risk::PRICE_SCALE;
         double holding = portfolio_.get_holding(id);
 
-        bool buy = false, sell = false;
+        // NEW LOGIC:
+        // - BUY based on regime + indicators
+        // - SELL handled by target/stop-loss (not here!)
 
-        // Get composite signals from technical indicators
+        bool should_buy = false;
+
         auto buy_strength = strat->indicators.buy_signal();
-        auto sell_strength = strat->indicators.sell_signal();
-
-        // SPOT TRADING: No shorting allowed!
-        // Regime determines which signals we act on and required strength
-
         using SS = TechnicalIndicators::SignalStrength;
 
         switch (strat->current_regime) {
             case MarketRegime::TrendingUp:
-                // Trend following: buy on EMA bullish + dip signals
-                // More aggressive - accept Medium strength
+                // Uptrend: Buy on medium signal, let target take profit
                 if (buy_strength >= SS::Medium && holding < args_.max_position) {
-                    buy = true;
+                    should_buy = true;
                 }
                 break;
 
             case MarketRegime::TrendingDown:
-                // Exit positions - sell on any bearish signal
-                if (sell_strength >= SS::Weak && holding > 0) {
-                    sell = true;
-                }
+                // Downtrend: DON'T BUY! Stop-loss will handle exits
+                // Just wait for trend reversal
                 break;
 
             case MarketRegime::Ranging:
             case MarketRegime::LowVolatility:
-                // Mean reversion: need Strong signals (multiple indicators agree)
-                if (buy_strength >= SS::Strong && holding < args_.max_position) {
-                    buy = true;
-                } else if (sell_strength >= SS::Strong && holding > 0) {
-                    sell = true;
+                // Mean reversion: Buy on dips (oversold signals)
+                if (buy_strength >= SS::Medium && holding < args_.max_position) {
+                    should_buy = true;
                 }
                 break;
 
             case MarketRegime::HighVolatility:
-                // Risk reduction: only sell on Strong signal, no buying
-                if (sell_strength >= SS::Medium && holding > 0) {
-                    sell = true;
+                // High vol: Be careful, only buy on very strong signals
+                if (buy_strength >= SS::Strong && holding < args_.max_position) {
+                    should_buy = true;
                 }
                 break;
 
@@ -646,14 +1096,21 @@ private:
                 break;
         }
 
-        // Check portfolio constraints (SPOT: no leverage, no shorting)
-        if (buy && !portfolio_.can_buy(ask_usd, 1)) {
-            buy = false;  // Not enough cash
-        }
-        if (sell) {
-            if (!portfolio_.can_sell(id, 1)) {
-                sell = false;  // No holdings to sell (this is normal, not an error)
+        // Price check: Only buy if price is attractive (below slow EMA)
+        double ema = strat->indicators.ema_slow();
+        if (should_buy && ema > 0) {
+            double deviation = (ask_usd - ema) / ema;
+            // Only buy if price is at or below EMA (deviation <= 0)
+            // Or at most slightly above (small positive deviation OK in uptrend)
+            double max_deviation = (strat->current_regime == MarketRegime::TrendingUp) ? 0.001 : 0.0;
+            if (deviation > max_deviation) {
+                should_buy = false;  // Price too high relative to EMA
             }
+        }
+
+        // Portfolio constraint
+        if (should_buy && !portfolio_.can_buy(ask_usd, 1)) {
+            should_buy = false;
         }
 
         auto signal_str = [](TechnicalIndicators::SignalStrength s) {
@@ -665,151 +1122,44 @@ private:
             }
         };
 
-        if (buy && world->can_trade(Side::Buy, 1)) {
+        // Execute buy if conditions met
+        if (should_buy && world->can_trade(Side::Buy, 1)) {
             if (args_.verbose) {
-                std::cout << "[SIGNAL] " << strat->ticker << " BUY @ $" << ask_usd
-                          << " (strength=" << signal_str(buy_strength)
-                          << ", RSI=" << std::fixed << std::setprecision(1) << strat->indicators.rsi()
-                          << ", EMA=" << (strat->indicators.ema_bullish() ? "BULL" : "BEAR") << ")\n";
+                std::cout << "[BUY] " << strat->ticker << " @ $" << std::fixed << std::setprecision(2) << ask_usd
+                          << " (signal=" << signal_str(buy_strength)
+                          << ", RSI=" << std::setprecision(0) << strat->indicators.rsi()
+                          << ", target=$" << std::setprecision(2) << ask_usd * (1.0 + portfolio_.profit_margin_pct)
+                          << ", stop=$" << ask_usd * (1.0 - portfolio_.stop_loss_pct) << ")\n";
             }
             engine_.send_order(id, Side::Buy, 1, true);
             strat->last_signal_time = now;
-        } else if (sell && world->can_trade(Side::Sell, 1)) {
-            if (args_.verbose) {
-                std::cout << "[SIGNAL] " << strat->ticker << " SELL"
-                          << " (strength=" << signal_str(sell_strength)
-                          << ", RSI=" << std::fixed << std::setprecision(1) << strat->indicators.rsi()
-                          << ", EMA=" << (strat->indicators.ema_bullish() ? "BULL" : "BEAR") << ")\n";
-            }
-            engine_.send_order(id, Side::Sell, 1, true);
-            strat->last_signal_time = now;
         }
+        // NOTE: Selling is handled by check_targets_and_stops(), not here!
     }
 };
 
 // ============================================================================
-// Display
+// CPU Affinity
 // ============================================================================
 
-void clear_screen() { std::cout << "\033[2J\033[H"; }
+// Pin current thread to specific CPU core
+bool set_cpu_affinity(int cpu) {
+    if (cpu < 0) return true;  // No pinning requested
 
-const char* regime_str(MarketRegime r) {
-    switch (r) {
-        case MarketRegime::TrendingUp: return "TREND-UP";
-        case MarketRegime::TrendingDown: return "TREND-DN";
-        case MarketRegime::Ranging: return "RANGING ";
-        case MarketRegime::HighVolatility: return "HIGH-VOL";
-        case MarketRegime::LowVolatility: return "LOW-VOL ";
-        default: return "UNKNOWN ";
+    cpu_set_t cpuset;
+    CPU_ZERO(&cpuset);
+    CPU_SET(cpu, &cpuset);
+
+    if (sched_setaffinity(0, sizeof(cpu_set_t), &cpuset) != 0) {
+        std::cerr << "[WARN] Could not pin to CPU " << cpu << ": " << strerror(errno) << "\n";
+        return false;
     }
+    std::cout << "[CPU] Pinned to core " << cpu << "\n";
+    return true;
 }
 
-const char* regime_short(MarketRegime r) {
-    switch (r) {
-        case MarketRegime::TrendingUp: return "UP  ";
-        case MarketRegime::TrendingDown: return "DOWN";
-        case MarketRegime::Ranging: return "RANG";
-        case MarketRegime::HighVolatility: return "HVOL";
-        case MarketRegime::LowVolatility: return "LVOL";
-        default: return "??? ";
-    }
-}
-
-const char* strategy_for_regime(MarketRegime r) {
-    switch (r) {
-        case MarketRegime::TrendingUp: return "MOMENTUM (buy dips)";
-        case MarketRegime::TrendingDown: return "MOMENTUM (sell rallies)";
-        case MarketRegime::Ranging: return "MEAN-REVERT";
-        case MarketRegime::HighVolatility: return "REDUCE-RISK";
-        case MarketRegime::LowVolatility: return "MEAN-REVERT";
-        default: return "WAIT";
-    }
-}
-
-// Short strategy name for table display
-const char* strategy_short(MarketRegime r) {
-    switch (r) {
-        case MarketRegime::TrendingUp: return "MOM-BUY";
-        case MarketRegime::TrendingDown: return "MOM-SEL";
-        case MarketRegime::Ranging: return "MR     ";
-        case MarketRegime::HighVolatility: return "REDUCE ";
-        case MarketRegime::LowVolatility: return "MR     ";
-        default: return "WAIT   ";
-    }
-}
-
-template<typename App>
-void print_status(App& app, int elapsed, bool paper_mode, double capital) {
-    auto stats = app.get_stats();
-    auto symbols = app.get_symbol_details();
-
-    clear_screen();
-    std::cout << "HFT Trading System - " << (paper_mode ? "PAPER" : "PRODUCTION") << " MODE\n";
-    std::cout << "================================================================\n\n";
-
-    std::cout << "  Time: " << elapsed << "s  |  Symbols: " << stats.symbols
-              << "  |  Ticks: " << stats.ticks << "  |  Fills: " << stats.fills
-              << "  |  " << (stats.halted ? "HALTED" : "ACTIVE") << "\n\n";
-
-    std::cout << std::fixed << std::setprecision(2);
-    std::cout << "  Cash: $" << stats.cash
-              << "  |  Holdings: $" << stats.holdings_value
-              << "  |  Equity: $" << stats.equity << "\n";
-    double pnl_pct = capital > 0 ? (stats.pnl / capital * 100) : 0;
-    std::cout << "  P&L: $" << (stats.pnl >= 0 ? "+" : "") << stats.pnl
-              << "  (" << (pnl_pct >= 0 ? "+" : "") << pnl_pct << "%)"
-              << "  |  Positions: " << stats.positions << " symbols\n\n";
-
-    // Regime distribution summary
-    std::map<MarketRegime, int> regime_counts;
-    for (const auto& s : symbols) {
-        regime_counts[s.regime]++;
-    }
-    std::cout << "  Regimes: ";
-    for (auto& [r, c] : regime_counts) {
-        if (r != MarketRegime::Unknown) {
-            std::cout << regime_short(r) << ":" << c << "  ";
-        }
-    }
-    std::cout << "\n\n";
-
-    // Symbol details table with individual strategy (top 15 by value)
-    std::cout << "  SYMBOL      REGIME  STRATEGY  RSI   EMA   SPREAD   QTY      VALUE\n";
-    std::cout << "  ---------------------------------------------------------------------------\n";
-
-    size_t show_count = std::min(symbols.size(), size_t(15));
-    for (size_t i = 0; i < show_count; ++i) {
-        const auto& s = symbols[i];
-        if (s.holding > 0 || i < 5) {  // Show holdings or at least top 5
-            std::cout << "  " << std::left << std::setw(10) << s.ticker
-                      << "  " << regime_short(s.regime)
-                      << "  " << strategy_short(s.regime)
-                      << "  " << std::right << std::setw(4) << std::fixed << std::setprecision(0) << s.rsi
-                      << "  " << (s.ema_bullish ? " UP " : " DN ")
-                      << "  " << std::setw(5) << std::setprecision(3) << s.spread_pct << "%"
-                      << "  " << std::setw(5) << std::setprecision(2) << s.holding
-                      << "  $" << std::setw(9) << s.value
-                      << "\n";
-        }
-    }
-
-    if (symbols.size() > 15) {
-        std::cout << "  ... and " << (symbols.size() - 15) << " more symbols\n";
-    }
-
-    // Recent regime changes
-    auto logs = app.get_recent_logs(5);
-    if (!logs.empty()) {
-        std::cout << "\n  Recent Regime Changes:\n";
-        for (const auto& log : logs) {
-            std::cout << "    " << std::left << std::setw(10) << log.ticker
-                      << ": " << regime_short(log.from) << " -> " << regime_short(log.to) << "\n";
-        }
-    }
-
-    std::cout << "\n================================================================\n";
-    std::cout << "  Press Ctrl+C to stop\n";
-}
+// Note: Dashboard removed - use hft_observer for real-time monitoring
+// This keeps HFT process lean with zero display overhead
 
 // ============================================================================
 // Main
@@ -817,6 +1167,9 @@ void print_status(App& app, int elapsed, bool paper_mode, double capital) {
 
 template<typename OrderSender>
 int run(const CLIArgs& args) {
+    // Pin to CPU core if requested (reduces latency variance)
+    set_cpu_affinity(args.cpu_affinity);
+
     std::cout << "\nHFT Trading System - " << (args.paper_mode ? "PAPER" : "PRODUCTION") << " MODE\n";
     std::cout << "================================================================\n\n";
 
@@ -840,6 +1193,11 @@ int run(const CLIArgs& args) {
 
     ws.set_connect_callback([](bool c) {
         if (c) std::cout << "[OK] Connected to Binance\n\n";
+        else std::cout << "[DISCONNECTED] from Binance\n";
+    });
+
+    ws.set_error_callback([](const std::string& err) {
+        std::cerr << "[WS ERROR] " << err << "\n";
     });
 
     ws.set_book_ticker_callback([&](const BookTicker& bt) {
@@ -863,7 +1221,14 @@ int run(const CLIArgs& args) {
         return 1;
     }
 
+    // Mark as running now that we're connected
+    if (g_shared_config) {
+        g_shared_config->set_hft_status(2);  // running
+        g_shared_config->update_heartbeat();
+    }
+
     auto start = std::chrono::steady_clock::now();
+    auto last_heartbeat = start;
 
     while (g_running) {
         auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
@@ -871,42 +1236,43 @@ int run(const CLIArgs& args) {
 
         if (args.duration > 0 && elapsed >= args.duration) break;
 
-        print_status(app, static_cast<int>(elapsed), args.paper_mode, args.capital);
-
         if (app.is_halted()) {
             std::cout << "\n  TRADING HALTED - Risk limit breached\n";
             break;
         }
 
-        std::this_thread::sleep_for(std::chrono::seconds(2));
+        // Update heartbeat every second
+        auto now = std::chrono::steady_clock::now();
+        if (std::chrono::duration_cast<std::chrono::seconds>(now - last_heartbeat).count() >= 1) {
+            if (g_shared_config) {
+                g_shared_config->update_heartbeat();
+            }
+            last_heartbeat = now;
+        }
+
+        // No dashboard here - use hft_observer for real-time monitoring
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
 
     ws.disconnect();
 
-    // Summary
+    // Final summary
     auto stats = app.get_stats();
     auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
         std::chrono::steady_clock::now() - start).count();
 
-    clear_screen();
-    std::cout << "\nFINAL SUMMARY\n";
-    std::cout << "================================================================\n";
-    std::cout << "  Mode:      " << (args.paper_mode ? "PAPER" : "PRODUCTION") << "\n";
-    std::cout << "  Duration:  " << elapsed << " seconds\n";
-    std::cout << "  Symbols:   " << stats.symbols << "\n";
-    std::cout << "  Ticks:     " << stats.ticks << "\n";
-    std::cout << "  Fills:     " << stats.fills << "\n";
-    std::cout << "  Capital:   $" << std::fixed << std::setprecision(2) << args.capital << "\n";
-    std::cout << "  Equity:    $" << stats.equity << "\n";
-    std::cout << "  P&L:       $" << (stats.pnl >= 0 ? "+" : "") << stats.pnl << "\n";
-    std::cout << "  Status:    " << (stats.halted ? "HALTED" : "OK") << "\n";
-    std::cout << "================================================================\n\n";
+    std::cout << "\n[DONE] " << elapsed << "s | "
+              << stats.ticks << " ticks | "
+              << stats.fills << " fills | P&L: $"
+              << std::fixed << std::setprecision(2)
+              << (stats.pnl >= 0 ? "+" : "") << stats.pnl << "\n";
 
     return 0;
 }
 
 int main(int argc, char* argv[]) {
     signal(SIGINT, signal_handler);
+    signal(SIGTERM, signal_handler);
 
     CLIArgs args;
     if (!parse_args(argc, argv, args)) return 1;

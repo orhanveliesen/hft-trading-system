@@ -402,9 +402,17 @@ private:
     }
 
     // WebSocket callback (static, called by libwebsockets)
+    // NOTE: lws 4.3+ remapped LWS_CALLBACK_CLIENT_RECEIVE from 8 to 71
+#ifdef LWS_VERSION_4_3_PLUS
+    static constexpr int LWS_CLIENT_RECEIVE_COMPAT = 71;
+#else
+    static constexpr int LWS_CLIENT_RECEIVE_COMPAT = LWS_CALLBACK_CLIENT_RECEIVE;
+#endif
+
     static int ws_callback(struct lws* wsi, enum lws_callback_reasons reason,
                            void* user, void* in, size_t len) {
         BinanceWs* self = static_cast<BinanceWs*>(lws_context_user(lws_get_context(wsi)));
+
         if (!self) return 0;
 
         switch (reason) {
@@ -416,6 +424,9 @@ private:
                 break;
 
             case LWS_CALLBACK_CLIENT_RECEIVE:
+#ifdef LWS_VERSION_4_3_PLUS
+            case 71:  // LWS_CALLBACK_CLIENT_RECEIVE in lws 4.3+
+#endif
                 if (in && len > 0) {
                     std::string msg(static_cast<char*>(in), len);
                     self->parse_message(msg);
@@ -488,7 +499,10 @@ private:
         ccinfo.host = host_.c_str();
         ccinfo.origin = host_.c_str();
         ccinfo.protocol = "binance-ws";
-        ccinfo.ssl_connection = LCCSCF_USE_SSL;
+        // WSL2'de CA bundle sorunu olabilir, sertifika doğrulamayı atla
+        ccinfo.ssl_connection = LCCSCF_USE_SSL |
+                                LCCSCF_ALLOW_SELFSIGNED |
+                                LCCSCF_SKIP_SERVER_CERT_HOSTNAME_CHECK;
 
         wsi_ = lws_client_connect_via_info(&ccinfo);
         if (!wsi_) {

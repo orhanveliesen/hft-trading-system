@@ -5,12 +5,38 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+# Get git commit hash for build versioning
+execute_process(
+    COMMAND git rev-parse --short=8 HEAD
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    OUTPUT_VARIABLE GIT_COMMIT_HASH
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET
+)
+if(NOT GIT_COMMIT_HASH)
+    set(GIT_COMMIT_HASH "00000000")
+endif()
+message(STATUS "Build version: ${GIT_COMMIT_HASH}")
+add_compile_definitions(HFT_BUILD_HASH="${GIT_COMMIT_HASH}")
+
 # Compiler flags
 set(CMAKE_CXX_FLAGS_DEBUG "-O0 -g -Wall -Wextra -Wpedantic")
 set(CMAKE_CXX_FLAGS_RELEASE "-O3 -march=native -DNDEBUG")
 
 # Include directories
 include_directories(${CMAKE_SOURCE_DIR}/include)
+
+# === Dependencies ===
+# libwebsockets - version 4.3+ has different callback enum values
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(LWS REQUIRED libwebsockets>=4.0)
+message(STATUS "libwebsockets version: ${LWS_VERSION}")
+
+# Define LWS version for compile-time checks
+if(LWS_VERSION VERSION_GREATER_EQUAL "4.3")
+    add_compile_definitions(LWS_VERSION_4_3_PLUS=1)
+    message(STATUS "Using lws 4.3+ callback enum compatibility")
+endif()
 
 # === Library ===
 add_library(hft_core
@@ -68,6 +94,9 @@ add_executable(test_simple_mr tests/test_simple_mr.cpp)
 target_link_libraries(test_simple_mr hft_core)
 add_test(NAME SimpleMRTests COMMAND test_simple_mr)
 
+add_executable(test_overfitting tests/test_overfitting.cpp)
+add_test(NAME OverfittingTests COMMAND test_overfitting)
+
 add_executable(test_all_strategies tests/test_all_strategies.cpp)
 add_test(NAME AllStrategiesTests COMMAND test_all_strategies)
 
@@ -102,10 +131,13 @@ add_test(NAME PaperPortfolioTests COMMAND test_paper_portfolio)
 
 # === Tools ===
 add_executable(hft tools/hft.cpp)
-target_link_libraries(hft hft_core websockets pthread)
+target_link_libraries(hft hft_core websockets pthread rt)
 
 add_executable(hft_control tools/hft_control.cpp)
 target_link_libraries(hft_control pthread rt)
+
+add_executable(hft_observer tools/hft_observer.cpp)
+target_link_libraries(hft_observer pthread rt)
 
 add_executable(fetch_klines tools/fetch_klines.cpp)
 target_link_libraries(fetch_klines curl)
@@ -119,3 +151,23 @@ target_link_libraries(optimize_strategies hft_core)
 # === Benchmarks ===
 add_executable(bench_orderbook benchmarks/bench_orderbook.cpp)
 target_link_libraries(bench_orderbook hft_core)
+
+add_executable(bench_lockfree benchmarks/bench_lockfree.cpp)
+target_link_libraries(bench_lockfree pthread)
+
+# === ImGui Dashboard ===
+set(IMGUI_DIR ${CMAKE_SOURCE_DIR}/external/imgui)
+add_executable(hft_dashboard
+    tools/hft_dashboard.cpp
+    ${IMGUI_DIR}/imgui.cpp
+    ${IMGUI_DIR}/imgui_draw.cpp
+    ${IMGUI_DIR}/imgui_tables.cpp
+    ${IMGUI_DIR}/imgui_widgets.cpp
+    ${IMGUI_DIR}/backends/imgui_impl_glfw.cpp
+    ${IMGUI_DIR}/backends/imgui_impl_opengl3.cpp
+)
+target_include_directories(hft_dashboard PRIVATE
+    ${IMGUI_DIR}
+    ${IMGUI_DIR}/backends
+)
+target_link_libraries(hft_dashboard glfw GL pthread rt)

@@ -64,6 +64,20 @@ cargo test
 - **Strategy** (`include/strategy/`) - Position tracker, risk manager, market maker
 - **Benchmark** (`include/benchmark/`) - RDTSC timer, histogram
 
+### IPC Components (Shared Memory)
+- **SharedConfig** (`include/ipc/shared_config.hpp`) - Runtime config, heartbeat, lifecycle management
+- **SharedPortfolioState** (`include/ipc/shared_portfolio_state.hpp`) - Portfolio snapshot for dashboard
+- **SharedRingBuffer** (`include/ipc/shared_ring_buffer.hpp`) - Lock-free SPSC event stream
+- **TradeEvent** (`include/ipc/trade_event.hpp`) - Event types for observer/dashboard
+
+### Tools
+- **hft** (`tools/hft.cpp`) - Main trading engine (paper trading on Binance)
+- **hft_dashboard** (`tools/hft_dashboard.cpp`) - Real-time ImGui dashboard
+- **hft_observer** (`tools/hft_observer.cpp`) - Event stream monitor (CLI)
+- **hft_control** (`tools/hft_control.cpp`) - Runtime parameter control
+- **run_backtest** (`tools/run_backtest.cpp`) - Strategy backtesting
+- **optimize_strategies** (`tools/optimize_strategies.cpp`) - Parameter optimization
+
 ## Code Standards (HFT-Specific)
 
 ### Hot Path Rules
@@ -99,6 +113,11 @@ hft/
 │   ├── network/
 │   │   ├── udp_receiver.hpp   # Multicast receiver + epoll
 │   │   └── packet_buffer.hpp  # Lock-free ring buffer
+│   ├── ipc/
+│   │   ├── shared_config.hpp  # Runtime config + heartbeat
+│   │   ├── shared_portfolio_state.hpp # Portfolio snapshot
+│   │   ├── shared_ring_buffer.hpp # Lock-free event stream
+│   │   └── trade_event.hpp    # Event definitions
 │   ├── benchmark/
 │   │   ├── timer.hpp          # RDTSC timing
 │   │   └── histogram.hpp      # Latency histogram
@@ -106,15 +125,14 @@ hft/
 │       ├── position.hpp       # Position & P&L tracking
 │       ├── risk_manager.hpp   # Risk limits
 │       └── market_maker.hpp   # Market making strategy
-├── src/
-│   ├── orderbook/orderbook.cpp
-│   └── benchmark/timer.cpp
-├── tests/                     # 42 tests
-│   ├── test_orderbook.cpp     # 11 tests
-│   ├── test_feed_handler.cpp  # 6 tests
-│   ├── test_network.cpp       # 7 tests
-│   ├── test_integration.cpp   # 7 tests
-│   └── test_strategy.cpp      # 11 tests
+├── tools/
+│   ├── hft.cpp                # Main trading engine
+│   ├── hft_dashboard.cpp      # ImGui real-time dashboard
+│   ├── hft_observer.cpp       # CLI event monitor
+│   ├── hft_control.cpp        # Runtime parameter control
+│   ├── run_backtest.cpp       # Backtesting tool
+│   └── optimize_strategies.cpp # Parameter optimizer
+├── tests/                     # 22 test suites
 └── benchmarks/
     └── bench_orderbook.cpp    # Performance benchmarks
 
@@ -127,7 +145,9 @@ rust/                          # Rust implementation
 └── Cargo.toml
 ```
 
-## Benchmark Results (C++ vs Rust)
+## Benchmark Results
+
+### OrderBook (C++ vs Rust)
 
 | Operation | C++ | Rust |
 |-----------|-----|------|
@@ -136,9 +156,32 @@ rust/                          # Rust implementation
 | Best Bid/Ask | 19 ns | ~0 ns |
 | Throughput | 2.21M ops/sec | 1.44M ops/sec |
 
+### IPC Overhead (Shared Memory)
+
+| Operation | Slow Path | Fast Path | Relaxed | Notes |
+|-----------|-----------|-----------|---------|-------|
+| Price update | 90 cycles | 17 cycles | **1.5 cycles** | ~0.5ns with relaxed ordering |
+| Position update | 120 cycles | 54 cycles | **2.9 cycles** | ~1ns with relaxed ordering |
+| Heartbeat | 75 cycles | - | - | Once per second |
+| Config read | 9 cycles | - | - | Atomic load |
+
+**Optimization techniques:**
+- Direct index access (O(1)) vs string search (O(n))
+- `memory_order_relaxed` for single-writer scenarios
+- `store(++seq)` vs `fetch_add(1)` (no RMW needed)
+- Pre-scaled int64 to avoid double→int conversion
+
+## HFT Lifecycle Management
+
+The HFT engine uses shared memory for process lifecycle:
+- **Heartbeat**: Updated every second, dashboard detects stale heartbeat (>3s)
+- **Version check**: Git commit hash embedded at compile time, auto-invalidates old shared memory
+- **Graceful shutdown**: Signal handlers (SIGTERM/SIGINT) set status before exit
+
 ## Next Steps
 1. End-to-end simulation with sample ITCH data
 2. Optimize Rust implementation (use BTreeMap, arena allocator)
+3. Add WebSocket support for remote dashboard
 
 ## References
 - NASDAQ ITCH 5.0 Spec: https://www.nasdaqtrader.com/content/technicalsupport/specifications/dataproducts/NQTVITCHspecification.pdf
