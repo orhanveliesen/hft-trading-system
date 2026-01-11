@@ -22,6 +22,8 @@
 #include "../include/risk/enhanced_risk_manager.hpp"
 #include "../include/ipc/trade_event.hpp"
 #include "../include/ipc/shared_ring_buffer.hpp"
+#include "../include/ipc/shared_portfolio_state.hpp"
+#include "../include/ipc/shared_config.hpp"
 #include <iostream>
 #include <iomanip>
 #include <chrono>
@@ -54,9 +56,15 @@ constexpr size_t MAX_POSITIONS_PER_SYMBOL = 32; // Max open positions per symbol
 // ============================================================================
 
 std::atomic<bool> g_running{true};
+ipc::SharedConfig* g_shared_config = nullptr;  // For graceful shutdown signaling
 
-void signal_handler(int) {
-    std::cout << "\n\n[SHUTDOWN] Stopping...\n";
+void signal_handler(int sig) {
+    // Mark as shutting down in shared memory (dashboard can see this immediately)
+    if (g_shared_config) {
+        g_shared_config->set_hft_status(3);  // shutting_down
+        g_shared_config->update_heartbeat();
+    }
+    std::cout << "\n\n[SHUTDOWN] Received signal " << sig << ", stopping gracefully...\n";
     g_running = false;
 }
 
@@ -641,10 +649,83 @@ public:
     {
         portfolio_.init(args.capital);
 
+        // Initialize shared portfolio state for dashboard/observer
+        if (args.paper_mode) {
+            // Try to open existing state first (crash recovery) - read-write mode
+            portfolio_state_ = SharedPortfolioState::open_rw("/hft_portfolio");
+            if (portfolio_state_) {
+                std::cout << "[IPC] Recovered existing portfolio state "
+                          << "(cash=$" << portfolio_state_->cash()
+                          << ", fills=" << portfolio_state_->total_fills.load() << ")\n";
+                // Sync local portfolio with shared state
+                portfolio_.cash = portfolio_state_->cash();
+                portfolio_state_->trading_active.store(1);
+            } else {
+                // Create new state
+                portfolio_state_ = SharedPortfolioState::create("/hft_portfolio", args.capital);
+                if (portfolio_state_) {
+                    std::cout << "[IPC] Portfolio state initialized "
+                              << "(session=" << std::hex << std::uppercase << portfolio_state_->session_id
+                              << std::dec << ", cash=$" << args.capital << ")\n";
+                }
+            }
+
+            // Open shared config (dashboard can modify this)
+            // Try to open existing, if version mismatch destroy and recreate
+            shared_config_ = SharedConfig::open_rw("/hft_config");
+            if (!shared_config_) {
+                // Either doesn't exist or version mismatch - destroy and create fresh
+                SharedConfig::destroy("/hft_config");
+                shared_config_ = SharedConfig::create("/hft_config");
+            }
+            if (shared_config_) {
+                last_config_seq_ = shared_config_->sequence.load();
+                std::cout << "[IPC] Config loaded (spread_mult="
+                          << shared_config_->spread_multiplier() << "x)\n";
+
+                // Register HFT lifecycle in shared config
+                shared_config_->set_hft_pid(getpid());
+                shared_config_->set_hft_status(1);  // starting
+                shared_config_->update_heartbeat();
+                g_shared_config = shared_config_;  // For signal handler
+            }
+        }
+
         if constexpr (std::is_same_v<OrderSender, PaperOrderSender>) {
             sender_.set_fill_callback([this](Symbol s, OrderId id, Side side, Quantity q, Price p) {
                 on_fill(s, id, side, q, p);
             });
+        }
+    }
+
+    ~TradingApp() {
+        // Normal shutdown - cleanup shared memory
+        if (portfolio_state_) {
+            // Mark trading as inactive
+            portfolio_state_->trading_active.store(0);
+
+            // Print final summary before cleanup
+            std::cout << "\n[CLEANUP] Final portfolio state:\n"
+                      << "  Cash: $" << std::fixed << std::setprecision(2) << portfolio_state_->cash() << "\n"
+                      << "  Realized P&L: $" << portfolio_state_->total_realized_pnl() << "\n"
+                      << "  Fills: " << portfolio_state_->total_fills.load()
+                      << ", Targets: " << portfolio_state_->total_targets.load()
+                      << ", Stops: " << portfolio_state_->total_stops.load() << "\n"
+                      << "  Win rate: " << std::setprecision(1) << portfolio_state_->win_rate() << "%\n";
+
+            // Unmap and unlink shared memory
+            munmap(portfolio_state_, sizeof(SharedPortfolioState));
+            SharedPortfolioState::destroy("/hft_portfolio");
+            std::cout << "[IPC] Portfolio state cleaned up\n";
+        }
+
+        // Cleanup shared config (mark as stopped before unmapping)
+        if (shared_config_) {
+            shared_config_->set_hft_status(0);  // stopped
+            shared_config_->update_heartbeat();
+            g_shared_config = nullptr;
+            munmap(shared_config_, sizeof(SharedConfig));
+            std::cout << "[IPC] Config unmapped, HFT marked as stopped\n";
         }
     }
 
@@ -697,6 +778,12 @@ public:
         strat.update_spread(bid, ask);
 
         double mid = (bid + ask) / 2.0 / risk::PRICE_SCALE;
+
+        // Update last price in shared state for dashboard charts (~2ns)
+        // Always update price for tracked symbols, not just those with positions
+        if (portfolio_state_) {
+            portfolio_state_->update_last_price(strat.ticker, mid);
+        }
         strat.regime.update(mid);
         strat.indicators.update(mid);  // Update technical indicators
 
@@ -707,6 +794,11 @@ public:
                 publisher_.regime_change(id, strat.ticker, static_cast<uint8_t>(new_regime));
             }
             strat.current_regime = new_regime;
+
+            // Update shared state for dashboard (~5ns)
+            if (portfolio_state_) {
+                portfolio_state_->update_regime(strat.ticker, static_cast<uint8_t>(new_regime));
+            }
         }
 
         // Generate buy signals
@@ -722,11 +814,26 @@ public:
             portfolio_.check_and_close(id, bid_usd,
                 // On target hit (profit)
                 [&](double qty, double entry, double exit) {
+                    double profit = (exit - entry) * qty;
+
+                    // Update shared portfolio state (~5ns)
+                    if (portfolio_state_) {
+                        portfolio_state_->set_cash(portfolio_.cash);
+                        portfolio_state_->add_realized_pnl(profit);
+                        portfolio_state_->record_target();
+                        portfolio_state_->record_event();
+                        // Update position (will be 0 qty if fully closed)
+                        auto& pos = portfolio_.positions[id];
+                        portfolio_state_->update_position(ticker, pos.total_quantity(), pos.avg_entry(), exit);
+                    }
+
+                    // Track win streak
+                    record_win();
+
                     // Publish to observer (~5ns)
                     publisher_.target_hit(id, ticker, entry, exit, qty);
 
                     if (args_.verbose) {
-                        double profit = (exit - entry) * qty;
                         std::cout << "[TARGET] " << ticker << " SELL " << qty
                                   << " @ $" << std::fixed << std::setprecision(2) << exit
                                   << " (entry=$" << entry
@@ -735,15 +842,30 @@ public:
                 },
                 // On stop-loss hit (cut loss)
                 [&](double qty, double entry, double exit) {
+                    double loss = (exit - entry) * qty;  // Will be negative
+
+                    // Update shared portfolio state (~5ns)
+                    if (portfolio_state_) {
+                        portfolio_state_->set_cash(portfolio_.cash);
+                        portfolio_state_->add_realized_pnl(loss);
+                        portfolio_state_->record_stop();
+                        portfolio_state_->record_event();
+                        // Update position (will be 0 qty if fully closed)
+                        auto& pos = portfolio_.positions[id];
+                        portfolio_state_->update_position(ticker, pos.total_quantity(), pos.avg_entry(), exit);
+                    }
+
+                    // Track loss streak
+                    record_loss();
+
                     // Publish to observer (~5ns)
                     publisher_.stop_loss(id, ticker, entry, exit, qty);
 
                     if (args_.verbose) {
-                        double loss = (entry - exit) * qty;
                         std::cout << "[STOP] " << ticker << " SELL " << qty
                                   << " @ $" << std::fixed << std::setprecision(2) << exit
                                   << " (entry=$" << entry
-                                  << ", loss=$" << std::setprecision(2) << loss << ")\n";
+                                  << ", loss=$" << std::setprecision(2) << -loss << ")\n";
                     }
                 }
             );
@@ -814,6 +936,54 @@ private:
     // No mutex - single-threaded hot path, lock-free design
     Portfolio portfolio_;
     EventPublisher publisher_;  // Lock-free event publishing to observer
+    SharedPortfolioState* portfolio_state_ = nullptr;  // Shared state for dashboard
+    SharedConfig* shared_config_ = nullptr;           // Shared config from dashboard
+    uint32_t last_config_seq_ = 0;                    // Track config changes
+
+    // Strategy mode tracking
+    int32_t consecutive_wins_ = 0;
+    int32_t consecutive_losses_ = 0;
+    uint8_t active_mode_ = 2;  // NORMAL by default
+
+    void update_active_mode() {
+        if (!shared_config_) return;
+
+        // Determine mode based on performance and config
+        uint8_t force = shared_config_->get_force_mode();
+        if (force > 0) {
+            // Manual override
+            active_mode_ = force;
+        } else {
+            // Auto mode - adjust based on performance
+            int32_t loss_limit = shared_config_->loss_streak();
+            if (consecutive_losses_ >= loss_limit) {
+                active_mode_ = 3;  // CAUTIOUS
+            } else if (consecutive_losses_ >= loss_limit + 2) {
+                active_mode_ = 4;  // DEFENSIVE
+            } else if (consecutive_wins_ >= 3) {
+                active_mode_ = 1;  // AGGRESSIVE
+            } else {
+                active_mode_ = 2;  // NORMAL
+            }
+        }
+
+        // Update shared config for dashboard
+        shared_config_->set_active_mode(active_mode_);
+        shared_config_->set_consecutive_wins(consecutive_wins_);
+        shared_config_->set_consecutive_losses(consecutive_losses_);
+    }
+
+    void record_win() {
+        consecutive_wins_++;
+        consecutive_losses_ = 0;
+        update_active_mode();
+    }
+
+    void record_loss() {
+        consecutive_losses_++;
+        consecutive_wins_ = 0;
+        update_active_mode();
+    }
 
     void on_fill(Symbol symbol, OrderId id, Side side, Quantity qty, Price price) {
         auto* world = engine_.get_symbol_world(symbol);
@@ -827,6 +997,27 @@ private:
             portfolio_.buy(symbol, price_usd, qty_d);
         } else {
             portfolio_.sell(symbol, price_usd, qty_d);
+        }
+
+        // Update shared portfolio state for dashboard (~5ns)
+        if (portfolio_state_) {
+            portfolio_state_->set_cash(portfolio_.cash);
+            portfolio_state_->record_fill();
+            portfolio_state_->record_event();
+
+            auto& pos = portfolio_.positions[symbol];
+            portfolio_state_->update_position(
+                world->ticker().c_str(),
+                pos.total_quantity(),
+                pos.avg_entry(),
+                price_usd
+            );
+
+            if (side == Side::Buy) {
+                portfolio_state_->record_buy(world->ticker().c_str());
+            } else {
+                portfolio_state_->record_sell(world->ticker().c_str());
+            }
         }
 
         // Publish fill event to observer (~5ns, lock-free)
@@ -1029,7 +1220,14 @@ int run(const CLIArgs& args) {
         return 1;
     }
 
+    // Mark as running now that we're connected
+    if (g_shared_config) {
+        g_shared_config->set_hft_status(2);  // running
+        g_shared_config->update_heartbeat();
+    }
+
     auto start = std::chrono::steady_clock::now();
+    auto last_heartbeat = start;
 
     while (g_running) {
         auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
@@ -1040,6 +1238,15 @@ int run(const CLIArgs& args) {
         if (app.is_halted()) {
             std::cout << "\n  TRADING HALTED - Risk limit breached\n";
             break;
+        }
+
+        // Update heartbeat every second
+        auto now = std::chrono::steady_clock::now();
+        if (std::chrono::duration_cast<std::chrono::seconds>(now - last_heartbeat).count() >= 1) {
+            if (g_shared_config) {
+                g_shared_config->update_heartbeat();
+            }
+            last_heartbeat = now;
         }
 
         // No dashboard here - use hft_observer for real-time monitoring
@@ -1064,6 +1271,7 @@ int run(const CLIArgs& args) {
 
 int main(int argc, char* argv[]) {
     signal(SIGINT, signal_handler);
+    signal(SIGTERM, signal_handler);
 
     CLIArgs args;
     if (!parse_args(argc, argv, args)) return 1;
