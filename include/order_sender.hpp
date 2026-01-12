@@ -2,6 +2,9 @@
 
 #include "types.hpp"
 #include <type_traits>
+#if __cplusplus >= 202002L
+#include <concepts>
+#endif
 
 namespace hft {
 
@@ -26,10 +29,14 @@ namespace hft {
 #if __cplusplus >= 202002L
 
 template<typename T>
-concept OrderSender = requires(T& sender, Symbol s, Side side, Quantity q, OrderId id) {
+concept OrderSenderConcept = requires(T& sender, Symbol s, Side side, Quantity q, OrderId id) {
     { sender.send_order(s, side, q, true) } -> std::convertible_to<bool>;
     { sender.cancel_order(s, id) } -> std::convertible_to<bool>;
 };
+
+// Provide is_order_sender_v for backwards compatibility
+template<typename T>
+inline constexpr bool is_order_sender_v = OrderSenderConcept<T>;
 
 #else
 

@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.16)
 project(hft VERSION 0.1.0 LANGUAGES CXX)
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
@@ -129,6 +129,13 @@ add_test(NAME ArbitrageTests COMMAND test_arbitrage)
 add_executable(test_paper_portfolio tests/test_paper_portfolio.cpp)
 add_test(NAME PaperPortfolioTests COMMAND test_paper_portfolio)
 
+add_executable(test_udp_telemetry tests/test_udp_telemetry.cpp)
+target_link_libraries(test_udp_telemetry pthread)
+add_test(NAME UdpTelemetryTests COMMAND test_udp_telemetry)
+
+add_executable(test_rolling_sharpe tests/test_rolling_sharpe.cpp)
+add_test(NAME RollingSharpeTests COMMAND test_rolling_sharpe)
+
 # === Tools ===
 add_executable(hft tools/hft.cpp)
 target_link_libraries(hft hft_core websockets pthread rt)
@@ -138,6 +145,9 @@ target_link_libraries(hft_control pthread rt)
 
 add_executable(hft_observer tools/hft_observer.cpp)
 target_link_libraries(hft_observer pthread rt)
+
+add_executable(hft_telemetry_collector tools/hft_telemetry_collector.cpp)
+target_link_libraries(hft_telemetry_collector pthread)
 
 add_executable(fetch_klines tools/fetch_klines.cpp)
 target_link_libraries(fetch_klines curl)

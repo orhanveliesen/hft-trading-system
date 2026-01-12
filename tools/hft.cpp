@@ -24,6 +24,8 @@
 #include "../include/ipc/shared_ring_buffer.hpp"
 #include "../include/ipc/shared_portfolio_state.hpp"
 #include "../include/ipc/shared_config.hpp"
+#include "../include/ipc/udp_telemetry.hpp"
+#include "../include/strategy/rolling_sharpe.hpp"
 #include <iostream>
 #include <iomanip>
 #include <chrono>
@@ -696,6 +698,11 @@ public:
                 on_fill(s, id, side, q, p);
             });
         }
+
+        // UDP Telemetry for remote monitoring
+        if (telemetry_.is_valid()) {
+            std::cout << "[UDP] Telemetry publisher initialized (multicast: 239.255.0.1:5555)\n";
+        }
     }
 
     ~TradingApp() {
@@ -834,6 +841,16 @@ public:
                     // Publish to observer (~5ns)
                     publisher_.target_hit(id, ticker, entry, exit, qty);
 
+                    // UDP telemetry: P&L update
+                    if (portfolio_state_) {
+                        telemetry_.publish_pnl(
+                            static_cast<int64_t>(portfolio_state_->total_realized_pnl() * 1e8),
+                            static_cast<int64_t>(portfolio_state_->total_unrealized_pnl() * 1e8),
+                            static_cast<int64_t>(portfolio_state_->total_equity() * 1e8),
+                            portfolio_state_->winning_trades.load(),
+                            portfolio_state_->losing_trades.load());
+                    }
+
                     if (args_.verbose) {
                         std::cout << "[TARGET] " << ticker << " SELL " << qty
                                   << " @ $" << std::fixed << std::setprecision(2) << exit
@@ -861,6 +878,16 @@ public:
 
                     // Publish to observer (~5ns)
                     publisher_.stop_loss(id, ticker, entry, exit, qty);
+
+                    // UDP telemetry: P&L update
+                    if (portfolio_state_) {
+                        telemetry_.publish_pnl(
+                            static_cast<int64_t>(portfolio_state_->total_realized_pnl() * 1e8),
+                            static_cast<int64_t>(portfolio_state_->total_unrealized_pnl() * 1e8),
+                            static_cast<int64_t>(portfolio_state_->total_equity() * 1e8),
+                            portfolio_state_->winning_trades.load(),
+                            portfolio_state_->losing_trades.load());
+                    }
 
                     if (args_.verbose) {
                         std::cout << "[STOP] " << ticker << " SELL " << qty
@@ -928,6 +955,11 @@ public:
 
     bool is_halted() const { return !engine_.can_trade(); }
 
+    // Called periodically from main loop for UDP telemetry heartbeat
+    void publish_telemetry_heartbeat() {
+        telemetry_.publish_heartbeat();
+    }
+
 private:
     CLIArgs args_;
     OrderSender sender_;
@@ -937,6 +969,7 @@ private:
     // No mutex - single-threaded hot path, lock-free design
     Portfolio portfolio_;
     EventPublisher publisher_;  // Lock-free event publishing to observer
+    ipc::TelemetryPublisher telemetry_;  // UDP multicast for remote monitoring
     SharedPortfolioState* portfolio_state_ = nullptr;  // Shared state for dashboard
     SharedConfig* shared_config_ = nullptr;           // Shared config from dashboard
     uint32_t last_config_seq_ = 0;                    // Track config changes
@@ -1024,6 +1057,11 @@ private:
         // Publish fill event to observer (~5ns, lock-free)
         publisher_.fill(symbol, world->ticker().c_str(),
                        side == Side::Buy ? 0 : 1, price_usd, qty_d, id);
+
+        // UDP telemetry for remote monitoring (~10µs, fire-and-forget)
+        telemetry_.publish_fill(symbol, side == Side::Buy,
+                                static_cast<uint32_t>(qty),
+                                static_cast<int64_t>(price_usd * 1e8));
 
         // Debug: log fill details
         if (args_.verbose) {
@@ -1247,6 +1285,7 @@ int run(const CLIArgs& args) {
             if (g_shared_config) {
                 g_shared_config->update_heartbeat();
             }
+            app.publish_telemetry_heartbeat();  // UDP multicast heartbeat
             last_heartbeat = now;
         }
 
