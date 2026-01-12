@@ -136,6 +136,10 @@ add_test(NAME UdpTelemetryTests COMMAND test_udp_telemetry)
 add_executable(test_rolling_sharpe tests/test_rolling_sharpe.cpp)
 add_test(NAME RollingSharpeTests COMMAND test_rolling_sharpe)
 
+add_executable(test_concepts tests/test_concepts.cpp)
+target_link_libraries(test_concepts hft_core)
+add_test(NAME ConceptTests COMMAND test_concepts)
+
 # === Tools ===
 add_executable(hft tools/hft.cpp)
 target_link_libraries(hft hft_core websockets pthread rt)

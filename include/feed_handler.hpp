@@ -1,6 +1,7 @@
 #pragma once
 
 #include "types.hpp"
+#include "concepts.hpp"
 #include "itch_messages.hpp"
 #include <cstddef>
 
@@ -12,7 +13,7 @@ namespace hft {
  * Template-based for compile-time callback binding (no vtable overhead).
  * Parses binary protocol and emits events via primitive parameters.
  *
- * Callback must implement:
+ * Callback must satisfy FeedCallback concept (see concepts.hpp):
  *   void on_add_order(OrderId, Side, Price, Quantity)
  *   void on_order_executed(OrderId, Quantity)
  *   void on_order_cancelled(OrderId, Quantity)  // partial cancel
@@ -21,7 +22,7 @@ namespace hft {
  * This is the ITCH implementation. Same callback interface can be used
  * with other feed handlers (Binance, Coinbase, etc.)
  */
-template<typename Callback>
+template<concepts::FeedCallback Callback>
 class FeedHandler {
 public:
     explicit FeedHandler(Callback& callback) : callback_(callback) {}

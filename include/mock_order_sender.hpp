@@ -76,8 +76,10 @@ private:
     bool fail_next_cancel_;
 };
 
-// Verify MockOrderSender satisfies concept (C++17 static assert)
-static_assert(is_order_sender_v<MockOrderSender>, "MockOrderSender must satisfy OrderSender concept");
-static_assert(is_order_sender_v<NullOrderSender>, "NullOrderSender must satisfy OrderSender concept");
+// Verify implementations satisfy the concept
+static_assert(concepts::OrderSender<MockOrderSender>,
+              "MockOrderSender must satisfy OrderSender concept");
+static_assert(concepts::OrderSender<NullOrderSender>,
+              "NullOrderSender must satisfy OrderSender concept");
 
 }  // namespace hft

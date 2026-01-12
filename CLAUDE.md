@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-HFT training project for learning low-latency trading systems in C++ and Rust. Target: US HFT firm applications.
+HFT training project for learning low-latency trading systems in C++. Target: US HFT firm applications.
 
 ## Build Commands
 
@@ -19,11 +19,6 @@ ctest --output-on-failure
 
 # Run benchmark
 ./bench_orderbook
-
-# Rust build
-cd rust && cargo build --release
-cargo test
-./target/release/bench_orderbook
 ```
 
 ## Architecture
@@ -132,29 +127,21 @@ hft/
 │   ├── hft_control.cpp        # Runtime parameter control
 │   ├── run_backtest.cpp       # Backtesting tool
 │   └── optimize_strategies.cpp # Parameter optimizer
-├── tests/                     # 22 test suites
+├── tests/                     # 26 test suites
 └── benchmarks/
     └── bench_orderbook.cpp    # Performance benchmarks
-
-rust/                          # Rust implementation
-├── src/
-│   ├── lib.rs
-│   ├── types.rs
-│   ├── orderbook.rs           # 11 tests
-│   └── bin/bench_orderbook.rs
-└── Cargo.toml
 ```
 
 ## Benchmark Results
 
-### OrderBook (C++ vs Rust)
+### OrderBook (C++)
 
-| Operation | C++ | Rust |
-|-----------|-----|------|
-| Cancel Order | 447 ns | 613 ns |
-| Execute Order | 486 ns | 542 ns |
-| Best Bid/Ask | 19 ns | ~0 ns |
-| Throughput | 2.21M ops/sec | 1.44M ops/sec |
+| Operation | Latency |
+|-----------|---------|
+| Cancel Order | 447 ns |
+| Execute Order | 486 ns |
+| Best Bid/Ask | 19 ns |
+| Throughput | 2.21M ops/sec |
 
 ### IPC Overhead (Shared Memory)
 
@@ -180,8 +167,8 @@ The HFT engine uses shared memory for process lifecycle:
 
 ## Next Steps
 1. End-to-end simulation with sample ITCH data
-2. Optimize Rust implementation (use BTreeMap, arena allocator)
-3. Add WebSocket support for remote dashboard
+2. Add WebSocket support for remote dashboard
+3. Rust port for comparison (future)
 
 ## References
 - NASDAQ ITCH 5.0 Spec: https://www.nasdaqtrader.com/content/technicalsupport/specifications/dataproducts/NQTVITCHspecification.pdf
