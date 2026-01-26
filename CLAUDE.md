@@ -4,7 +4,132 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-HFT training project for learning low-latency trading systems in C++. Target: US HFT firm applications.
+Low-latency trading system in C++ for HFT and crypto markets. Tools: `trader`, `trader_dashboard`, `trader_observer`, `trader_control`.
+
+---
+
+## 🟡 PROJECT-SPECIFIC EXCEPTIONS (Override Global CLAUDE.md)
+
+### Hot Path Parameter Exception
+```
+GLOBAL RULE: 3+ parameters = REFUSE
+PROJECT EXCEPTION: Hot path callbacks ALLOWED with 3+ parameters
+REASON: Input struct overhead unacceptable at nanosecond scale
+```
+
+**Allowed patterns on hot path:**
+```cpp
+// ✅ ALLOWED - Protocol callbacks (no struct overhead)
+void on_add_order(OrderId, Side, Price, Quantity);
+void on_trade(Symbol, Price, Quantity, Side);
+void on_quote(Symbol, Price bid, Price ask, Quantity bid_size, Quantity ask_size);
+
+// ❌ STILL FORBIDDEN - Non-hot-path code
+void create_report(string, string, int, double, bool);  // Use Input struct
+```
+
+### Interface Exception
+```
+GLOBAL RULE: Single implementation = no interface
+PROJECT EXCEPTION: IExchange interface ALLOWED with single implementation
+REASON: Real exchange adapters (Binance, Coinbase) planned
+```
+
+### Test Philosophy - NON-NEGOTIABLE
+```
+TESTS ARE THE SPECIFICATION.
+APPLICATION ADAPTS TO TESTS, NEVER THE REVERSE.
+
+❌ FORBIDDEN: Modifying test to make broken code pass
+✅ REQUIRED: Fixing application code to satisfy test
+```
+
+---
+
+## 🔴 DEVELOPMENT DISCIPLINE (HFT-SPECIFIC)
+
+### Scope Control - STRICTLY ENFORCED
+```
+ONE COMPONENT PER TASK. NO EXCEPTIONS.
+OrderBook OR FeedHandler OR Strategy - NEVER MULTIPLE.
+```
+
+**Before ANY code:**
+1. State the single component I'm touching
+2. List files (MAX 2 for hot path, MAX 3 otherwise)
+3. Describe the test I'll write FIRST
+4. **WAIT for approval**
+
+### Hot Path Changes - EXTRA SCRUTINY
+```
+HOT PATH CHANGE = BENCHMARK BEFORE + BENCHMARK AFTER
+REGRESSION = IMMEDIATE REVERT. NO DISCUSSION.
+```
+
+**Mandatory workflow for hot path (`orderbook.hpp`, `feed_handler.hpp`, `packet_buffer.hpp`):**
+1. Run `./bench_orderbook` → Record baseline numbers
+2. Write failing test
+3. Make MINIMAL change
+4. Run benchmark → Compare
+5. ANY regression? **REVERT IMMEDIATELY**
+6. No regression? Commit with benchmark results in message
+
+### File Touch Limits - HARD RULES
+
+| File/Directory | Max Files Per Commit | Extra Requirement |
+|----------------|---------------------|-------------------|
+| `include/orderbook.hpp` | 1 | Benchmark before/after |
+| `include/feed_handler.hpp` | 1 | Benchmark before/after |
+| `include/network/*` | 2 | Test with UDP receiver |
+| `include/ipc/*` | 2 | Test with trader + dashboard + observer |
+| `include/strategy/*` | 3 | Backtest required |
+| `tools/*.cpp` | 1 | Integration test |
+
+### I WILL REFUSE WITHOUT EXPLICIT APPROVAL:
+- ❌ Adding new shared memory segments
+- ❌ Changing memory layout of IPC structs (breaks compatibility)
+- ❌ Modifying hot path allocation strategy
+- ❌ Adding dependencies to CMakeLists.txt
+- ❌ Changing `constexpr` pool sizes
+- ❌ Touching multiple core components in one task
+
+### IPC Changes - MANDATORY TESTING
+```
+ANY IPC CHANGE = TEST ALL CONSUMERS
+trader + trader_dashboard + trader_observer MUST ALL WORK
+```
+
+Before committing IPC changes:
+```bash
+# Terminal 1
+./trader --paper
+
+# Terminal 2
+./trader_dashboard
+
+# Terminal 3
+./trader_observer
+
+# ALL THREE must work together without errors
+```
+
+### Benchmark Regression Policy
+```
+CURRENT BASELINE (DO NOT REGRESS):
+- Cancel Order: < 500 ns
+- Execute Order: < 500 ns
+- Best Bid/Ask: < 25 ns
+- Throughput: > 2M ops/sec
+- IPC Price Update: < 5 cycles (relaxed)
+```
+
+If benchmark shows regression:
+1. **STOP**
+2. **REVERT**
+3. **Analyze** why
+4. **Try different approach**
+
+---
 
 ## Build Commands
 
@@ -17,9 +142,14 @@ make -j$(nproc)
 # Run all tests
 ctest --output-on-failure
 
-# Run benchmark
+# Run benchmark (MANDATORY before/after hot path changes)
 ./bench_orderbook
+
+# Quick validation
+./run_tests && ./bench_orderbook
 ```
+
+---
 
 ## Architecture
 
@@ -66,25 +196,73 @@ ctest --output-on-failure
 - **TradeEvent** (`include/ipc/trade_event.hpp`) - Event types for observer/dashboard
 
 ### Tools
-- **hft** (`tools/hft.cpp`) - Main trading engine (paper trading on Binance)
-- **hft_dashboard** (`tools/hft_dashboard.cpp`) - Real-time ImGui dashboard
-- **hft_observer** (`tools/hft_observer.cpp`) - Event stream monitor (CLI)
-- **hft_control** (`tools/hft_control.cpp`) - Runtime parameter control
+- **trader** (`tools/trader.cpp`) - Main trading engine (paper trading on Binance)
+- **trader_dashboard** (`tools/trader_dashboard.cpp`) - Real-time ImGui dashboard
+- **trader_observer** (`tools/trader_observer.cpp`) - Event stream monitor (CLI)
+- **trader_control** (`tools/trader_control.cpp`) - Runtime parameter control
 - **run_backtest** (`tools/run_backtest.cpp`) - Strategy backtesting
 - **optimize_strategies** (`tools/optimize_strategies.cpp`) - Parameter optimization
 
+---
+
 ## Code Standards (HFT-Specific)
 
-### Hot Path Rules
+### No Magic Numbers - ABSOLUTE
+```
+EVERY NUMERIC LITERAL MUST BE A NAMED CONSTANT OR CONFIG VALUE.
+NO EXCEPTIONS.
+```
+
+**Rules:**
 ```cpp
-// FORBIDDEN on hot path
+// ❌ FORBIDDEN - Magic numbers
+if (sharpe_.count() >= 20) { ... }
+if (spread_pct > 0.001) { ... }
+RollingSharpe<100> sharpe_;
+
+// ✅ REQUIRED - Named constants or config values
+static constexpr int MIN_TRADES_FOR_SHARPE_MODE = 20;
+if (sharpe_.count() >= MIN_TRADES_FOR_SHARPE_MODE) { ... }
+
+// ✅ BETTER - Configurable via struct
+if (sharpe_.count() >= config_.min_trades_for_sharpe) { ... }
+if (spread_pct > config_.wide_spread_threshold) { ... }
+```
+
+**Where to define constants:**
+- Strategy-specific: Inside `*Config` struct (e.g., `SmartStrategyConfig`)
+- Cross-cutting: In `include/constants.hpp` (create if needed)
+- Template params: Use constexpr from config or define as named constant
+
+**I WILL REFUSE:**
+- ❌ Numeric literals in conditionals
+- ❌ Hardcoded thresholds without justification
+- ❌ "Temporary" magic numbers ("will fix later" = never)
+
+### Hot Path Rules - ABSOLUTE
+```cpp
+// ❌ FORBIDDEN on hot path - I WILL REFUSE
 new, delete, malloc, free
 std::string, std::map, std::unordered_map
 virtual functions, exceptions
+std::function, std::any
 
-// ALLOWED on hot path
+// ✅ ALLOWED on hot path
 Pre-allocated arrays, intrusive containers
 Direct array indexing, inline functions, constexpr
+Fixed-size buffers, placement new (pre-allocated only)
+```
+
+### Memory Order Rules (IPC)
+```cpp
+// Single-writer scenarios: USE RELAXED
+price_.store(value, std::memory_order_relaxed);  // ✅
+
+// Cross-thread synchronization: USE ACQUIRE/RELEASE
+ready_.store(true, std::memory_order_release);   // writer
+if (ready_.load(std::memory_order_acquire)) {}   // reader
+
+// When in doubt: ASK BEFORE IMPLEMENTING
 ```
 
 ### Naming Convention
@@ -96,9 +274,32 @@ class OrderBook {           // PascalCase for classes
 constexpr size_t MAX_ORDERS = 1'000'000;  // UPPER_SNAKE for constants
 ```
 
+### Input Object Pattern (C++ Specific)
+```cpp
+// 2+ parameters? CREATE INPUT STRUCT WITH HEADER FILE
+
+// ❌ I WILL REFUSE
+void place_order(uint64_t id, Side side, uint32_t price, 
+                 uint32_t qty, uint64_t timestamp);
+
+// ✅ CORRECT - with header file
+// file: include/types/place_order_input.hpp
+struct PlaceOrderInput {
+    uint64_t order_id;
+    Side side;
+    uint32_t price;
+    uint32_t quantity;
+    uint64_t timestamp;
+};
+
+void place_order(const PlaceOrderInput& input);
+```
+
+---
+
 ## Project Structure
 ```
-hft/
+trader/
 ├── include/
 │   ├── types.hpp              # Core types (Order, Price, Side)
 │   ├── orderbook.hpp          # Order book interface
@@ -121,49 +322,95 @@ hft/
 │       ├── risk_manager.hpp   # Risk limits
 │       └── market_maker.hpp   # Market making strategy
 ├── tools/
-│   ├── hft.cpp                # Main trading engine
-│   ├── hft_dashboard.cpp      # ImGui real-time dashboard
-│   ├── hft_observer.cpp       # CLI event monitor
-│   ├── hft_control.cpp        # Runtime parameter control
+│   ├── trader.cpp             # Main trading engine
+│   ├── trader_dashboard.cpp   # ImGui real-time dashboard
+│   ├── trader_observer.cpp    # CLI event monitor
+│   ├── trader_control.cpp     # Runtime parameter control
 │   ├── run_backtest.cpp       # Backtesting tool
 │   └── optimize_strategies.cpp # Parameter optimizer
-├── tests/                     # 26 test suites
+├── tests/                     # 33 test suites
 └── benchmarks/
     └── bench_orderbook.cpp    # Performance benchmarks
 ```
 
-## Benchmark Results
+---
+
+## Benchmark Results (BASELINE - DO NOT REGRESS)
 
 ### OrderBook (C++)
 
-| Operation | Latency |
-|-----------|---------|
-| Cancel Order | 447 ns |
-| Execute Order | 486 ns |
-| Best Bid/Ask | 19 ns |
-| Throughput | 2.21M ops/sec |
+| Operation | Latency | HARD LIMIT |
+|-----------|---------|------------|
+| Cancel Order | 447 ns | < 500 ns |
+| Execute Order | 486 ns | < 500 ns |
+| Best Bid/Ask | 19 ns | < 25 ns |
+| Throughput | 2.21M ops/sec | > 2M ops/sec |
 
 ### IPC Overhead (Shared Memory)
 
-| Operation | Slow Path | Fast Path | Relaxed | Notes |
-|-----------|-----------|-----------|---------|-------|
-| Price update | 90 cycles | 17 cycles | **1.5 cycles** | ~0.5ns with relaxed ordering |
-| Position update | 120 cycles | 54 cycles | **2.9 cycles** | ~1ns with relaxed ordering |
-| Heartbeat | 75 cycles | - | - | Once per second |
-| Config read | 9 cycles | - | - | Atomic load |
+| Operation | Slow Path | Fast Path | Relaxed | HARD LIMIT |
+|-----------|-----------|-----------|---------|------------|
+| Price update | 90 cycles | 17 cycles | **1.5 cycles** | < 5 cycles |
+| Position update | 120 cycles | 54 cycles | **2.9 cycles** | < 10 cycles |
+| Heartbeat | 75 cycles | - | - | < 100 cycles |
+| Config read | 9 cycles | - | - | < 15 cycles |
 
-**Optimization techniques:**
-- Direct index access (O(1)) vs string search (O(n))
-- `memory_order_relaxed` for single-writer scenarios
-- `store(++seq)` vs `fetch_add(1)` (no RMW needed)
-- Pre-scaled int64 to avoid double→int conversion
+---
 
-## HFT Lifecycle Management
+## Test Requirements
 
-The HFT engine uses shared memory for process lifecycle:
+### Before ANY Commit
+```bash
+# 1. Run unit tests
+ctest --output-on-failure
+
+# 2. Run benchmarks (for hot path changes)
+./bench_orderbook
+
+# 3. Integration test (for IPC/tool changes)
+# Run trader + trader_dashboard + trader_observer together
+```
+
+### Test Coverage Rules
+- New hot path code: **100% branch coverage**
+- New IPC code: **Multi-process test required**
+- New strategy code: **Backtest with sample data**
+
+### Test Philosophy
+```
+TESTS = SPECIFICATION
+CODE ADAPTS TO TESTS, NOT TESTS TO CODE.
+
+If test fails:
+1. STOP
+2. ANALYZE the test expectation
+3. FIX the application code
+4. NEVER modify test to pass broken code
+```
+
+---
+
+## Trader Lifecycle Management
+
+The trader engine uses shared memory for process lifecycle:
 - **Heartbeat**: Updated every second, dashboard detects stale heartbeat (>3s)
 - **Version check**: Git commit hash embedded at compile time, auto-invalidates old shared memory
 - **Graceful shutdown**: Signal handlers (SIGTERM/SIGINT) set status before exit
+
+---
+
+## Red Flags - I WILL STOP AND ASK
+
+| If I See This | My Response |
+|---------------|-------------|
+| `new` or `malloc` in hot path | *"Allocation hot path'te yasak. Pre-allocated pool kullan."* |
+| `std::string` in hot path | *"std::string yasak. Fixed-size char array kullan."* |
+| `virtual` in hot path | *"vtable overhead kabul edilemez. CRTP veya template kullan."* |
+| Missing benchmark | *"Hot path değişikliği için benchmark zorunlu. Önce baseline al."* |
+| IPC struct layout change | *"Bu backward compatibility'yi bozar. Approval gerekli."* |
+| Multiple components in one task | *"Tek component, tek task. Hangisini önce yapıyoruz?"* |
+
+---
 
 ## Next Steps
 1. End-to-end simulation with sample ITCH data

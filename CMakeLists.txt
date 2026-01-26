@@ -25,6 +25,7 @@ set(CMAKE_CXX_FLAGS_RELEASE "-O3 -march=native -DNDEBUG")
 
 # Include directories
 include_directories(${CMAKE_SOURCE_DIR}/include)
+include_directories(${CMAKE_SOURCE_DIR}/external)
 
 # === Dependencies ===
 # libwebsockets - version 4.3+ has different callback enum values

@@ -7,9 +7,12 @@
 #include <stdexcept>
 #include <unistd.h>
 #include <curl/curl.h>
+#include <nlohmann/json.hpp>
 
 namespace hft {
 namespace exchange {
+
+using json = nlohmann::json;
 
 /**
  * Binance REST API client for historical data
@@ -135,17 +138,12 @@ public:
         std::string url = std::string(base_url_) + "/api/v3/time";
         std::string response = http_get(url);
 
-        // Parse {"serverTime":1234567890123}
-        size_t pos = response.find("serverTime");
-        if (pos == std::string::npos) {
+        json data = json::parse(response);
+        if (!data.contains("serverTime")) {
             throw std::runtime_error("Invalid server time response");
         }
 
-        pos = response.find(':', pos);
-        size_t end = response.find('}', pos);
-        std::string time_str = response.substr(pos + 1, end - pos - 1);
-
-        return std::stoull(time_str);
+        return data["serverTime"].get<Timestamp>();
     }
 
     /**
@@ -159,86 +157,62 @@ public:
     /**
      * Fetch trading symbols from Binance
      *
-     * Fetches exchange info and extracts USDT spot trading pairs that are
-     * currently trading. Optionally filters by quote volume.
+     * Fetches exchange info and extracts spot trading pairs that are
+     * currently trading, filtered by quote asset.
      *
      * @param quote_asset Filter by quote asset (default "USDT")
-     * @param max_symbols Maximum number of symbols to return (0 = all)
      * @return Vector of symbol strings (e.g., "BTCUSDT", "ETHUSDT")
      */
     std::vector<std::string> fetch_trading_symbols(
-        const std::string& quote_asset = "USDT",
-        size_t max_symbols = 30
+        const std::string& quote_asset = "USDT"
     ) {
         std::vector<std::string> symbols;
 
         try {
-            std::string json = get_exchange_info();
+            std::string response = get_exchange_info();
+            json exchange_info = json::parse(response);
 
-            // Parse symbols array from exchange info
-            // Format: {"symbols":[{"symbol":"BTCUSDT","status":"TRADING",...},...]}
-            size_t symbols_start = json.find("\"symbols\"");
-            if (symbols_start == std::string::npos) {
+            if (!exchange_info.contains("symbols")) {
                 return symbols;
             }
 
-            // Find the symbols array
-            size_t array_start = json.find('[', symbols_start);
-            if (array_start == std::string::npos) {
-                return symbols;
-            }
-
-            // Parse each symbol object
-            size_t pos = array_start;
-            while ((pos = json.find("{\"symbol\"", pos)) != std::string::npos) {
-                // Extract symbol name
-                size_t sym_start = json.find("\"symbol\":\"", pos);
-                if (sym_start == std::string::npos) break;
-                sym_start += 10;  // Skip "\"symbol\":\""
-
-                size_t sym_end = json.find("\"", sym_start);
-                if (sym_end == std::string::npos) break;
-
-                std::string symbol = json.substr(sym_start, sym_end - sym_start);
-
-                // Check if trading
-                size_t status_pos = json.find("\"status\"", pos);
-                bool is_trading = false;
-                if (status_pos != std::string::npos && status_pos < pos + 500) {
-                    is_trading = (json.find("\"TRADING\"", status_pos) != std::string::npos &&
-                                  json.find("\"TRADING\"", status_pos) < status_pos + 30);
+            for (const auto& sym : exchange_info["symbols"]) {
+                // Check status
+                if (!sym.contains("status") || sym["status"] != "TRADING") {
+                    continue;
                 }
 
                 // Check quote asset
-                size_t quote_pos = json.find("\"quoteAsset\"", pos);
-                bool correct_quote = false;
-                if (quote_pos != std::string::npos && quote_pos < pos + 500) {
-                    std::string quote_check = "\"" + quote_asset + "\"";
-                    correct_quote = (json.find(quote_check, quote_pos) != std::string::npos &&
-                                     json.find(quote_check, quote_pos) < quote_pos + 30);
+                if (!sym.contains("quoteAsset") || sym["quoteAsset"] != quote_asset) {
+                    continue;
                 }
 
-                // Check if SPOT
-                size_t perms_pos = json.find("\"permissions\"", pos);
+                // Check if SPOT trading is permitted
                 bool is_spot = false;
-                if (perms_pos != std::string::npos && perms_pos < pos + 800) {
-                    is_spot = (json.find("\"SPOT\"", perms_pos) != std::string::npos &&
-                               json.find("\"SPOT\"", perms_pos) < perms_pos + 100);
-                }
-
-                if (is_trading && correct_quote && is_spot) {
-                    symbols.push_back(symbol);
-
-                    if (max_symbols > 0 && symbols.size() >= max_symbols) {
-                        break;
+                if (sym.contains("permissions")) {
+                    for (const auto& perm : sym["permissions"]) {
+                        if (perm == "SPOT") {
+                            is_spot = true;
+                            break;
+                        }
                     }
                 }
 
-                pos = sym_end;
+                if (!is_spot) {
+                    continue;
+                }
+
+                // Extract symbol name
+                if (sym.contains("symbol")) {
+                    symbols.push_back(sym["symbol"].get<std::string>());
+                }
             }
 
+        } catch (const json::exception& e) {
+            // JSON parsing error - return empty vector
+            return symbols;
         } catch (const std::exception& e) {
-            // Return empty vector on error - caller should handle fallback
+            // Network or other error - return empty vector
             return symbols;
         }
 
@@ -252,17 +226,12 @@ public:
         std::string url = std::string(base_url_) + "/api/v3/ticker/price?symbol=" + symbol;
         std::string response = http_get(url);
 
-        // Parse {"symbol":"BTCUSDT","price":"50000.00"}
-        size_t pos = response.find("price");
-        if (pos == std::string::npos) {
+        json data = json::parse(response);
+        if (!data.contains("price")) {
             throw std::runtime_error("Invalid price response");
         }
 
-        pos = response.find('"', pos + 7);  // Skip "price":"
-        size_t end = response.find('"', pos + 1);
-        std::string price_str = response.substr(pos + 1, end - pos - 1);
-
-        return std::stod(price_str);
+        return std::stod(data["price"].get<std::string>());
     }
 
 private:
@@ -316,53 +285,29 @@ private:
      *           close_time, "quote_volume", trades, "taker_buy_base",
      *           "taker_buy_quote", "ignore"], ...]
      */
-    std::vector<Kline> parse_klines_json(const std::string& json) {
+    std::vector<Kline> parse_klines_json(const std::string& response) {
         std::vector<Kline> klines;
 
-        // Simple JSON array parser
-        // Find each inner array [...]
-        size_t pos = 0;
-        while ((pos = json.find('[', pos + 1)) != std::string::npos) {
-            // Skip the outer array start
-            if (pos == 0) continue;
+        json data = json::parse(response);
 
-            size_t end = json.find(']', pos);
-            if (end == std::string::npos) break;
-
-            std::string arr = json.substr(pos + 1, end - pos - 1);
-
-            // Parse comma-separated values
-            std::vector<std::string> values;
-            std::stringstream ss(arr);
-            std::string token;
-
-            while (std::getline(ss, token, ',')) {
-                // Remove quotes
-                size_t start = 0, len = token.length();
-                if (!token.empty() && token[0] == '"') {
-                    start = 1;
-                    len -= 2;
-                }
-                values.push_back(token.substr(start, len));
+        for (const auto& arr : data) {
+            if (!arr.is_array() || arr.size() < 11) {
+                continue;
             }
 
-            if (values.size() >= 11) {
-                Kline k;
-                k.open_time = std::stoull(values[0]);
-                k.open = static_cast<Price>(std::stod(values[1]) * 10000);
-                k.high = static_cast<Price>(std::stod(values[2]) * 10000);
-                k.low = static_cast<Price>(std::stod(values[3]) * 10000);
-                k.close = static_cast<Price>(std::stod(values[4]) * 10000);
-                k.volume = std::stod(values[5]);
-                k.close_time = std::stoull(values[6]);
-                k.quote_volume = std::stod(values[7]);
-                k.trades = static_cast<uint32_t>(std::stoul(values[8]));
-                k.taker_buy_volume = std::stod(values[9]);
+            Kline k;
+            k.open_time = arr[0].get<Timestamp>();
+            k.open = static_cast<Price>(std::stod(arr[1].get<std::string>()) * 10000);
+            k.high = static_cast<Price>(std::stod(arr[2].get<std::string>()) * 10000);
+            k.low = static_cast<Price>(std::stod(arr[3].get<std::string>()) * 10000);
+            k.close = static_cast<Price>(std::stod(arr[4].get<std::string>()) * 10000);
+            k.volume = std::stod(arr[5].get<std::string>());
+            k.close_time = arr[6].get<Timestamp>();
+            k.quote_volume = std::stod(arr[7].get<std::string>());
+            k.trades = arr[8].get<uint32_t>();
+            k.taker_buy_volume = std::stod(arr[9].get<std::string>());
 
-                klines.push_back(k);
-            }
-
-            pos = end;
+            klines.push_back(k);
         }
 
         return klines;

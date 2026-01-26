@@ -343,13 +343,13 @@ std::vector<std::string> get_default_symbols() {
     };
 
     try {
-        // Try to fetch symbols from Binance
+        // Fetch all USDT spot trading pairs from Binance
         BinanceRest rest(false);  // Use mainnet
-        auto symbols = rest.fetch_trading_symbols("USDT", 30);
+        auto symbols = rest.fetch_trading_symbols("USDT");
 
         if (!symbols.empty()) {
             std::cout << "[SYMBOLS] Fetched " << symbols.size()
-                      << " trading pairs from Binance Exchange Info API\n";
+                      << " USDT trading pairs from Binance Exchange Info API\n";
             return symbols;
         }
     } catch (const std::exception& e) {
