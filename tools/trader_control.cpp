@@ -15,6 +15,7 @@
  */
 
 #include "../include/ipc/shared_config.hpp"
+#include "../include/ipc/shared_paper_config.hpp"
 #include <iostream>
 #include <iomanip>
 #include <string>
@@ -22,6 +23,11 @@
 #include <chrono>
 
 using namespace hft::ipc;
+
+// Basis points to percentage conversion: 1 bps = 0.01% = 1/100 of a percent
+static constexpr double BPS_TO_PCT = 100.0;
+// Percentage to decimal conversion: 1% = 0.01
+static constexpr double PCT_TO_DECIMAL = 100.0;
 
 void print_usage(const char* prog) {
     std::cerr << "Usage: " << prog << " <command> [args...]\n\n"
@@ -54,6 +60,11 @@ void print_usage(const char* prog) {
               << "  ema_dev_trending       Max % above EMA in uptrend (e.g., 1.0 = 1%)\n"
               << "  ema_dev_ranging        Max % above EMA in ranging (e.g., 0.5 = 0.5%)\n"
               << "  ema_dev_highvol        Max % above EMA in high vol (e.g., 0.2 = 0.2%)\n"
+              << "\nSpike Detection (regime detector):\n"
+              << "  spike_threshold        Standard deviations for spike (e.g., 3.0 = 3σ)\n"
+              << "  spike_lookback         Bars for average calculation (e.g., 10)\n"
+              << "  spike_min_move         Minimum % move filter (e.g., 0.5 = 0.5%)\n"
+              << "  spike_cooldown         Bars between detections (e.g., 5)\n"
               << "\nAI Tuner & Order Execution:\n"
               << "  tuner_mode             AI tuner mode (0=OFF, 1=ON unified strategy)\n"
               << "  order_type             Order type (0=Auto, 1=MarketOnly, 2=LimitOnly, 3=Adaptive)\n"
@@ -78,7 +89,7 @@ void print_params(const SharedConfig* config, const char* shm_name) {
     std::cout << "  target_pct:        " << std::setw(8) << config->target_pct() << "%   Profit target\n";
     std::cout << "  stop_pct:          " << std::setw(8) << config->stop_pct() << "%   Stop loss\n";
     std::cout << "  pullback_pct:      " << std::setw(8) << config->pullback_pct() << "%   Trend exit pullback\n";
-    std::cout << "  commission:        " << std::setw(8) << (config->commission_rate() * 100) << "%   Commission rate\n";
+    std::cout << "  commission:        " << std::setw(8) << (config->commission_rate() * PCT_TO_DECIMAL) << "%   Commission rate\n";
 
     std::cout << "\n[ Trade Filtering ]\n";
     std::cout << "  min_trade_value:   " << std::setw(8) << config->min_trade_value() << "$   Minimum trade\n";
@@ -102,7 +113,7 @@ void print_params(const SharedConfig* config, const char* shm_name) {
     std::cout << "  sequence:          " << std::setw(8) << config->sequence.load() << "    Config version\n";
 }
 
-void print_status(const SharedConfig* config, const char* shm_name) {
+void print_status(const SharedConfig* config, const SharedPaperConfig* paper_config, const char* shm_name) {
     std::cout << "=== Trader Config Status ===\n";
     std::cout << "Config: /dev/shm" << shm_name << "\n";
     std::cout << "Build: " << config->get_build_hash() << "\n\n";
@@ -117,16 +128,17 @@ void print_status(const SharedConfig* config, const char* shm_name) {
     std::cout << "  mode:            " << (int)config->get_active_mode() << "\n\n";
 
     // Trading costs
+    double slippage_bps = paper_config ? paper_config->slippage_bps() : config->slippage_bps();
     std::cout << "[ Trading Costs ]\n";
     std::cout << "  target_pct:      " << config->target_pct() << "% (profit target)\n";
     std::cout << "  stop_pct:        " << config->stop_pct() << "% (stop loss)\n";
     std::cout << "  pullback_pct:    " << config->pullback_pct() << "% (trend exit)\n";
-    std::cout << "  commission:      " << (config->commission_rate() * 100) << "% (per trade)\n";
-    std::cout << "  slippage_bps:    " << config->slippage_bps() << " bps (paper only)\n\n";
+    std::cout << "  commission:      " << (config->commission_rate() * PCT_TO_DECIMAL) << "% (per trade)\n";
+    std::cout << "  slippage_bps:    " << slippage_bps << " bps (paper only)\n\n";
 
     // Round-trip cost calculation
     double commission_pct = config->commission_rate() * 100;
-    double slippage_pct = config->slippage_bps() / 100.0;
+    double slippage_pct = slippage_bps / BPS_TO_PCT;
     double round_trip = (commission_pct * 2) + (slippage_pct * 2);
     std::cout << "  Round-trip cost: ~" << round_trip << "% (commission + slippage)\n";
     std::cout << "  Breakeven:       target > " << round_trip << "%\n\n";
@@ -163,9 +175,16 @@ void print_status(const SharedConfig* config, const char* shm_name) {
 
     // EMA deviation thresholds
     std::cout << "[ EMA Filter ]\n";
-    std::cout << "  ema_dev_trending:   " << (config->ema_dev_trending() * 100) << "% (uptrend)\n";
-    std::cout << "  ema_dev_ranging:    " << (config->ema_dev_ranging() * 100) << "% (ranging/lowvol)\n";
-    std::cout << "  ema_dev_highvol:    " << (config->ema_dev_highvol() * 100) << "% (high volatility)\n\n";
+    std::cout << "  ema_dev_trending:   " << (config->ema_dev_trending() * PCT_TO_DECIMAL) << "% (uptrend)\n";
+    std::cout << "  ema_dev_ranging:    " << (config->ema_dev_ranging() * PCT_TO_DECIMAL) << "% (ranging/lowvol)\n";
+    std::cout << "  ema_dev_highvol:    " << (config->ema_dev_highvol() * PCT_TO_DECIMAL) << "% (high volatility)\n\n";
+
+    // Spike detection thresholds
+    std::cout << "[ Spike Detection ]\n";
+    std::cout << "  spike_threshold:    " << config->spike_threshold() << "σ (standard deviations)\n";
+    std::cout << "  spike_lookback:     " << config->get_spike_lookback() << " bars\n";
+    std::cout << "  spike_min_move:     " << (config->spike_min_move() * PCT_TO_DECIMAL) << "% (minimum move)\n";
+    std::cout << "  spike_cooldown:     " << config->get_spike_cooldown() << " bars\n\n";
 
     // AI Tuner & Order Type
     std::cout << "[ AI Tuner & Order Execution ]\n";
@@ -224,6 +243,7 @@ int main(int argc, char* argv[]) {
     }
 
     const char* shm_name = "/trader_config";
+    const char* paper_shm_name = "/trader_paper_config";
     std::string cmd = argv[1];
 
     // Open shared config (read-write)
@@ -234,9 +254,12 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
+    // Open paper config (optional, for slippage settings)
+    SharedPaperConfig* paper_config = SharedPaperConfig::open_rw(paper_shm_name);
+
     // Commands
     if (cmd == "status") {
-        print_status(config, shm_name);
+        print_status(config, paper_config, shm_name);
     }
     else if (cmd == "list") {
         print_params(config, shm_name);
@@ -252,9 +275,13 @@ int main(int argc, char* argv[]) {
         } else if (param == "pullback_pct") {
             std::cout << config->pullback_pct() << "\n";
         } else if (param == "commission") {
-            std::cout << (config->commission_rate() * 100) << "\n";
+            std::cout << (config->commission_rate() * PCT_TO_DECIMAL) << "\n";
         } else if (param == "slippage_bps" || param == "slippage") {
-            std::cout << config->slippage_bps() << "\n";
+            if (paper_config) {
+                std::cout << paper_config->slippage_bps() << "\n";
+            } else {
+                std::cout << config->slippage_bps() << " (fallback to SharedConfig)\n";
+            }
         } else if (param == "min_trade_value") {
             std::cout << config->min_trade_value() << "\n";
         } else if (param == "cooldown_ms" || param == "cooldown") {
@@ -281,11 +308,19 @@ int main(int argc, char* argv[]) {
         } else if (param == "paper_trading") {
             std::cout << (config->is_paper_trading() ? "true" : "false") << "\n";
         } else if (param == "ema_dev_trending") {
-            std::cout << (config->ema_dev_trending() * 100) << "\n";
+            std::cout << (config->ema_dev_trending() * PCT_TO_DECIMAL) << "\n";
         } else if (param == "ema_dev_ranging") {
-            std::cout << (config->ema_dev_ranging() * 100) << "\n";
+            std::cout << (config->ema_dev_ranging() * PCT_TO_DECIMAL) << "\n";
         } else if (param == "ema_dev_highvol") {
-            std::cout << (config->ema_dev_highvol() * 100) << "\n";
+            std::cout << (config->ema_dev_highvol() * PCT_TO_DECIMAL) << "\n";
+        } else if (param == "spike_threshold") {
+            std::cout << config->spike_threshold() << "\n";
+        } else if (param == "spike_lookback") {
+            std::cout << config->get_spike_lookback() << "\n";
+        } else if (param == "spike_min_move") {
+            std::cout << (config->spike_min_move() * PCT_TO_DECIMAL) << "\n";
+        } else if (param == "spike_cooldown") {
+            std::cout << config->get_spike_cooldown() << "\n";
         } else if (param == "tuner_mode") {
             std::cout << (config->is_tuner_mode() ? "1" : "0") << "\n";
         } else if (param == "order_type") {
@@ -314,11 +349,17 @@ int main(int argc, char* argv[]) {
             config->set_pullback_pct(value);
             std::cout << "pullback_pct = " << value << "% (trend exit)\n";
         } else if (param == "commission") {
-            config->set_commission_rate(value / 100.0);  // Convert % to decimal
+            config->set_commission_rate(value / PCT_TO_DECIMAL);  // Convert % to decimal
             std::cout << "commission = " << value << "% (" << (value * 10) << " bps)\n";
         } else if (param == "slippage_bps" || param == "slippage") {
-            config->set_slippage_bps(value);
-            std::cout << "slippage_bps = " << value << " bps (" << (value / 100.0) << "%, paper only)\n";
+            if (paper_config) {
+                paper_config->set_slippage_bps(value);
+                std::cout << "slippage_bps = " << value << " bps (" << (value / BPS_TO_PCT) << "%, paper only)\n";
+            } else {
+                // Fallback to SharedConfig (deprecated)
+                config->set_slippage_bps(value);
+                std::cout << "slippage_bps = " << value << " bps (SharedConfig fallback, deprecated)\n";
+            }
         } else if (param == "min_trade_value") {
             config->set_min_trade_value(value);
             std::cout << "min_trade_value = $" << value << " (minimum trade size)\n";
@@ -374,6 +415,18 @@ int main(int argc, char* argv[]) {
         } else if (param == "ema_dev_highvol") {
             config->set_ema_dev_highvol(value);
             std::cout << "ema_dev_highvol = " << value << "% (max above EMA in high vol)\n";
+        } else if (param == "spike_threshold") {
+            config->set_spike_threshold(value);
+            std::cout << "spike_threshold = " << value << "σ (standard deviations)\n";
+        } else if (param == "spike_lookback") {
+            config->set_spike_lookback(static_cast<int32_t>(value));
+            std::cout << "spike_lookback = " << static_cast<int32_t>(value) << " bars\n";
+        } else if (param == "spike_min_move") {
+            config->set_spike_min_move(value / PCT_TO_DECIMAL);  // Convert % to decimal
+            std::cout << "spike_min_move = " << value << "% (minimum move filter)\n";
+        } else if (param == "spike_cooldown") {
+            config->set_spike_cooldown(static_cast<int32_t>(value));
+            std::cout << "spike_cooldown = " << static_cast<int32_t>(value) << " bars\n";
         } else if (param == "tuner_mode") {
             bool enabled = (value > 0);
             config->set_tuner_mode(enabled);

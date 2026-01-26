@@ -18,7 +18,31 @@ enum class EventType : uint8_t {
     TargetHit,      // Take-profit triggered
     StopLoss,       // Stop-loss triggered
     RegimeChange,   // Market regime changed
-    Error           // Error occurred
+    Status,         // Status/info event (heartbeat, warnings, etc.)
+    Error,          // Error occurred
+    TunerConfig     // Tuner configuration change event
+};
+
+/**
+ * Status codes for Status events
+ */
+enum class StatusCode : uint8_t {
+    None = 0,
+    Heartbeat,          // System alive signal
+    IndicatorsWarmup,   // Technical indicators warming up
+    CashLow,            // Insufficient cash for trading
+    TradingDisabled,    // Trading is disabled
+    VolatilitySpike,    // High volatility detected
+    DrawdownAlert,      // Drawdown threshold reached
+    AutoTunePaused,     // Auto-tune is paused
+    AutoTuneRelaxed,    // Auto-tune relaxed parameters
+    AutoTuneCooldown,   // Auto-tune increased cooldown
+    AutoTuneSignal,     // Auto-tune changed signal strength
+    AutoTuneMinTrade,   // Auto-tune changed min trade value
+    TunerConfigUpdate,  // Tuner configuration updated
+    TunerPauseSymbol,   // Tuner paused symbol
+    TunerResumeSymbol,  // Tuner resumed symbol
+    TunerEmergencyExit  // Tuner triggered emergency exit
 };
 
 /**
@@ -54,7 +78,7 @@ struct alignas(64) TradeEvent {
     uint8_t side;               // 0=Buy, 1=Sell
     uint8_t regime;             // Market regime
     uint8_t signal_strength;    // Signal strength (0-3)
-    uint8_t padding2;           // Alignment padding
+    uint8_t status_code;        // StatusCode for Status events
 
     // Sequence for ordering (4 bytes) - total now 64 bytes
     uint32_t sequence;          // Monotonic sequence number
@@ -163,6 +187,65 @@ struct alignas(64) TradeEvent {
         e.set_ticker(tick);
         e.regime = new_regime;
         return e;
+    }
+
+    static TradeEvent status(uint32_t seq, uint64_t ts, uint32_t sym,
+                            const char* tick, StatusCode code,
+                            double price = 0, uint8_t sig_strength = 0,
+                            uint8_t regime_val = 0) {
+        TradeEvent e;
+        e.clear();
+        e.sequence = seq;
+        e.timestamp_ns = ts;
+        e.type = EventType::Status;
+        e.symbol_id = sym;
+        e.set_ticker(tick);
+        e.status_code = static_cast<uint8_t>(code);
+        e.price = price;
+        e.signal_strength = sig_strength;
+        e.regime = regime_val;
+        return e;
+    }
+
+    static TradeEvent tuner_config(uint32_t seq, uint64_t ts, uint32_t sym,
+                                   const char* tick, StatusCode code,
+                                   double confidence = 0) {
+        TradeEvent e;
+        e.clear();
+        e.sequence = seq;
+        e.timestamp_ns = ts;
+        e.type = EventType::TunerConfig;
+        e.symbol_id = sym;
+        e.set_ticker(tick);
+        e.status_code = static_cast<uint8_t>(code);
+        e.price = confidence;  // Store confidence in price field
+        return e;
+    }
+
+    StatusCode get_status_code() const {
+        return static_cast<StatusCode>(status_code);
+    }
+
+    static const char* status_code_name(StatusCode code) {
+        switch (code) {
+            case StatusCode::None: return "None";
+            case StatusCode::Heartbeat: return "Heartbeat";
+            case StatusCode::IndicatorsWarmup: return "IndicatorsWarmup";
+            case StatusCode::CashLow: return "CashLow";
+            case StatusCode::TradingDisabled: return "TradingDisabled";
+            case StatusCode::VolatilitySpike: return "VolatilitySpike";
+            case StatusCode::DrawdownAlert: return "DrawdownAlert";
+            case StatusCode::AutoTunePaused: return "AutoTunePaused";
+            case StatusCode::AutoTuneRelaxed: return "AutoTuneRelaxed";
+            case StatusCode::AutoTuneCooldown: return "AutoTuneCooldown";
+            case StatusCode::AutoTuneSignal: return "AutoTuneSignal";
+            case StatusCode::AutoTuneMinTrade: return "AutoTuneMinTrade";
+            case StatusCode::TunerConfigUpdate: return "TunerConfigUpdate";
+            case StatusCode::TunerPauseSymbol: return "TunerPauseSymbol";
+            case StatusCode::TunerResumeSymbol: return "TunerResumeSymbol";
+            case StatusCode::TunerEmergencyExit: return "TunerEmergencyExit";
+            default: return "Unknown";
+        }
     }
 };
 

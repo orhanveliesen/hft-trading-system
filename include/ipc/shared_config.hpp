@@ -20,6 +20,7 @@
  */
 
 #include <atomic>
+#include <array>
 #include <chrono>
 #include <cstdint>
 #include <cstring>
@@ -29,6 +30,44 @@
 
 namespace hft {
 namespace ipc {
+
+/**
+ * Strategy types for regime mapping
+ * Used by SharedConfig::get/set_strategy_for_regime()
+ */
+enum class StrategyType : uint8_t {
+    NONE = 0,       // No trading
+    MOMENTUM = 1,   // Momentum/trend following
+    MEAN_REV = 2,   // Mean reversion
+    MKT_MAKER = 3,  // Market making
+    DEFENSIVE = 4,  // Defensive (reduced risk)
+    CAUTIOUS = 5,   // Extra cautious (high vol)
+    SMART = 6       // Smart/adaptive strategy
+};
+
+constexpr size_t STRATEGY_TYPE_COUNT = 7;
+
+// Strategy name lookup table: {long_name, short_name}
+// Index matches StrategyType enum value - no branching needed
+constexpr std::array<std::pair<const char*, const char*>, STRATEGY_TYPE_COUNT> STRATEGY_NAMES = {{
+    {"NONE", "OFF"},
+    {"MOMENTUM", "MOM"},
+    {"MEAN_REV", "MRV"},
+    {"MKT_MAKER", "MMK"},
+    {"DEFENSIVE", "DEF"},
+    {"CAUTIOUS", "CAU"},
+    {"SMART", "SMT"}
+}};
+
+inline const char* strategy_type_to_string(StrategyType type) {
+    const auto idx = static_cast<size_t>(type);
+    return idx < STRATEGY_TYPE_COUNT ? STRATEGY_NAMES[idx].first : "UNKNOWN";
+}
+
+inline const char* strategy_type_to_short(StrategyType type) {
+    const auto idx = static_cast<size_t>(type);
+    return idx < STRATEGY_TYPE_COUNT ? STRATEGY_NAMES[idx].second : "UNK";
+}
 
 // Convert 8-char hex string to uint32_t at compile time
 constexpr uint32_t hex_to_u32(const char* s) {
@@ -82,6 +121,13 @@ struct SharedConfig {
     std::atomic<int32_t> ema_dev_trending_x1000;  // Default: 10 (1% = 0.01)
     std::atomic<int32_t> ema_dev_ranging_x1000;   // Default: 5 (0.5% = 0.005)
     std::atomic<int32_t> ema_dev_highvol_x1000;   // Default: 2 (0.2% = 0.002)
+
+    // Spike detection thresholds (regime detector)
+    // Based on statistical significance: spike = move > N standard deviations
+    std::atomic<int32_t> spike_threshold_x100;    // Default: 300 (3.0σ - 99.7% significance)
+    std::atomic<int32_t> spike_lookback;          // Default: 10 (bars for avg calculation)
+    std::atomic<int32_t> spike_min_move_x10000;   // Default: 50 (0.5% minimum move filter)
+    std::atomic<int32_t> spike_cooldown;          // Default: 5 (bars between detections)
 
     // Mode overrides
     std::atomic<uint8_t> force_mode;    // 0 = auto, 1-5 = force specific mode
@@ -204,6 +250,12 @@ struct SharedConfig {
     double ema_dev_ranging() const { return ema_dev_ranging_x1000.load() / 1000.0; }
     double ema_dev_highvol() const { return ema_dev_highvol_x1000.load() / 1000.0; }
 
+    // Spike detection accessors
+    double spike_threshold() const { return spike_threshold_x100.load() / 100.0; }
+    int32_t get_spike_lookback() const { return spike_lookback.load(); }
+    double spike_min_move() const { return spike_min_move_x10000.load() / 10000.0; }
+    int32_t get_spike_cooldown() const { return spike_cooldown.load(); }
+
     // Regime → Strategy mapping accessors
     // regime_idx: 0=Unknown, 1=TrendingUp, 2=TrendingDown, 3=Ranging, 4=HighVol, 5=LowVol, 6=Spike
     uint8_t get_strategy_for_regime(int regime_idx) const {
@@ -285,6 +337,23 @@ struct SharedConfig {
     }
     void set_ema_dev_highvol(double val) {
         ema_dev_highvol_x1000.store(static_cast<int32_t>(val * 10));   // 0.2% -> 2
+        sequence.fetch_add(1);
+    }
+    // Spike detection setters
+    void set_spike_threshold(double val) {
+        spike_threshold_x100.store(static_cast<int32_t>(val * 100));
+        sequence.fetch_add(1);
+    }
+    void set_spike_lookback(int32_t val) {
+        spike_lookback.store(val);
+        sequence.fetch_add(1);
+    }
+    void set_spike_min_move(double val) {
+        spike_min_move_x10000.store(static_cast<int32_t>(val * 10000));
+        sequence.fetch_add(1);
+    }
+    void set_spike_cooldown(int32_t val) {
+        spike_cooldown.store(val);
         sequence.fetch_add(1);
     }
     void set_trading_enabled(bool enabled) {
@@ -448,6 +517,12 @@ struct SharedConfig {
         ema_dev_trending_x1000.store(10);     // 1% above EMA OK in uptrend
         ema_dev_ranging_x1000.store(5);       // 0.5% above EMA in ranging
         ema_dev_highvol_x1000.store(2);       // 0.2% above EMA in high vol
+
+        // Spike detection defaults (empirically tuned for crypto markets)
+        spike_threshold_x100.store(300);      // 3.0σ - statistical significance threshold
+        spike_lookback.store(10);             // 10 bars for stable average
+        spike_min_move_x10000.store(50);      // 0.5% minimum move filter
+        spike_cooldown.store(5);              // 5 bars between detections
 
         force_mode.store(0);                  // auto
         trading_enabled.store(1);             // active

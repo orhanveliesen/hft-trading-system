@@ -36,20 +36,67 @@
 namespace hft {
 namespace ipc {
 
+// Fixed-point scaling factor for atomic int64 <-> double conversions
+// Using 1e8 provides 8 decimal places of precision (sufficient for crypto prices)
+static constexpr double FIXED_POINT_SCALE = 1e8;
+
 // Maximum number of symbols we can track
 static constexpr size_t MAX_PORTFOLIO_SYMBOLS = 64;
+
+// Position snapshot for tracking OHLC and technical indicators
+// Size: 6x int64_t (48) + int32_t (4) + int8_t (1) + uint32_t (4) + padding (15) = 72 bytes
+struct PositionSnapshot {
+    std::atomic<int64_t> price_open_x8{0};    // Opening price * FIXED_POINT_SCALE
+    std::atomic<int64_t> price_high_x8{0};    // High price * FIXED_POINT_SCALE
+    std::atomic<int64_t> price_low_x8{0};     // Low price * FIXED_POINT_SCALE
+    std::atomic<int64_t> ema_20_x8{0};        // 20-period EMA * FIXED_POINT_SCALE
+    std::atomic<int64_t> atr_14_x8{0};        // 14-period ATR * FIXED_POINT_SCALE (or BB width)
+    std::atomic<int64_t> volume_sum_x8{0};    // Sum of volume * FIXED_POINT_SCALE
+    std::atomic<int32_t> volatility_x100{0};  // Volatility * 100
+    std::atomic<int8_t> trend_direction{0};   // -1, 0, +1
+    std::atomic<uint32_t> tick_count{0};      // Number of ticks received
+
+    void clear() {
+        price_open_x8.store(0);
+        price_high_x8.store(0);
+        price_low_x8.store(0);
+        ema_20_x8.store(0);
+        atr_14_x8.store(0);
+        volume_sum_x8.store(0);
+        volatility_x100.store(0);
+        trend_direction.store(0);
+        tick_count.store(0);
+    }
+
+    double price_open() const { return price_open_x8.load() / FIXED_POINT_SCALE; }
+    double price_high() const { return price_high_x8.load() / FIXED_POINT_SCALE; }
+    double price_low() const { return price_low_x8.load() / FIXED_POINT_SCALE; }
+    double ema_20() const { return ema_20_x8.load() / FIXED_POINT_SCALE; }
+    double atr_14() const { return atr_14_x8.load() / FIXED_POINT_SCALE; }
+    double volume_sum() const { return volume_sum_x8.load() / FIXED_POINT_SCALE; }
+    double volatility() const { return volatility_x100.load() / 100.0; }
+    double volatility_pct() const { return volatility(); }
+
+    double price_range_pct() const {
+        double high = price_high();
+        double low = price_low();
+        if (low <= 0) return 0.0;
+        return (high - low) / low * 100.0;
+    }
+};
 
 // Position data for a single symbol
 struct PositionSlot {
     char symbol[16];                    // Symbol name (null-terminated)
-    std::atomic<int64_t> quantity_x8;   // Quantity * 1e8 (for atomic int ops)
-    std::atomic<int64_t> avg_price_x8;  // Avg entry price * 1e8
-    std::atomic<int64_t> last_price_x8; // Last market price * 1e8
-    std::atomic<int64_t> realized_pnl_x8; // Realized P&L * 1e8
+    std::atomic<int64_t> quantity_x8;   // Quantity * FIXED_POINT_SCALE (for atomic int ops)
+    std::atomic<int64_t> avg_price_x8;  // Avg entry price * FIXED_POINT_SCALE
+    std::atomic<int64_t> last_price_x8; // Last market price * FIXED_POINT_SCALE
+    std::atomic<int64_t> realized_pnl_x8; // Realized P&L * FIXED_POINT_SCALE
     std::atomic<uint32_t> buy_count;    // Number of buys
     std::atomic<uint32_t> sell_count;   // Number of sells
     std::atomic<uint8_t> active;        // Is this slot in use?
     std::atomic<uint8_t> regime;        // Current market regime (0=Unknown, 1=TrendingUp, etc.)
+    PositionSnapshot snapshot;          // Last snapshot for tracking changes
     uint8_t padding[6];                 // Align to 8 bytes
 
     void clear() {
@@ -62,13 +109,14 @@ struct PositionSlot {
         sell_count.store(0);
         active.store(0);
         regime.store(0);
+        snapshot.clear();
     }
 
     // Conversion helpers (atomic int64 <-> double)
-    double quantity() const { return quantity_x8.load() / 1e8; }
-    double avg_price() const { return avg_price_x8.load() / 1e8; }
-    double last_price() const { return last_price_x8.load() / 1e8; }
-    double realized_pnl() const { return realized_pnl_x8.load() / 1e8; }
+    double quantity() const { return quantity_x8.load() / FIXED_POINT_SCALE; }
+    double avg_price() const { return avg_price_x8.load() / FIXED_POINT_SCALE; }
+    double last_price() const { return last_price_x8.load() / FIXED_POINT_SCALE; }
+    double realized_pnl() const { return realized_pnl_x8.load() / FIXED_POINT_SCALE; }
 
     double unrealized_pnl() const {
         double qty = quantity();
@@ -111,8 +159,8 @@ struct SharedPortfolioState {
     std::atomic<uint32_t> sequence;     // Incremented on each update
 
     // Global portfolio state
-    std::atomic<int64_t> cash_x8;       // Available cash * 1e8
-    std::atomic<int64_t> initial_cash_x8; // Starting cash * 1e8
+    std::atomic<int64_t> cash_x8;       // Available cash * FIXED_POINT_SCALE
+    std::atomic<int64_t> initial_cash_x8; // Starting cash * FIXED_POINT_SCALE
     std::atomic<int64_t> total_realized_pnl_x8;
     std::atomic<uint64_t> total_events;
     std::atomic<uint32_t> winning_trades;
@@ -122,15 +170,21 @@ struct SharedPortfolioState {
     std::atomic<uint32_t> total_stops;
     std::atomic<int64_t> start_time_ns; // Epoch nanoseconds
     std::atomic<uint8_t> trading_active;
-    uint8_t padding[7];
+    uint8_t padding1[7];
+
+    // Trading costs tracking
+    std::atomic<int64_t> total_slippage_x8;     // Total slippage * FIXED_POINT_SCALE
+    std::atomic<int64_t> total_commissions_x8;  // Total commissions * FIXED_POINT_SCALE
+    std::atomic<int64_t> total_spread_cost_x8;  // Total spread cost * FIXED_POINT_SCALE
+    std::atomic<int64_t> total_volume_x8;       // Total volume traded * FIXED_POINT_SCALE
 
     // Position slots
     PositionSlot positions[MAX_PORTFOLIO_SYMBOLS];
 
     // === Accessors ===
-    double cash() const { return cash_x8.load() / 1e8; }
-    double initial_cash() const { return initial_cash_x8.load() / 1e8; }
-    double total_realized_pnl() const { return total_realized_pnl_x8.load() / 1e8; }
+    double cash() const { return cash_x8.load() / FIXED_POINT_SCALE; }
+    double initial_cash() const { return initial_cash_x8.load() / FIXED_POINT_SCALE; }
+    double total_realized_pnl() const { return total_realized_pnl_x8.load() / FIXED_POINT_SCALE; }
 
     double total_unrealized_pnl() const {
         double total = 0;
@@ -153,18 +207,41 @@ struct SharedPortfolioState {
         return total > 0 ? (double)wins / total * 100.0 : 0.0;
     }
 
+    double total_slippage() const { return total_slippage_x8.load() / FIXED_POINT_SCALE; }
+    double total_commissions() const { return total_commissions_x8.load() / FIXED_POINT_SCALE; }
+    double total_spread_cost() const { return total_spread_cost_x8.load() / FIXED_POINT_SCALE; }
+    double total_volume() const { return total_volume_x8.load() / FIXED_POINT_SCALE; }
+    double total_costs() const { return total_slippage() + total_commissions() + total_spread_cost(); }
+
+    double gross_pnl() const { return total_realized_pnl() + total_costs(); }
+
+    double cost_per_trade() const {
+        uint32_t fills = total_fills.load();
+        return fills > 0 ? total_costs() / fills : 0.0;
+    }
+
+    double avg_trade_value() const {
+        uint32_t fills = total_fills.load();
+        return fills > 0 ? total_volume() / fills : 0.0;
+    }
+
+    double cost_pct_per_trade() const {
+        double avg_val = avg_trade_value();
+        return avg_val > 0 ? (cost_per_trade() / avg_val) * 100.0 : 0.0;
+    }
+
     // === Mutators (for writer) ===
     void set_cash(double value) {
-        cash_x8.store(static_cast<int64_t>(value * 1e8));
+        cash_x8.store(static_cast<int64_t>(value * FIXED_POINT_SCALE));
         sequence.fetch_add(1);
     }
 
     void set_initial_cash(double value) {
-        initial_cash_x8.store(static_cast<int64_t>(value * 1e8));
+        initial_cash_x8.store(static_cast<int64_t>(value * FIXED_POINT_SCALE));
     }
 
     void add_realized_pnl(double pnl) {
-        int64_t pnl_x8 = static_cast<int64_t>(pnl * 1e8);
+        int64_t pnl_x8 = static_cast<int64_t>(pnl * FIXED_POINT_SCALE);
         total_realized_pnl_x8.fetch_add(pnl_x8);
         if (pnl > 0) {
             winning_trades.fetch_add(1);
@@ -178,6 +255,22 @@ struct SharedPortfolioState {
     void record_target() { total_targets.fetch_add(1); }
     void record_stop() { total_stops.fetch_add(1); }
     void record_event() { total_events.fetch_add(1); }
+
+    void add_slippage(double value) {
+        total_slippage_x8.fetch_add(static_cast<int64_t>(value * FIXED_POINT_SCALE));
+    }
+
+    void add_commission(double value) {
+        total_commissions_x8.fetch_add(static_cast<int64_t>(value * FIXED_POINT_SCALE));
+    }
+
+    void add_spread_cost(double value) {
+        total_spread_cost_x8.fetch_add(static_cast<int64_t>(value * FIXED_POINT_SCALE));
+    }
+
+    void add_volume(double value) {
+        total_volume_x8.fetch_add(static_cast<int64_t>(value * FIXED_POINT_SCALE));
+    }
 
     // Find or create position slot for symbol
     PositionSlot* get_or_create_position(const char* symbol) {
@@ -205,11 +298,11 @@ struct SharedPortfolioState {
                          double last_price, double realized = 0) {
         PositionSlot* pos = get_or_create_position(symbol);
         if (pos) {
-            pos->quantity_x8.store(static_cast<int64_t>(qty * 1e8));
-            pos->avg_price_x8.store(static_cast<int64_t>(avg_price * 1e8));
-            pos->last_price_x8.store(static_cast<int64_t>(last_price * 1e8));
+            pos->quantity_x8.store(static_cast<int64_t>(qty * FIXED_POINT_SCALE));
+            pos->avg_price_x8.store(static_cast<int64_t>(avg_price * FIXED_POINT_SCALE));
+            pos->last_price_x8.store(static_cast<int64_t>(last_price * FIXED_POINT_SCALE));
             if (realized != 0) {
-                pos->realized_pnl_x8.fetch_add(static_cast<int64_t>(realized * 1e8));
+                pos->realized_pnl_x8.fetch_add(static_cast<int64_t>(realized * FIXED_POINT_SCALE));
             }
             sequence.fetch_add(1);
         }
@@ -219,7 +312,7 @@ struct SharedPortfolioState {
         // Get or create position slot - ensures all tracked symbols show prices
         PositionSlot* pos = get_or_create_position(symbol);
         if (pos) {
-            pos->last_price_x8.store(static_cast<int64_t>(price * 1e8));
+            pos->last_price_x8.store(static_cast<int64_t>(price * FIXED_POINT_SCALE));
             // Note: not incrementing sequence here to reduce overhead (called every tick)
         }
     }
@@ -227,7 +320,7 @@ struct SharedPortfolioState {
     // Fast path: Direct index access (no search) - use when symbol_id is known
     void update_last_price_fast(size_t symbol_id, double price) {
         if (symbol_id < MAX_PORTFOLIO_SYMBOLS) {
-            positions[symbol_id].last_price_x8.store(static_cast<int64_t>(price * 1e8));
+            positions[symbol_id].last_price_x8.store(static_cast<int64_t>(price * FIXED_POINT_SCALE));
         }
     }
 
@@ -235,11 +328,11 @@ struct SharedPortfolioState {
                               double last_price, double realized = 0) {
         if (symbol_id >= MAX_PORTFOLIO_SYMBOLS) return;
         auto& pos = positions[symbol_id];
-        pos.quantity_x8.store(static_cast<int64_t>(qty * 1e8));
-        pos.avg_price_x8.store(static_cast<int64_t>(avg_price * 1e8));
-        pos.last_price_x8.store(static_cast<int64_t>(last_price * 1e8));
+        pos.quantity_x8.store(static_cast<int64_t>(qty * FIXED_POINT_SCALE));
+        pos.avg_price_x8.store(static_cast<int64_t>(avg_price * FIXED_POINT_SCALE));
+        pos.last_price_x8.store(static_cast<int64_t>(last_price * FIXED_POINT_SCALE));
         if (realized != 0) {
-            pos.realized_pnl_x8.fetch_add(static_cast<int64_t>(realized * 1e8));
+            pos.realized_pnl_x8.fetch_add(static_cast<int64_t>(realized * FIXED_POINT_SCALE));
         }
         sequence.fetch_add(1);
     }
@@ -308,8 +401,8 @@ struct SharedPortfolioState {
         session_id = rd();
 
         sequence.store(0);
-        cash_x8.store(static_cast<int64_t>(starting_cash * 1e8));
-        initial_cash_x8.store(static_cast<int64_t>(starting_cash * 1e8));
+        cash_x8.store(static_cast<int64_t>(starting_cash * FIXED_POINT_SCALE));
+        initial_cash_x8.store(static_cast<int64_t>(starting_cash * FIXED_POINT_SCALE));
         total_realized_pnl_x8.store(0);
         total_events.store(0);
         winning_trades.store(0);
@@ -319,6 +412,10 @@ struct SharedPortfolioState {
         total_stops.store(0);
         start_time_ns.store(std::chrono::steady_clock::now().time_since_epoch().count());
         trading_active.store(1);
+        total_slippage_x8.store(0);
+        total_commissions_x8.store(0);
+        total_spread_cost_x8.store(0);
+        total_volume_x8.store(0);
 
         for (size_t i = 0; i < MAX_PORTFOLIO_SYMBOLS; ++i) {
             positions[i].clear();
@@ -393,7 +490,16 @@ struct SharedPortfolioState {
     }
 };
 
-static_assert(sizeof(PositionSlot) == 64, "PositionSlot size mismatch");
+// PositionSlot size is calculated automatically by compiler.
+// Use sizeof(PositionSlot) instead of hardcoded values.
+// Alignment requirements for atomic operations and IPC compatibility:
+static_assert(sizeof(PositionSlot) % 8 == 0, "PositionSlot size must be 8-byte aligned for atomic ops");
+static_assert(alignof(PositionSlot) >= 8, "PositionSlot must have at least 8-byte alignment");
+
+// Current size for documentation (will update automatically if struct changes):
+// sizeof(PositionSlot) = sizeof(symbol) + 4*sizeof(atomic<int64_t>) + 2*sizeof(atomic<uint32_t>)
+//                      + 2*sizeof(atomic<uint8_t>) + sizeof(PositionSnapshot) + padding
+constexpr size_t POSITION_SLOT_SIZE = sizeof(PositionSlot);
 
 }  // namespace ipc
 }  // namespace hft

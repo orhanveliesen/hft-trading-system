@@ -11,6 +11,7 @@
 #include <mutex>
 #include <queue>
 #include <cstring>
+#include <concepts>
 
 namespace hft {
 namespace exchange {
@@ -72,6 +73,18 @@ using WsTradeCallback = std::function<void(const WsTrade&)>;
 using WsKlineCallback = std::function<void(const WsKline&)>;
 using WsErrorCallback = std::function<void(const std::string&)>;
 using WsConnectCallback = std::function<void(bool connected)>;
+// Callback concepts for compile-time type checking
+template<typename T, typename... Args>
+concept Callable = requires(T t, Args... args) {
+    { t(args...) } -> std::same_as<void>;
+};
+
+template<typename T>
+concept ReconnectCallable = Callable<T, uint32_t, bool>;
+
+// Type-erased storage (required due to libwebsockets C-style callback architecture)
+// Template setters below provide compile-time type checking
+using WsReconnectCallback = std::function<void(uint32_t retry_count, bool success)>;
 
 /**
  * Binance WebSocket Client
@@ -198,6 +211,37 @@ public:
         return running_;
     }
 
+    // ========================================
+    // Auto-Reconnect and Health Management
+    // ========================================
+
+    void enable_auto_reconnect(bool enable = true) {
+        auto_reconnect_ = enable;
+    }
+
+    bool is_healthy() const {
+        return is_healthy(30);  // Default to 30 seconds
+    }
+
+    bool is_healthy(int timeout_seconds) const {
+        if (!connected_) return false;
+        // Consider healthy if we received data within timeout
+        auto now = std::chrono::steady_clock::now();
+        auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
+            now - last_data_time_.load()).count();
+        return elapsed < timeout_seconds;
+    }
+
+    void force_reconnect() {
+        reconnect_requested_ = true;
+    }
+
+    // Template setter with concept constraint for compile-time type checking
+    template<ReconnectCallable Callback>
+    void set_reconnect_callback(Callback&& cb) {
+        reconnect_callback_ = std::forward<Callback>(cb);
+    }
+
 private:
     std::string host_;
     int port_;
@@ -205,6 +249,9 @@ private:
 
     std::atomic<bool> running_;
     std::atomic<bool> connected_;
+    std::atomic<bool> auto_reconnect_{false};
+    std::atomic<bool> reconnect_requested_{false};
+    std::atomic<std::chrono::steady_clock::time_point> last_data_time_{std::chrono::steady_clock::now()};
     std::thread ws_thread_;
 
     struct lws* wsi_;
@@ -216,6 +263,7 @@ private:
     WsKlineCallback kline_callback_;
     WsErrorCallback error_callback_;
     WsConnectCallback connect_callback_;
+    WsReconnectCallback reconnect_callback_;
 
     // Receive buffer
     std::string rx_buffer_;
@@ -245,6 +293,9 @@ private:
 
     // Parse incoming JSON message
     void parse_message(const std::string& json) {
+        // Update last data time for health monitoring
+        last_data_time_.store(std::chrono::steady_clock::now());
+
         // Check if it's a combined stream message
         bool is_combined = (json.find("\"stream\"") != std::string::npos);
 

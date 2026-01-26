@@ -7,6 +7,9 @@
 #include <algorithm>
 #include <string>
 
+// Forward declaration to avoid circular dependency
+namespace hft { namespace ipc { struct SharedConfig; } }
+
 namespace hft {
 namespace strategy {
 
@@ -19,7 +22,8 @@ enum class MarketRegime {
     TrendingDown,    // Strong downward trend
     Ranging,         // Sideways, mean-reverting
     HighVolatility,  // Choppy, high uncertainty
-    LowVolatility    // Quiet, low movement
+    LowVolatility,   // Quiet, low movement
+    Spike            // Sudden price spike detected
 };
 
 inline std::string regime_to_string(MarketRegime regime) {
@@ -29,6 +33,7 @@ inline std::string regime_to_string(MarketRegime regime) {
         case MarketRegime::Ranging: return "RANGING";
         case MarketRegime::HighVolatility: return "HIGH_VOL";
         case MarketRegime::LowVolatility: return "LOW_VOL";
+        case MarketRegime::Spike: return "SPIKE";
         default: return "UNKNOWN";
     }
 }
@@ -48,9 +53,27 @@ struct RegimeConfig {
     double high_vol_threshold = 0.03;  // 3% daily vol = high
     double low_vol_threshold = 0.01;   // 1% daily vol = low
 
-    // Mean reversion detection (simplified Hurst)
-    double mean_reversion_threshold = 0.4;  // < 0.4 = mean reverting
-    double trending_threshold = 0.6;        // > 0.6 = trending
+    // Mean reversion detection based on Hurst Exponent theory:
+    // - H = 0.5: Random walk (no predictable pattern)
+    // - H < 0.5: Mean reverting (price tends to return to mean)
+    // - H > 0.5: Trending (momentum persists)
+    // Thresholds 0.4 and 0.6 create buffer zones around 0.5:
+    // - < 0.4: Strong mean reversion signal
+    // - 0.4-0.6: Uncertain/random behavior
+    // - > 0.6: Strong trending signal
+    // Reference: Mandelbrot (1971), Lo & MacKinlay (1988) Variance Ratio Test
+    double mean_reversion_threshold = 0.4;
+    double trending_threshold = 0.6;
+
+    // Spike detection thresholds (empirically tuned for crypto markets)
+    // - spike_threshold: 3.0 = 3 standard deviations, statistical significance threshold
+    // - spike_lookback: 10 bars provides stable average without being too slow to react
+    // - spike_min_move: 0.5% filters out noise on low-volatility pairs
+    // - spike_cooldown: 5 bars prevents double-counting cascading moves
+    double spike_threshold = 3.0;
+    int spike_lookback = 10;
+    double spike_min_move = 0.005;
+    int spike_cooldown = 5;
 };
 
 /**
@@ -143,6 +166,21 @@ public:
                current_regime_ == MarketRegime::TrendingDown;
     }
 
+    /**
+     * Is there a price spike detected?
+     */
+    bool is_spike() const {
+        return current_regime_ == MarketRegime::Spike;
+    }
+
+    /**
+     * Is the market in a dangerous state (high vol or spike)?
+     */
+    bool is_dangerous() const {
+        return current_regime_ == MarketRegime::HighVolatility ||
+               current_regime_ == MarketRegime::Spike;
+    }
+
     void reset() {
         prices_.clear();
         highs_.clear();
@@ -152,6 +190,18 @@ public:
         volatility_ = 0;
         mean_reversion_score_ = 0.5;
     }
+
+    /**
+     * Update spike detection config from SharedConfig
+     * Call this when SharedConfig sequence changes to sync runtime settings
+     */
+    void update_from_config(const ipc::SharedConfig* cfg);
+
+    /**
+     * Direct config access for testing
+     */
+    RegimeConfig& config() { return config_; }
+    const RegimeConfig& config() const { return config_; }
 
 private:
     RegimeConfig config_;
@@ -325,6 +375,24 @@ private:
         current_regime_ = MarketRegime::Ranging;
     }
 };
+
+}  // namespace strategy
+}  // namespace hft
+
+// Implementation requires SharedConfig definition
+#include "../ipc/shared_config.hpp"
+
+namespace hft {
+namespace strategy {
+
+inline void RegimeDetector::update_from_config(const ipc::SharedConfig* cfg) {
+    if (!cfg) return;
+
+    config_.spike_threshold = cfg->spike_threshold();
+    config_.spike_lookback = cfg->get_spike_lookback();
+    config_.spike_min_move = cfg->spike_min_move();
+    config_.spike_cooldown = cfg->get_spike_cooldown();
+}
 
 }  // namespace strategy
 }  // namespace hft

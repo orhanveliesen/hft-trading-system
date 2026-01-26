@@ -27,6 +27,7 @@
 #include "../include/ipc/shared_ring_buffer.hpp"
 #include "../include/ipc/shared_portfolio_state.hpp"
 #include "../include/ipc/shared_config.hpp"
+#include "../include/ipc/shared_paper_config.hpp"
 #include "../include/ipc/udp_telemetry.hpp"
 #include "../include/ipc/execution_report.hpp"
 #include "../include/ipc/shared_event_log.hpp"
@@ -1082,6 +1083,17 @@ public:
                           << "position=" << (portfolio_.base_position_pct() * 100) << "%\n";
             }
 
+            // Initialize paper trading config (separate from main config for SRP)
+            shared_paper_config_ = SharedPaperConfig::open_rw("/trader_paper_config");
+            if (!shared_paper_config_) {
+                SharedPaperConfig::destroy("/trader_paper_config");
+                shared_paper_config_ = SharedPaperConfig::create("/trader_paper_config");
+            }
+            if (shared_paper_config_) {
+                std::cout << "[IPC] Paper config loaded (slippage="
+                          << shared_paper_config_->slippage_bps() << " bps)\n";
+            }
+
             // Initialize event log for tuner and web interface
             event_log_ = SharedEventLog::create();
             if (event_log_) {
@@ -1109,6 +1121,7 @@ public:
 
             // Initialize new PaperExchange with config and callbacks
             paper_exchange_.set_config(shared_config_);
+            paper_exchange_.set_paper_config(shared_paper_config_);  // Paper-specific settings
             paper_exchange_.set_execution_callback([this](const ipc::ExecutionReport& report) {
                 on_execution_report(report);
             });
@@ -1132,6 +1145,7 @@ public:
             // Create PaperExchangeAdapter with same price scale
             paper_adapter_ = std::make_unique<PaperExchangeAdapter>(risk::PRICE_SCALE);
             paper_adapter_->set_config(shared_config_);
+            paper_adapter_->set_paper_config(shared_paper_config_);  // Paper-specific settings
 
             // Set up fill callback to route through on_execution_report
             paper_adapter_->set_fill_callback([this](
@@ -1622,6 +1636,7 @@ private:
     ipc::TelemetryPublisher telemetry_;  // UDP multicast for remote monitoring
     SharedPortfolioState* portfolio_state_ = nullptr;  // Shared state for dashboard
     SharedConfig* shared_config_ = nullptr;           // Shared config from dashboard
+    SharedPaperConfig* shared_paper_config_ = nullptr; // Paper trading settings
     SharedEventLog* event_log_ = nullptr;             // Event log for tuner/web
     uint32_t last_config_seq_ = 0;                    // Track config changes
     std::unique_ptr<strategy::PositionStore> position_store_;  // Position persistence

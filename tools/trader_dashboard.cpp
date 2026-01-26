@@ -15,6 +15,7 @@
 #include "../include/ipc/shared_ring_buffer.hpp"
 #include "../include/ipc/shared_portfolio_state.hpp"
 #include "../include/ipc/shared_config.hpp"
+#include "../include/ipc/shared_paper_config.hpp"
 #include "../include/ipc/symbol_config.hpp"
 
 #include "imgui.h"
@@ -576,7 +577,7 @@ struct DashboardData {
 // ImGui Rendering
 // ============================================================================
 
-void render_dashboard(DashboardData& data, const SharedPortfolioState* portfolio_state, SharedConfig* config, SharedSymbolConfigs* symbol_configs) {
+void render_dashboard(DashboardData& data, const SharedPortfolioState* portfolio_state, SharedConfig* config, SharedPaperConfig* paper_config, SharedSymbolConfigs* symbol_configs) {
     auto now = std::chrono::steady_clock::now();
     auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - data.start_time).count();
     int hours = elapsed / 3600;
@@ -1871,12 +1872,17 @@ void render_dashboard(DashboardData& data, const SharedPortfolioState* portfolio
                     "Lower = more realistic paper profits");
             }
 
-            // Slippage
-            float slippage = static_cast<float>(config->slippage_bps());
+            // Slippage (uses SharedPaperConfig if available, fallback to SharedConfig)
+            float slippage = paper_config ? static_cast<float>(paper_config->slippage_bps())
+                                          : static_cast<float>(config->slippage_bps());
             ImGui::SetNextItemWidth(100);
             if (ImGui::InputFloat("Slippage (bps)", &slippage, 1.0f, 5.0f, "%.1f")) {
                 slippage = std::clamp(slippage, 0.0f, 100.0f);
-                config->set_slippage_bps(slippage);
+                if (paper_config) {
+                    paper_config->set_slippage_bps(slippage);
+                } else {
+                    config->set_slippage_bps(slippage);  // Fallback (deprecated)
+                }
             }
             if (ImGui::IsItemHovered()) {
                 ImGui::SetTooltip(
@@ -2405,6 +2411,15 @@ int main(int argc, char* argv[]) {
         std::cout << "Config connected (spread_mult=" << shared_config->spread_multiplier() << "x)\n";
     }
 
+    // Try to open paper config (for paper-specific settings like slippage)
+    SharedPaperConfig* paper_config = SharedPaperConfig::open_rw("/trader_paper_config");
+    if (!paper_config) {
+        paper_config = SharedPaperConfig::create("/trader_paper_config");
+    }
+    if (paper_config) {
+        std::cout << "Paper config connected (slippage=" << paper_config->slippage_bps() << " bps)\n";
+    }
+
     // Try to open symbol configs (for per-symbol config editing)
     SharedSymbolConfigs* symbol_configs = SharedSymbolConfigs::open_rw("/trader_symbol_configs");
     if (!symbol_configs) {
@@ -2438,6 +2453,7 @@ int main(int argc, char* argv[]) {
         std::cerr << "Could not connect to Trader engine\n";
         if (portfolio_state) munmap(portfolio_state, sizeof(SharedPortfolioState));
         if (shared_config) munmap(shared_config, sizeof(SharedConfig));
+        if (paper_config) munmap(paper_config, sizeof(SharedPaperConfig));
         ImGui_ImplOpenGL3_Shutdown();
         ImGui_ImplGlfw_Shutdown();
         ImGui::DestroyContext();
@@ -2526,7 +2542,7 @@ int main(int argc, char* argv[]) {
         ImGui::NewFrame();
 
         // Render dashboard
-        render_dashboard(data, portfolio_state, shared_config, symbol_configs);
+        render_dashboard(data, portfolio_state, shared_config, paper_config, symbol_configs);
 
         // Render
         ImGui::Render();
@@ -2550,6 +2566,9 @@ int main(int argc, char* argv[]) {
     }
     if (shared_config) {
         munmap(shared_config, sizeof(SharedConfig));
+    }
+    if (paper_config) {
+        munmap(paper_config, sizeof(SharedPaperConfig));
     }
     if (symbol_configs) {
         munmap(symbol_configs, sizeof(SharedSymbolConfigs));
