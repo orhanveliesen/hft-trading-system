@@ -24,6 +24,11 @@
 
 using namespace hft::ipc;
 
+// Basis points to percentage conversion: 1 bps = 0.01% = 1/100 of a percent
+static constexpr double BPS_TO_PCT = 100.0;
+// Percentage to decimal conversion: 1% = 0.01
+static constexpr double PCT_TO_DECIMAL = 100.0;
+
 void print_usage(const char* prog) {
     std::cerr << "Usage: " << prog << " <command> [args...]\n\n"
               << "Commands:\n"
@@ -79,7 +84,7 @@ void print_params(const SharedConfig* config, const char* shm_name) {
     std::cout << "  target_pct:        " << std::setw(8) << config->target_pct() << "%   Profit target\n";
     std::cout << "  stop_pct:          " << std::setw(8) << config->stop_pct() << "%   Stop loss\n";
     std::cout << "  pullback_pct:      " << std::setw(8) << config->pullback_pct() << "%   Trend exit pullback\n";
-    std::cout << "  commission:        " << std::setw(8) << (config->commission_rate() * 100) << "%   Commission rate\n";
+    std::cout << "  commission:        " << std::setw(8) << (config->commission_rate() * PCT_TO_DECIMAL) << "%   Commission rate\n";
 
     std::cout << "\n[ Trade Filtering ]\n";
     std::cout << "  min_trade_value:   " << std::setw(8) << config->min_trade_value() << "$   Minimum trade\n";
@@ -123,12 +128,12 @@ void print_status(const SharedConfig* config, const SharedPaperConfig* paper_con
     std::cout << "  target_pct:      " << config->target_pct() << "% (profit target)\n";
     std::cout << "  stop_pct:        " << config->stop_pct() << "% (stop loss)\n";
     std::cout << "  pullback_pct:    " << config->pullback_pct() << "% (trend exit)\n";
-    std::cout << "  commission:      " << (config->commission_rate() * 100) << "% (per trade)\n";
+    std::cout << "  commission:      " << (config->commission_rate() * PCT_TO_DECIMAL) << "% (per trade)\n";
     std::cout << "  slippage_bps:    " << slippage_bps << " bps (paper only)\n\n";
 
     // Round-trip cost calculation
     double commission_pct = config->commission_rate() * 100;
-    double slippage_pct = slippage_bps / 100.0;
+    double slippage_pct = slippage_bps / BPS_TO_PCT;
     double round_trip = (commission_pct * 2) + (slippage_pct * 2);
     std::cout << "  Round-trip cost: ~" << round_trip << "% (commission + slippage)\n";
     std::cout << "  Breakeven:       target > " << round_trip << "%\n\n";
@@ -165,9 +170,9 @@ void print_status(const SharedConfig* config, const SharedPaperConfig* paper_con
 
     // EMA deviation thresholds
     std::cout << "[ EMA Filter ]\n";
-    std::cout << "  ema_dev_trending:   " << (config->ema_dev_trending() * 100) << "% (uptrend)\n";
-    std::cout << "  ema_dev_ranging:    " << (config->ema_dev_ranging() * 100) << "% (ranging/lowvol)\n";
-    std::cout << "  ema_dev_highvol:    " << (config->ema_dev_highvol() * 100) << "% (high volatility)\n\n";
+    std::cout << "  ema_dev_trending:   " << (config->ema_dev_trending() * PCT_TO_DECIMAL) << "% (uptrend)\n";
+    std::cout << "  ema_dev_ranging:    " << (config->ema_dev_ranging() * PCT_TO_DECIMAL) << "% (ranging/lowvol)\n";
+    std::cout << "  ema_dev_highvol:    " << (config->ema_dev_highvol() * PCT_TO_DECIMAL) << "% (high volatility)\n\n";
 
     // AI Tuner & Order Type
     std::cout << "[ AI Tuner & Order Execution ]\n";
@@ -258,7 +263,7 @@ int main(int argc, char* argv[]) {
         } else if (param == "pullback_pct") {
             std::cout << config->pullback_pct() << "\n";
         } else if (param == "commission") {
-            std::cout << (config->commission_rate() * 100) << "\n";
+            std::cout << (config->commission_rate() * PCT_TO_DECIMAL) << "\n";
         } else if (param == "slippage_bps" || param == "slippage") {
             if (paper_config) {
                 std::cout << paper_config->slippage_bps() << "\n";
@@ -291,11 +296,11 @@ int main(int argc, char* argv[]) {
         } else if (param == "paper_trading") {
             std::cout << (config->is_paper_trading() ? "true" : "false") << "\n";
         } else if (param == "ema_dev_trending") {
-            std::cout << (config->ema_dev_trending() * 100) << "\n";
+            std::cout << (config->ema_dev_trending() * PCT_TO_DECIMAL) << "\n";
         } else if (param == "ema_dev_ranging") {
-            std::cout << (config->ema_dev_ranging() * 100) << "\n";
+            std::cout << (config->ema_dev_ranging() * PCT_TO_DECIMAL) << "\n";
         } else if (param == "ema_dev_highvol") {
-            std::cout << (config->ema_dev_highvol() * 100) << "\n";
+            std::cout << (config->ema_dev_highvol() * PCT_TO_DECIMAL) << "\n";
         } else if (param == "tuner_mode") {
             std::cout << (config->is_tuner_mode() ? "1" : "0") << "\n";
         } else if (param == "order_type") {
@@ -324,12 +329,12 @@ int main(int argc, char* argv[]) {
             config->set_pullback_pct(value);
             std::cout << "pullback_pct = " << value << "% (trend exit)\n";
         } else if (param == "commission") {
-            config->set_commission_rate(value / 100.0);  // Convert % to decimal
+            config->set_commission_rate(value / PCT_TO_DECIMAL);  // Convert % to decimal
             std::cout << "commission = " << value << "% (" << (value * 10) << " bps)\n";
         } else if (param == "slippage_bps" || param == "slippage") {
             if (paper_config) {
                 paper_config->set_slippage_bps(value);
-                std::cout << "slippage_bps = " << value << " bps (" << (value / 100.0) << "%, paper only)\n";
+                std::cout << "slippage_bps = " << value << " bps (" << (value / BPS_TO_PCT) << "%, paper only)\n";
             } else {
                 // Fallback to SharedConfig (deprecated)
                 config->set_slippage_bps(value);

@@ -54,11 +54,15 @@ struct RegimeConfig {
     double mean_reversion_threshold = 0.4;  // < 0.4 = mean reverting
     double trending_threshold = 0.6;        // > 0.6 = trending
 
-    // Spike detection
-    double spike_threshold = 3.0;      // Multiplier of avg move for spike detection
-    int spike_lookback = 10;           // Bars to use for average move calculation
-    double spike_min_move = 0.005;     // Minimum move (0.5%) to consider as spike
-    int spike_cooldown = 5;            // Bars to wait after spike before re-detection
+    // Spike detection thresholds (empirically tuned for crypto markets)
+    // - spike_threshold: 3.0 = 3 standard deviations, statistical significance threshold
+    // - spike_lookback: 10 bars provides stable average without being too slow to react
+    // - spike_min_move: 0.5% filters out noise on low-volatility pairs
+    // - spike_cooldown: 5 bars prevents double-counting cascading moves
+    double spike_threshold = 3.0;
+    int spike_lookback = 10;
+    double spike_min_move = 0.005;
+    int spike_cooldown = 5;
 };
 
 /**

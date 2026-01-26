@@ -72,6 +72,8 @@ using WsTradeCallback = std::function<void(const WsTrade&)>;
 using WsKlineCallback = std::function<void(const WsKline&)>;
 using WsErrorCallback = std::function<void(const std::string&)>;
 using WsConnectCallback = std::function<void(bool connected)>;
+// Note: std::function has ~40 byte overhead but WsReconnectCallback is only called
+// on reconnect events (rare), not on the hot data path. Acceptable trade-off for flexibility.
 using WsReconnectCallback = std::function<void(uint32_t retry_count, bool success)>;
 
 /**
