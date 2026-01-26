@@ -125,6 +125,13 @@ struct SharedConfig {
     std::atomic<int32_t> ema_dev_ranging_x1000;   // Default: 5 (0.5% = 0.005)
     std::atomic<int32_t> ema_dev_highvol_x1000;   // Default: 2 (0.2% = 0.002)
 
+    // Spike detection thresholds (regime detector)
+    // Based on statistical significance: spike = move > N standard deviations
+    std::atomic<int32_t> spike_threshold_x100;    // Default: 300 (3.0σ - 99.7% significance)
+    std::atomic<int32_t> spike_lookback;          // Default: 10 (bars for avg calculation)
+    std::atomic<int32_t> spike_min_move_x10000;   // Default: 50 (0.5% minimum move filter)
+    std::atomic<int32_t> spike_cooldown;          // Default: 5 (bars between detections)
+
     // Mode overrides
     std::atomic<uint8_t> force_mode;    // 0 = auto, 1-5 = force specific mode
     std::atomic<uint8_t> trading_enabled;  // 0 = paused, 1 = active
@@ -246,6 +253,12 @@ struct SharedConfig {
     double ema_dev_ranging() const { return ema_dev_ranging_x1000.load() / 1000.0; }
     double ema_dev_highvol() const { return ema_dev_highvol_x1000.load() / 1000.0; }
 
+    // Spike detection accessors
+    double spike_threshold() const { return spike_threshold_x100.load() / 100.0; }
+    int32_t get_spike_lookback() const { return spike_lookback.load(); }
+    double spike_min_move() const { return spike_min_move_x10000.load() / 10000.0; }
+    int32_t get_spike_cooldown() const { return spike_cooldown.load(); }
+
     // Regime → Strategy mapping accessors
     // regime_idx: 0=Unknown, 1=TrendingUp, 2=TrendingDown, 3=Ranging, 4=HighVol, 5=LowVol, 6=Spike
     uint8_t get_strategy_for_regime(int regime_idx) const {
@@ -327,6 +340,23 @@ struct SharedConfig {
     }
     void set_ema_dev_highvol(double val) {
         ema_dev_highvol_x1000.store(static_cast<int32_t>(val * 10));   // 0.2% -> 2
+        sequence.fetch_add(1);
+    }
+    // Spike detection setters
+    void set_spike_threshold(double val) {
+        spike_threshold_x100.store(static_cast<int32_t>(val * 100));
+        sequence.fetch_add(1);
+    }
+    void set_spike_lookback(int32_t val) {
+        spike_lookback.store(val);
+        sequence.fetch_add(1);
+    }
+    void set_spike_min_move(double val) {
+        spike_min_move_x10000.store(static_cast<int32_t>(val * 10000));
+        sequence.fetch_add(1);
+    }
+    void set_spike_cooldown(int32_t val) {
+        spike_cooldown.store(val);
         sequence.fetch_add(1);
     }
     void set_trading_enabled(bool enabled) {
@@ -490,6 +520,12 @@ struct SharedConfig {
         ema_dev_trending_x1000.store(10);     // 1% above EMA OK in uptrend
         ema_dev_ranging_x1000.store(5);       // 0.5% above EMA in ranging
         ema_dev_highvol_x1000.store(2);       // 0.2% above EMA in high vol
+
+        // Spike detection defaults (empirically tuned for crypto markets)
+        spike_threshold_x100.store(300);      // 3.0σ - statistical significance threshold
+        spike_lookback.store(10);             // 10 bars for stable average
+        spike_min_move_x10000.store(50);      // 0.5% minimum move filter
+        spike_cooldown.store(5);              // 5 bars between detections
 
         force_mode.store(0);                  // auto
         trading_enabled.store(1);             // active

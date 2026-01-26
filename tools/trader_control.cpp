@@ -60,6 +60,11 @@ void print_usage(const char* prog) {
               << "  ema_dev_trending       Max % above EMA in uptrend (e.g., 1.0 = 1%)\n"
               << "  ema_dev_ranging        Max % above EMA in ranging (e.g., 0.5 = 0.5%)\n"
               << "  ema_dev_highvol        Max % above EMA in high vol (e.g., 0.2 = 0.2%)\n"
+              << "\nSpike Detection (regime detector):\n"
+              << "  spike_threshold        Standard deviations for spike (e.g., 3.0 = 3σ)\n"
+              << "  spike_lookback         Bars for average calculation (e.g., 10)\n"
+              << "  spike_min_move         Minimum % move filter (e.g., 0.5 = 0.5%)\n"
+              << "  spike_cooldown         Bars between detections (e.g., 5)\n"
               << "\nAI Tuner & Order Execution:\n"
               << "  tuner_mode             AI tuner mode (0=OFF, 1=ON unified strategy)\n"
               << "  order_type             Order type (0=Auto, 1=MarketOnly, 2=LimitOnly, 3=Adaptive)\n"
@@ -173,6 +178,13 @@ void print_status(const SharedConfig* config, const SharedPaperConfig* paper_con
     std::cout << "  ema_dev_trending:   " << (config->ema_dev_trending() * PCT_TO_DECIMAL) << "% (uptrend)\n";
     std::cout << "  ema_dev_ranging:    " << (config->ema_dev_ranging() * PCT_TO_DECIMAL) << "% (ranging/lowvol)\n";
     std::cout << "  ema_dev_highvol:    " << (config->ema_dev_highvol() * PCT_TO_DECIMAL) << "% (high volatility)\n\n";
+
+    // Spike detection thresholds
+    std::cout << "[ Spike Detection ]\n";
+    std::cout << "  spike_threshold:    " << config->spike_threshold() << "σ (standard deviations)\n";
+    std::cout << "  spike_lookback:     " << config->get_spike_lookback() << " bars\n";
+    std::cout << "  spike_min_move:     " << (config->spike_min_move() * PCT_TO_DECIMAL) << "% (minimum move)\n";
+    std::cout << "  spike_cooldown:     " << config->get_spike_cooldown() << " bars\n\n";
 
     // AI Tuner & Order Type
     std::cout << "[ AI Tuner & Order Execution ]\n";
@@ -301,6 +313,14 @@ int main(int argc, char* argv[]) {
             std::cout << (config->ema_dev_ranging() * PCT_TO_DECIMAL) << "\n";
         } else if (param == "ema_dev_highvol") {
             std::cout << (config->ema_dev_highvol() * PCT_TO_DECIMAL) << "\n";
+        } else if (param == "spike_threshold") {
+            std::cout << config->spike_threshold() << "\n";
+        } else if (param == "spike_lookback") {
+            std::cout << config->get_spike_lookback() << "\n";
+        } else if (param == "spike_min_move") {
+            std::cout << (config->spike_min_move() * PCT_TO_DECIMAL) << "\n";
+        } else if (param == "spike_cooldown") {
+            std::cout << config->get_spike_cooldown() << "\n";
         } else if (param == "tuner_mode") {
             std::cout << (config->is_tuner_mode() ? "1" : "0") << "\n";
         } else if (param == "order_type") {
@@ -395,6 +415,18 @@ int main(int argc, char* argv[]) {
         } else if (param == "ema_dev_highvol") {
             config->set_ema_dev_highvol(value);
             std::cout << "ema_dev_highvol = " << value << "% (max above EMA in high vol)\n";
+        } else if (param == "spike_threshold") {
+            config->set_spike_threshold(value);
+            std::cout << "spike_threshold = " << value << "σ (standard deviations)\n";
+        } else if (param == "spike_lookback") {
+            config->set_spike_lookback(static_cast<int32_t>(value));
+            std::cout << "spike_lookback = " << static_cast<int32_t>(value) << " bars\n";
+        } else if (param == "spike_min_move") {
+            config->set_spike_min_move(value / PCT_TO_DECIMAL);  // Convert % to decimal
+            std::cout << "spike_min_move = " << value << "% (minimum move filter)\n";
+        } else if (param == "spike_cooldown") {
+            config->set_spike_cooldown(static_cast<int32_t>(value));
+            std::cout << "spike_cooldown = " << static_cast<int32_t>(value) << " bars\n";
         } else if (param == "tuner_mode") {
             bool enabled = (value > 0);
             config->set_tuner_mode(enabled);

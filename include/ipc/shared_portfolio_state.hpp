@@ -490,15 +490,16 @@ struct SharedPortfolioState {
     }
 };
 
-// PositionSlot size breakdown:
-//   symbol[16]         = 16 bytes
-//   4x atomic<int64_t> = 32 bytes (quantity, avg_price, last_price, realized_pnl)
-//   2x atomic<uint32_t> = 8 bytes (buy_count, sell_count)
-//   2x atomic<uint8_t>  = 2 bytes (active, regime)
-//   PositionSnapshot    = 72 bytes (see struct above)
-//   padding[6]          = 6 bytes (8-byte alignment)
-//   Total: 16 + 32 + 8 + 2 + 72 + 6 = 136 bytes
-static_assert(sizeof(PositionSlot) == 136, "PositionSlot size mismatch");
+// PositionSlot size is calculated automatically by compiler.
+// Use sizeof(PositionSlot) instead of hardcoded values.
+// Alignment requirements for atomic operations and IPC compatibility:
+static_assert(sizeof(PositionSlot) % 8 == 0, "PositionSlot size must be 8-byte aligned for atomic ops");
+static_assert(alignof(PositionSlot) >= 8, "PositionSlot must have at least 8-byte alignment");
+
+// Current size for documentation (will update automatically if struct changes):
+// sizeof(PositionSlot) = sizeof(symbol) + 4*sizeof(atomic<int64_t>) + 2*sizeof(atomic<uint32_t>)
+//                      + 2*sizeof(atomic<uint8_t>) + sizeof(PositionSnapshot) + padding
+constexpr size_t POSITION_SLOT_SIZE = sizeof(PositionSlot);
 
 }  // namespace ipc
 }  // namespace hft

@@ -50,9 +50,17 @@ struct RegimeConfig {
     double high_vol_threshold = 0.03;  // 3% daily vol = high
     double low_vol_threshold = 0.01;   // 1% daily vol = low
 
-    // Mean reversion detection (simplified Hurst)
-    double mean_reversion_threshold = 0.4;  // < 0.4 = mean reverting
-    double trending_threshold = 0.6;        // > 0.6 = trending
+    // Mean reversion detection based on Hurst Exponent theory:
+    // - H = 0.5: Random walk (no predictable pattern)
+    // - H < 0.5: Mean reverting (price tends to return to mean)
+    // - H > 0.5: Trending (momentum persists)
+    // Thresholds 0.4 and 0.6 create buffer zones around 0.5:
+    // - < 0.4: Strong mean reversion signal
+    // - 0.4-0.6: Uncertain/random behavior
+    // - > 0.6: Strong trending signal
+    // Reference: Mandelbrot (1971), Lo & MacKinlay (1988) Variance Ratio Test
+    double mean_reversion_threshold = 0.4;
+    double trending_threshold = 0.6;
 
     // Spike detection thresholds (empirically tuned for crypto markets)
     // - spike_threshold: 3.0 = 3 standard deviations, statistical significance threshold

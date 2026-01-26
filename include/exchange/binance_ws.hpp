@@ -11,6 +11,7 @@
 #include <mutex>
 #include <queue>
 #include <cstring>
+#include <concepts>
 
 namespace hft {
 namespace exchange {
@@ -72,8 +73,17 @@ using WsTradeCallback = std::function<void(const WsTrade&)>;
 using WsKlineCallback = std::function<void(const WsKline&)>;
 using WsErrorCallback = std::function<void(const std::string&)>;
 using WsConnectCallback = std::function<void(bool connected)>;
-// Note: std::function has ~40 byte overhead but WsReconnectCallback is only called
-// on reconnect events (rare), not on the hot data path. Acceptable trade-off for flexibility.
+// Callback concepts for compile-time type checking
+template<typename T, typename... Args>
+concept Callable = requires(T t, Args... args) {
+    { t(args...) } -> std::same_as<void>;
+};
+
+template<typename T>
+concept ReconnectCallable = Callable<T, uint32_t, bool>;
+
+// Type-erased storage (required due to libwebsockets C-style callback architecture)
+// Template setters below provide compile-time type checking
 using WsReconnectCallback = std::function<void(uint32_t retry_count, bool success)>;
 
 /**
@@ -226,8 +236,10 @@ public:
         reconnect_requested_ = true;
     }
 
-    void set_reconnect_callback(WsReconnectCallback cb) {
-        reconnect_callback_ = std::move(cb);
+    // Template setter with concept constraint for compile-time type checking
+    template<ReconnectCallable Callback>
+    void set_reconnect_callback(Callback&& cb) {
+        reconnect_callback_ = std::forward<Callback>(cb);
     }
 
 private:
