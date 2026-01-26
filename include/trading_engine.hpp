@@ -1,6 +1,7 @@
 #pragma once
 
 #include "types.hpp"
+#include "concepts.hpp"
 #include "order_sender.hpp"
 #include "symbol_config.hpp"
 #include "symbol_world.hpp"
@@ -17,8 +18,8 @@ namespace hft {
 /**
  * Trading Engine - Manages multiple symbols via SymbolWorld
  *
- * Template parameter OrderSender provides zero-cost order sending.
- * See order_sender.hpp for concept requirements.
+ * Template parameter Sender must satisfy concepts::OrderSender.
+ * See concepts.hpp for the full concept definition.
  *
  * Before (scattered data):
  *   orderbooks_[symbol]->add_order(...);
@@ -29,12 +30,11 @@ namespace hft {
  *   world.book().add_order(...);
  *   world.config().base_price;
  */
-template<typename OrderSender>
+template<concepts::OrderSender Sender>
 class TradingEngine {
-    static_assert(is_order_sender_v<OrderSender>, "OrderSender must satisfy OrderSender concept");
 
 public:
-    explicit TradingEngine(OrderSender& sender)
+    explicit TradingEngine(Sender& sender)
         : sender_(sender), next_symbol_id_(1) {
         setup_halt_manager();
     }
@@ -232,8 +232,8 @@ public:
     }
 
     // Get the underlying sender (for advanced use)
-    OrderSender& sender() { return sender_; }
-    const OrderSender& sender() const { return sender_; }
+    Sender& sender() { return sender_; }
+    const Sender& sender() const { return sender_; }
 
     // Convenience method to trigger halt
     bool halt(strategy::HaltReason reason, const std::string& message = "") {
@@ -291,7 +291,7 @@ private:
     }
 
     // Order sender (template-based, zero overhead)
-    OrderSender& sender_;
+    Sender& sender_;
 
     // Single map: Symbol ID -> SymbolWorld (all data in one place)
     std::unordered_map<Symbol, std::unique_ptr<SymbolWorld>> worlds_;

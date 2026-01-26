@@ -347,7 +347,8 @@ private:
 };
 
 // Verify concept satisfaction
-static_assert(is_order_sender_v<PaperOrderSender>, "PaperOrderSender must satisfy OrderSender concept");
+static_assert(concepts::OrderSender<PaperOrderSender>,
+              "PaperOrderSender must satisfy OrderSender concept");
 
 /**
  * Per-symbol risk configuration for paper trading

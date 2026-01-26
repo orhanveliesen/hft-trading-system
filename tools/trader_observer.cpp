@@ -71,13 +71,15 @@ namespace box {
 
 struct StatsModel {
     uint64_t total_events = 0;
+    uint64_t total_status = 0;  // Status events count
     int64_t elapsed_seconds = 0;
     double rate = 0.0;
     bool dirty = true;
 
-    void update(uint64_t events, int64_t elapsed) {
-        if (total_events != events || elapsed_seconds != elapsed) {
+    void update(uint64_t events, uint64_t status_cnt, int64_t elapsed) {
+        if (total_events != events || total_status != status_cnt || elapsed_seconds != elapsed) {
             total_events = events;
+            total_status = status_cnt;
             elapsed_seconds = elapsed;
             rate = elapsed > 0 ? (double)events / elapsed : 0.0;
             dirty = true;
@@ -117,11 +119,13 @@ struct TradeStatsModel {
     uint64_t fills = 0;
     uint64_t targets = 0;
     uint64_t stops = 0;
+    uint64_t status_events = 0;  // Status/debug events
     bool dirty = true;
 
     void add_fill() { fills++; dirty = true; }
     void add_target() { targets++; dirty = true; }
     void add_stop() { stops++; dirty = true; }
+    void add_status() { status_events++; dirty = true; }
 };
 
 struct EventEntry {
@@ -323,10 +327,11 @@ public:
 
         std::ostringstream ss;
         ss << term::BCYAN << box::V << term::RESET << "  ";
-        ss << term::BGREEN << "Fills: " << std::setw(6) << model.fills << term::RESET << "  |  ";
-        ss << term::GREEN << "Targets: " << std::setw(6) << model.targets << term::RESET << "  |  ";
-        ss << term::RED << "Stops: " << std::setw(6) << model.stops << term::RESET;
-        ss << std::string(std::max(0, width_ - 57), ' ');
+        ss << term::BGREEN << "Fills: " << std::setw(5) << model.fills << term::RESET << "  |  ";
+        ss << term::GREEN << "Targets: " << std::setw(5) << model.targets << term::RESET << "  |  ";
+        ss << term::RED << "Stops: " << std::setw(5) << model.stops << term::RESET << "  |  ";
+        ss << term::CYAN << "Status: " << std::setw(5) << model.status_events << term::RESET;
+        ss << std::string(std::max(0, width_ - 72), ' ');
         ss << term::BCYAN << box::V << term::RESET;
         lines_.push_back(ss.str());
 
@@ -514,6 +519,48 @@ public:
                 events_.add(ss.str(), term::BCYAN);
                 break;
             }
+            case EventType::Status: {
+                trade_stats_.add_status();
+                std::string ticker(e.ticker, 4);
+                const char* code_name = TradeEvent::status_code_name(e.get_status_code());
+
+                // Format status message based on code
+                ss << std::fixed << std::setprecision(1) << std::setw(6) << rel_sec << "s  "
+                   << std::setw(10) << code_name << "  " << std::setw(4) << ticker;
+
+                // Add price if available
+                if (e.price > 0) {
+                    ss << "  $" << std::setprecision(2) << e.price;
+                }
+
+                // Add signal strength if relevant
+                if (e.signal_strength > 0) {
+                    ss << "  Str:" << (int)e.signal_strength;
+                }
+
+                // Color based on status type
+                const char* color = term::DIM;
+                StatusCode sc = e.get_status_code();
+                if (sc == StatusCode::Heartbeat) {
+                    color = term::DIM;  // Dim for routine heartbeat
+                } else if (sc == StatusCode::AutoTuneRelaxed) {
+                    color = term::BGREEN;  // Green - good news (relaxed params)
+                } else if (sc == StatusCode::IndicatorsWarmup ||
+                           sc == StatusCode::AutoTuneCooldown ||
+                           sc == StatusCode::AutoTuneSignal ||
+                           sc == StatusCode::AutoTuneMinTrade) {
+                    color = term::YELLOW;  // Yellow - warning/adjustment
+                } else if (sc == StatusCode::CashLow ||
+                           sc == StatusCode::TradingDisabled ||
+                           sc == StatusCode::AutoTunePaused ||
+                           sc == StatusCode::VolatilitySpike ||
+                           sc == StatusCode::DrawdownAlert) {
+                    color = term::BRED;  // Red - alert!
+                }
+
+                events_.add(ss.str(), color);
+                break;
+            }
             default:
                 return;
         }
@@ -527,6 +574,7 @@ public:
         auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - start_time_).count();
         stats_.update(
             trade_stats_.fills + trade_stats_.targets + trade_stats_.stops,
+            trade_stats_.status_events,
             elapsed
         );
 
@@ -615,7 +663,8 @@ public:
     }
 
     // Getters for final summary
-    uint64_t total_events() const { return trade_stats_.fills + trade_stats_.targets + trade_stats_.stops; }
+    uint64_t total_events() const { return trade_stats_.fills + trade_stats_.targets + trade_stats_.stops + trade_stats_.status_events; }
+    uint64_t total_status() const { return trade_stats_.status_events; }
     double realized_pnl() const { return pnl_.realized_pnl; }
     int wins() const { return pnl_.winning_trades; }
     int losses() const { return pnl_.losing_trades; }
@@ -679,7 +728,7 @@ int main(int argc, char* argv[]) {
 
     while (!buffer && retries < 30 && g_running) {
         try {
-            buffer = new SharedRingBuffer<TradeEvent>("/hft_events", false);
+            buffer = new SharedRingBuffer<TradeEvent>("/trader_events", false);
             std::cout << term::BGREEN << "Connected!" << term::RESET << "\n";
         } catch (...) {
             retries++;
@@ -721,6 +770,13 @@ int main(int argc, char* argv[]) {
                     case EventType::Fill: type_str = "FILL"; break;
                     case EventType::TargetHit: type_str = "TARGET"; break;
                     case EventType::StopLoss: type_str = "STOP"; break;
+                    case EventType::Status: {
+                        // Show status with code name
+                        std::cout << "STATUS " << std::string(event.ticker, 4) << " "
+                                  << TradeEvent::status_code_name(event.get_status_code())
+                                  << " $" << event.price << "\n";
+                        continue;
+                    }
                     default: continue;
                 }
                 std::cout << type_str << " " << std::string(event.ticker, 3)
@@ -760,7 +816,7 @@ int main(int argc, char* argv[]) {
 
     // Final summary
     std::cout << "\n" << term::BOLD << "Final Summary:" << term::RESET << "\n";
-    std::cout << "  Events: " << controller.total_events() << "\n";
+    std::cout << "  Events: " << controller.total_events() << " (Status: " << controller.total_status() << ")\n";
     std::cout << "  P&L: ";
     if (controller.realized_pnl() >= 0) {
         std::cout << term::GREEN << "+$" << std::fixed << std::setprecision(2) << controller.realized_pnl();

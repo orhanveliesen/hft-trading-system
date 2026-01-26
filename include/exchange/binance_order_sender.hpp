@@ -58,7 +58,8 @@ private:
 };
 
 // Verify concept satisfaction
-static_assert(is_order_sender_v<BinanceOrderSender>, "BinanceOrderSender must satisfy OrderSender concept");
+static_assert(concepts::OrderSender<BinanceOrderSender>,
+              "BinanceOrderSender must satisfy OrderSender concept");
 
 }  // namespace exchange
 }  // namespace hft

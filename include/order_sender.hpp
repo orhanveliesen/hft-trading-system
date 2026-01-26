@@ -1,64 +1,18 @@
 #pragma once
 
-#include "types.hpp"
-#include <type_traits>
-
-namespace hft {
-
 /**
- * OrderSender Concept
+ * OrderSender - Order Sending Interface
  *
- * Zero-cost abstraction for order sending/cancelling.
- * Template-based polymorphism eliminates std::function overhead.
+ * Defines the OrderSender concept and provides default implementations.
+ * Uses C++23 concepts for compile-time type checking.
  *
- * Implementations must provide:
- *   - bool send_order(Symbol, Side, Quantity, bool is_market)
- *   - bool cancel_order(Symbol, OrderId)
- *
- * Example implementations:
- *   - MockOrderSender (testing)
- *   - BinanceOrderSender (paper trading)
- *   - OuchOrderSender (NASDAQ direct)
- *   - FixOrderSender (FIX protocol)
+ * See concepts.hpp for the full concept definition.
  */
 
-// C++20 concept (fallback to SFINAE for C++17)
-#if __cplusplus >= 202002L
+#include "types.hpp"
+#include "concepts.hpp"
 
-template<typename T>
-concept OrderSender = requires(T& sender, Symbol s, Side side, Quantity q, OrderId id) {
-    { sender.send_order(s, side, q, true) } -> std::convertible_to<bool>;
-    { sender.cancel_order(s, id) } -> std::convertible_to<bool>;
-};
-
-#else
-
-// C++17 SFINAE fallback
-namespace detail {
-
-template<typename T, typename = void>
-struct is_order_sender : std::false_type {};
-
-template<typename T>
-struct is_order_sender<T, std::void_t<
-    decltype(std::declval<T&>().send_order(
-        std::declval<Symbol>(),
-        std::declval<Side>(),
-        std::declval<Quantity>(),
-        std::declval<bool>()
-    )),
-    decltype(std::declval<T&>().cancel_order(
-        std::declval<Symbol>(),
-        std::declval<OrderId>()
-    ))
->> : std::true_type {};
-
-}  // namespace detail
-
-template<typename T>
-inline constexpr bool is_order_sender_v = detail::is_order_sender<T>::value;
-
-#endif
+namespace hft {
 
 /**
  * NullOrderSender - No-op implementation
@@ -75,5 +29,9 @@ struct NullOrderSender {
         return true;
     }
 };
+
+// Static assertion to verify NullOrderSender satisfies the concept
+static_assert(concepts::OrderSender<NullOrderSender>,
+              "NullOrderSender must satisfy OrderSender concept");
 
 }  // namespace hft

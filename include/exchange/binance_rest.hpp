@@ -7,9 +7,12 @@
 #include <stdexcept>
 #include <unistd.h>
 #include <curl/curl.h>
+#include <nlohmann/json.hpp>
 
 namespace hft {
 namespace exchange {
+
+using json = nlohmann::json;
 
 /**
  * Binance REST API client for historical data
@@ -135,17 +138,12 @@ public:
         std::string url = std::string(base_url_) + "/api/v3/time";
         std::string response = http_get(url);
 
-        // Parse {"serverTime":1234567890123}
-        size_t pos = response.find("serverTime");
-        if (pos == std::string::npos) {
+        json data = json::parse(response);
+        if (!data.contains("serverTime")) {
             throw std::runtime_error("Invalid server time response");
         }
 
-        pos = response.find(':', pos);
-        size_t end = response.find('}', pos);
-        std::string time_str = response.substr(pos + 1, end - pos - 1);
-
-        return std::stoull(time_str);
+        return data["serverTime"].get<Timestamp>();
     }
 
     /**
@@ -157,23 +155,83 @@ public:
     }
 
     /**
+     * Fetch trading symbols from Binance
+     *
+     * Fetches exchange info and extracts spot trading pairs that are
+     * currently trading, filtered by quote asset.
+     *
+     * @param quote_asset Filter by quote asset (default "USDT")
+     * @return Vector of symbol strings (e.g., "BTCUSDT", "ETHUSDT")
+     */
+    std::vector<std::string> fetch_trading_symbols(
+        const std::string& quote_asset = "USDT"
+    ) {
+        std::vector<std::string> symbols;
+
+        try {
+            std::string response = get_exchange_info();
+            json exchange_info = json::parse(response);
+
+            if (!exchange_info.contains("symbols")) {
+                return symbols;
+            }
+
+            for (const auto& sym : exchange_info["symbols"]) {
+                // Check status
+                if (!sym.contains("status") || sym["status"] != "TRADING") {
+                    continue;
+                }
+
+                // Check quote asset
+                if (!sym.contains("quoteAsset") || sym["quoteAsset"] != quote_asset) {
+                    continue;
+                }
+
+                // Check if SPOT trading is permitted
+                bool is_spot = false;
+                if (sym.contains("permissions")) {
+                    for (const auto& perm : sym["permissions"]) {
+                        if (perm == "SPOT") {
+                            is_spot = true;
+                            break;
+                        }
+                    }
+                }
+
+                if (!is_spot) {
+                    continue;
+                }
+
+                // Extract symbol name
+                if (sym.contains("symbol")) {
+                    symbols.push_back(sym["symbol"].get<std::string>());
+                }
+            }
+
+        } catch (const json::exception& e) {
+            // JSON parsing error - return empty vector
+            return symbols;
+        } catch (const std::exception& e) {
+            // Network or other error - return empty vector
+            return symbols;
+        }
+
+        return symbols;
+    }
+
+    /**
      * Get ticker price
      */
     double get_price(const std::string& symbol) {
         std::string url = std::string(base_url_) + "/api/v3/ticker/price?symbol=" + symbol;
         std::string response = http_get(url);
 
-        // Parse {"symbol":"BTCUSDT","price":"50000.00"}
-        size_t pos = response.find("price");
-        if (pos == std::string::npos) {
+        json data = json::parse(response);
+        if (!data.contains("price")) {
             throw std::runtime_error("Invalid price response");
         }
 
-        pos = response.find('"', pos + 7);  // Skip "price":"
-        size_t end = response.find('"', pos + 1);
-        std::string price_str = response.substr(pos + 1, end - pos - 1);
-
-        return std::stod(price_str);
+        return std::stod(data["price"].get<std::string>());
     }
 
 private:
@@ -227,53 +285,29 @@ private:
      *           close_time, "quote_volume", trades, "taker_buy_base",
      *           "taker_buy_quote", "ignore"], ...]
      */
-    std::vector<Kline> parse_klines_json(const std::string& json) {
+    std::vector<Kline> parse_klines_json(const std::string& response) {
         std::vector<Kline> klines;
 
-        // Simple JSON array parser
-        // Find each inner array [...]
-        size_t pos = 0;
-        while ((pos = json.find('[', pos + 1)) != std::string::npos) {
-            // Skip the outer array start
-            if (pos == 0) continue;
+        json data = json::parse(response);
 
-            size_t end = json.find(']', pos);
-            if (end == std::string::npos) break;
-
-            std::string arr = json.substr(pos + 1, end - pos - 1);
-
-            // Parse comma-separated values
-            std::vector<std::string> values;
-            std::stringstream ss(arr);
-            std::string token;
-
-            while (std::getline(ss, token, ',')) {
-                // Remove quotes
-                size_t start = 0, len = token.length();
-                if (!token.empty() && token[0] == '"') {
-                    start = 1;
-                    len -= 2;
-                }
-                values.push_back(token.substr(start, len));
+        for (const auto& arr : data) {
+            if (!arr.is_array() || arr.size() < 11) {
+                continue;
             }
 
-            if (values.size() >= 11) {
-                Kline k;
-                k.open_time = std::stoull(values[0]);
-                k.open = static_cast<Price>(std::stod(values[1]) * 10000);
-                k.high = static_cast<Price>(std::stod(values[2]) * 10000);
-                k.low = static_cast<Price>(std::stod(values[3]) * 10000);
-                k.close = static_cast<Price>(std::stod(values[4]) * 10000);
-                k.volume = std::stod(values[5]);
-                k.close_time = std::stoull(values[6]);
-                k.quote_volume = std::stod(values[7]);
-                k.trades = static_cast<uint32_t>(std::stoul(values[8]));
-                k.taker_buy_volume = std::stod(values[9]);
+            Kline k;
+            k.open_time = arr[0].get<Timestamp>();
+            k.open = static_cast<Price>(std::stod(arr[1].get<std::string>()) * 10000);
+            k.high = static_cast<Price>(std::stod(arr[2].get<std::string>()) * 10000);
+            k.low = static_cast<Price>(std::stod(arr[3].get<std::string>()) * 10000);
+            k.close = static_cast<Price>(std::stod(arr[4].get<std::string>()) * 10000);
+            k.volume = std::stod(arr[5].get<std::string>());
+            k.close_time = arr[6].get<Timestamp>();
+            k.quote_volume = std::stod(arr[7].get<std::string>());
+            k.trades = arr[8].get<uint32_t>();
+            k.taker_buy_volume = std::stod(arr[9].get<std::string>());
 
-                klines.push_back(k);
-            }
-
-            pos = end;
+            klines.push_back(k);
         }
 
         return klines;

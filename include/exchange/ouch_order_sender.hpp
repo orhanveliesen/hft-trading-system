@@ -436,7 +436,8 @@ private:
 };
 
 // Verify concept satisfaction
-static_assert(is_order_sender_v<OuchOrderSender>, "OuchOrderSender must satisfy OrderSender concept");
+static_assert(concepts::OrderSender<OuchOrderSender>,
+              "OuchOrderSender must satisfy OrderSender concept");
 
 }  // namespace exchange
 }  // namespace hft

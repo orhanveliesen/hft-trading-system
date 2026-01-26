@@ -17,7 +17,7 @@ using namespace hft::config;
 #define ASSERT_TRUE(x) assert(x)
 #define ASSERT_FALSE(x) assert(!(x))
 
-constexpr const char* TEST_SHM_NAME = "/hft_config_test";
+constexpr const char* TEST_SHM_NAME = "/trader_config_test";
 
 TEST(config_create_and_defaults) {
     // Create

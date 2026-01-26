@@ -16,6 +16,7 @@
 
 #include "regime_detector.hpp"
 #include "technical_indicators.hpp"
+#include "rolling_sharpe.hpp"
 #include "../types.hpp"
 #include <cmath>
 #include <algorithm>
@@ -87,6 +88,11 @@ struct SmartStrategyConfig {
     // Win rate thresholds
     double win_rate_aggressive = 0.60;  // >60% → can be AGGRESSIVE
     double win_rate_cautious = 0.40;    // <40% → be CAUTIOUS
+
+    // Sharpe ratio thresholds (risk-adjusted performance)
+    double sharpe_aggressive = 1.0;     // Sharpe > 1.0 → can be AGGRESSIVE
+    double sharpe_cautious = 0.3;       // Sharpe < 0.3 → be CAUTIOUS
+    double sharpe_defensive = 0.0;      // Sharpe < 0 → DEFENSIVE
 
     // Signal thresholds by mode
     double signal_threshold_aggressive = 0.3;
@@ -176,6 +182,9 @@ public:
         }
         trade_results_[0] = pnl_pct;
 
+        // Update Rolling Sharpe with this trade's return
+        sharpe_.add_return(pnl_pct);
+
         total_trades_++;
         if (was_win) {
             wins_++;
@@ -213,6 +222,7 @@ public:
         current_drawdown_ = 0;
         confidence_ = 0.5;  // Start neutral
         mode_ = StrategyMode::NORMAL;
+        sharpe_.reset();    // Reset Sharpe calculator
     }
 
     // =========================================================================
@@ -228,6 +238,13 @@ public:
     int consecutive_wins() const { return consecutive_wins_; }
     double current_drawdown() const { return current_drawdown_; }
     int total_trades() const { return total_trades_; }
+
+    // Sharpe ratio accessors
+    double sharpe_ratio() const { return sharpe_.sharpe_ratio(); }
+    double annualized_sharpe() const { return sharpe_.annualized_sharpe(); }
+    double sharpe_position_multiplier() const { return sharpe_.position_multiplier(); }
+    bool sharpe_should_trade() const { return sharpe_.should_trade(); }
+    const RollingSharpe<100>& sharpe() const { return sharpe_; }
 
     // For dashboard display
     const char* mode_string() const { return mode_to_string(mode_); }
@@ -245,6 +262,9 @@ private:
     double cumulative_pnl_ = 0;
     double peak_pnl_ = 0;
     double current_drawdown_ = 0;
+
+    // Rolling Sharpe for risk-adjusted performance
+    RollingSharpe<100> sharpe_{0};  // 100-trade window, 0 risk-free rate for simplicity
 
     // Internal state
     double confidence_ = 0.5;
@@ -277,6 +297,31 @@ private:
         if (consecutive_losses_ >= config_.losses_to_cautious) {
             mode_ = StrategyMode::CAUTIOUS;
             return;
+        }
+
+        // Sharpe ratio based (after enough trades for reliable Sharpe)
+        if (sharpe_.count() >= 20) {
+            double sr = sharpe_.sharpe_ratio();
+
+            // Negative Sharpe = losing money on risk-adjusted basis
+            if (sr < config_.sharpe_defensive) {
+                mode_ = StrategyMode::DEFENSIVE;
+                return;
+            }
+
+            // Low Sharpe = poor risk-adjusted returns
+            if (sr < config_.sharpe_cautious) {
+                mode_ = StrategyMode::CAUTIOUS;
+                return;
+            }
+
+            // High Sharpe + good conditions = can be aggressive
+            if (sr >= config_.sharpe_aggressive &&
+                consecutive_wins_ >= 2 &&
+                win_rate() >= config_.win_rate_aggressive) {
+                mode_ = StrategyMode::AGGRESSIVE;
+                return;
+            }
         }
 
         // Win rate based (only after enough trades)
@@ -511,6 +556,12 @@ private:
 
         // Scale by strategy confidence
         size *= confidence_;
+
+        // Scale by Sharpe-based position multiplier (risk-adjusted sizing)
+        // This reduces size when Sharpe is low/negative, increases when high
+        if (sharpe_.count() >= 10) {
+            size *= sharpe_.position_multiplier();
+        }
 
         // Reduce for wide spreads
         if (spread_pct > 0.001) {
