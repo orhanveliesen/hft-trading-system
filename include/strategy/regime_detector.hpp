@@ -7,6 +7,9 @@
 #include <algorithm>
 #include <string>
 
+// Forward declaration to avoid circular dependency
+namespace hft { namespace ipc { struct SharedConfig; } }
+
 namespace hft {
 namespace strategy {
 
@@ -188,6 +191,18 @@ public:
         mean_reversion_score_ = 0.5;
     }
 
+    /**
+     * Update spike detection config from SharedConfig
+     * Call this when SharedConfig sequence changes to sync runtime settings
+     */
+    void update_from_config(const ipc::SharedConfig* cfg);
+
+    /**
+     * Direct config access for testing
+     */
+    RegimeConfig& config() { return config_; }
+    const RegimeConfig& config() const { return config_; }
+
 private:
     RegimeConfig config_;
     std::deque<double> prices_;
@@ -360,6 +375,24 @@ private:
         current_regime_ = MarketRegime::Ranging;
     }
 };
+
+}  // namespace strategy
+}  // namespace hft
+
+// Implementation requires SharedConfig definition
+#include "../ipc/shared_config.hpp"
+
+namespace hft {
+namespace strategy {
+
+inline void RegimeDetector::update_from_config(const ipc::SharedConfig* cfg) {
+    if (!cfg) return;
+
+    config_.spike_threshold = cfg->spike_threshold();
+    config_.spike_lookback = cfg->get_spike_lookback();
+    config_.spike_min_move = cfg->spike_min_move();
+    config_.spike_cooldown = cfg->get_spike_cooldown();
+}
 
 }  // namespace strategy
 }  // namespace hft
