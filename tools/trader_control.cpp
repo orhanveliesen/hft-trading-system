@@ -15,6 +15,7 @@
  */
 
 #include "../include/ipc/shared_config.hpp"
+#include "../include/ipc/shared_paper_config.hpp"
 #include <iostream>
 #include <iomanip>
 #include <string>
@@ -102,7 +103,7 @@ void print_params(const SharedConfig* config, const char* shm_name) {
     std::cout << "  sequence:          " << std::setw(8) << config->sequence.load() << "    Config version\n";
 }
 
-void print_status(const SharedConfig* config, const char* shm_name) {
+void print_status(const SharedConfig* config, const SharedPaperConfig* paper_config, const char* shm_name) {
     std::cout << "=== Trader Config Status ===\n";
     std::cout << "Config: /dev/shm" << shm_name << "\n";
     std::cout << "Build: " << config->get_build_hash() << "\n\n";
@@ -117,16 +118,17 @@ void print_status(const SharedConfig* config, const char* shm_name) {
     std::cout << "  mode:            " << (int)config->get_active_mode() << "\n\n";
 
     // Trading costs
+    double slippage_bps = paper_config ? paper_config->slippage_bps() : config->slippage_bps();
     std::cout << "[ Trading Costs ]\n";
     std::cout << "  target_pct:      " << config->target_pct() << "% (profit target)\n";
     std::cout << "  stop_pct:        " << config->stop_pct() << "% (stop loss)\n";
     std::cout << "  pullback_pct:    " << config->pullback_pct() << "% (trend exit)\n";
     std::cout << "  commission:      " << (config->commission_rate() * 100) << "% (per trade)\n";
-    std::cout << "  slippage_bps:    " << config->slippage_bps() << " bps (paper only)\n\n";
+    std::cout << "  slippage_bps:    " << slippage_bps << " bps (paper only)\n\n";
 
     // Round-trip cost calculation
     double commission_pct = config->commission_rate() * 100;
-    double slippage_pct = config->slippage_bps() / 100.0;
+    double slippage_pct = slippage_bps / 100.0;
     double round_trip = (commission_pct * 2) + (slippage_pct * 2);
     std::cout << "  Round-trip cost: ~" << round_trip << "% (commission + slippage)\n";
     std::cout << "  Breakeven:       target > " << round_trip << "%\n\n";
@@ -224,6 +226,7 @@ int main(int argc, char* argv[]) {
     }
 
     const char* shm_name = "/trader_config";
+    const char* paper_shm_name = "/trader_paper_config";
     std::string cmd = argv[1];
 
     // Open shared config (read-write)
@@ -234,9 +237,12 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
+    // Open paper config (optional, for slippage settings)
+    SharedPaperConfig* paper_config = SharedPaperConfig::open_rw(paper_shm_name);
+
     // Commands
     if (cmd == "status") {
-        print_status(config, shm_name);
+        print_status(config, paper_config, shm_name);
     }
     else if (cmd == "list") {
         print_params(config, shm_name);
@@ -254,7 +260,11 @@ int main(int argc, char* argv[]) {
         } else if (param == "commission") {
             std::cout << (config->commission_rate() * 100) << "\n";
         } else if (param == "slippage_bps" || param == "slippage") {
-            std::cout << config->slippage_bps() << "\n";
+            if (paper_config) {
+                std::cout << paper_config->slippage_bps() << "\n";
+            } else {
+                std::cout << config->slippage_bps() << " (fallback to SharedConfig)\n";
+            }
         } else if (param == "min_trade_value") {
             std::cout << config->min_trade_value() << "\n";
         } else if (param == "cooldown_ms" || param == "cooldown") {
@@ -317,8 +327,14 @@ int main(int argc, char* argv[]) {
             config->set_commission_rate(value / 100.0);  // Convert % to decimal
             std::cout << "commission = " << value << "% (" << (value * 10) << " bps)\n";
         } else if (param == "slippage_bps" || param == "slippage") {
-            config->set_slippage_bps(value);
-            std::cout << "slippage_bps = " << value << " bps (" << (value / 100.0) << "%, paper only)\n";
+            if (paper_config) {
+                paper_config->set_slippage_bps(value);
+                std::cout << "slippage_bps = " << value << " bps (" << (value / 100.0) << "%, paper only)\n";
+            } else {
+                // Fallback to SharedConfig (deprecated)
+                config->set_slippage_bps(value);
+                std::cout << "slippage_bps = " << value << " bps (SharedConfig fallback, deprecated)\n";
+            }
         } else if (param == "min_trade_value") {
             config->set_min_trade_value(value);
             std::cout << "min_trade_value = $" << value << " (minimum trade size)\n";

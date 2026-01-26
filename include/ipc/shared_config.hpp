@@ -30,6 +30,48 @@
 namespace hft {
 namespace ipc {
 
+/**
+ * Strategy types for regime mapping
+ * Used by SharedConfig::get/set_strategy_for_regime()
+ */
+enum class StrategyType : uint8_t {
+    NONE = 0,       // No trading
+    MOMENTUM = 1,   // Momentum/trend following
+    MEAN_REV = 2,   // Mean reversion
+    MKT_MAKER = 3,  // Market making
+    DEFENSIVE = 4,  // Defensive (reduced risk)
+    CAUTIOUS = 5,   // Extra cautious (high vol)
+    SMART = 6       // Smart/adaptive strategy
+};
+
+constexpr size_t STRATEGY_TYPE_COUNT = 7;
+
+inline const char* strategy_type_to_string(StrategyType type) {
+    switch (type) {
+        case StrategyType::NONE: return "NONE";
+        case StrategyType::MOMENTUM: return "MOMENTUM";
+        case StrategyType::MEAN_REV: return "MEAN_REV";
+        case StrategyType::MKT_MAKER: return "MKT_MAKER";
+        case StrategyType::DEFENSIVE: return "DEFENSIVE";
+        case StrategyType::CAUTIOUS: return "CAUTIOUS";
+        case StrategyType::SMART: return "SMART";
+        default: return "UNKNOWN";
+    }
+}
+
+inline const char* strategy_type_to_short(StrategyType type) {
+    switch (type) {
+        case StrategyType::NONE: return "OFF";
+        case StrategyType::MOMENTUM: return "MOM";
+        case StrategyType::MEAN_REV: return "MRV";
+        case StrategyType::MKT_MAKER: return "MMK";
+        case StrategyType::DEFENSIVE: return "DEF";
+        case StrategyType::CAUTIOUS: return "CAU";
+        case StrategyType::SMART: return "SMT";
+        default: return "UNK";
+    }
+}
+
 // Convert 8-char hex string to uint32_t at compile time
 constexpr uint32_t hex_to_u32(const char* s) {
     uint32_t result = 0;

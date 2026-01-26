@@ -39,6 +39,47 @@ namespace ipc {
 // Maximum number of symbols we can track
 static constexpr size_t MAX_PORTFOLIO_SYMBOLS = 64;
 
+// Position snapshot for tracking OHLC and technical indicators
+struct PositionSnapshot {
+    std::atomic<int64_t> price_open_x8{0};    // Opening price * 1e8
+    std::atomic<int64_t> price_high_x8{0};    // High price * 1e8
+    std::atomic<int64_t> price_low_x8{0};     // Low price * 1e8
+    std::atomic<int64_t> ema_20_x8{0};        // 20-period EMA * 1e8
+    std::atomic<int64_t> atr_14_x8{0};        // 14-period ATR * 1e8 (or BB width)
+    std::atomic<int64_t> volume_sum_x8{0};    // Sum of volume * 1e8
+    std::atomic<int32_t> volatility_x100{0};  // Volatility * 100
+    std::atomic<int8_t> trend_direction{0};   // -1, 0, +1
+    std::atomic<uint32_t> tick_count{0};      // Number of ticks received
+
+    void clear() {
+        price_open_x8.store(0);
+        price_high_x8.store(0);
+        price_low_x8.store(0);
+        ema_20_x8.store(0);
+        atr_14_x8.store(0);
+        volume_sum_x8.store(0);
+        volatility_x100.store(0);
+        trend_direction.store(0);
+        tick_count.store(0);
+    }
+
+    double price_open() const { return price_open_x8.load() / 1e8; }
+    double price_high() const { return price_high_x8.load() / 1e8; }
+    double price_low() const { return price_low_x8.load() / 1e8; }
+    double ema_20() const { return ema_20_x8.load() / 1e8; }
+    double atr_14() const { return atr_14_x8.load() / 1e8; }
+    double volume_sum() const { return volume_sum_x8.load() / 1e8; }
+    double volatility() const { return volatility_x100.load() / 100.0; }
+    double volatility_pct() const { return volatility(); }
+
+    double price_range_pct() const {
+        double high = price_high();
+        double low = price_low();
+        if (low <= 0) return 0.0;
+        return (high - low) / low * 100.0;
+    }
+};
+
 // Position data for a single symbol
 struct PositionSlot {
     char symbol[16];                    // Symbol name (null-terminated)
@@ -50,6 +91,7 @@ struct PositionSlot {
     std::atomic<uint32_t> sell_count;   // Number of sells
     std::atomic<uint8_t> active;        // Is this slot in use?
     std::atomic<uint8_t> regime;        // Current market regime (0=Unknown, 1=TrendingUp, etc.)
+    PositionSnapshot snapshot;          // Last snapshot for tracking changes
     uint8_t padding[6];                 // Align to 8 bytes
 
     void clear() {
@@ -62,6 +104,7 @@ struct PositionSlot {
         sell_count.store(0);
         active.store(0);
         regime.store(0);
+        snapshot.clear();
     }
 
     // Conversion helpers (atomic int64 <-> double)
@@ -122,7 +165,13 @@ struct SharedPortfolioState {
     std::atomic<uint32_t> total_stops;
     std::atomic<int64_t> start_time_ns; // Epoch nanoseconds
     std::atomic<uint8_t> trading_active;
-    uint8_t padding[7];
+    uint8_t padding1[7];
+
+    // Trading costs tracking
+    std::atomic<int64_t> total_slippage_x8;     // Total slippage * 1e8
+    std::atomic<int64_t> total_commissions_x8;  // Total commissions * 1e8
+    std::atomic<int64_t> total_spread_cost_x8;  // Total spread cost * 1e8
+    std::atomic<int64_t> total_volume_x8;       // Total volume traded * 1e8
 
     // Position slots
     PositionSlot positions[MAX_PORTFOLIO_SYMBOLS];
@@ -153,6 +202,29 @@ struct SharedPortfolioState {
         return total > 0 ? (double)wins / total * 100.0 : 0.0;
     }
 
+    double total_slippage() const { return total_slippage_x8.load() / 1e8; }
+    double total_commissions() const { return total_commissions_x8.load() / 1e8; }
+    double total_spread_cost() const { return total_spread_cost_x8.load() / 1e8; }
+    double total_volume() const { return total_volume_x8.load() / 1e8; }
+    double total_costs() const { return total_slippage() + total_commissions() + total_spread_cost(); }
+
+    double gross_pnl() const { return total_realized_pnl() + total_costs(); }
+
+    double cost_per_trade() const {
+        uint32_t fills = total_fills.load();
+        return fills > 0 ? total_costs() / fills : 0.0;
+    }
+
+    double avg_trade_value() const {
+        uint32_t fills = total_fills.load();
+        return fills > 0 ? total_volume() / fills : 0.0;
+    }
+
+    double cost_pct_per_trade() const {
+        double avg_val = avg_trade_value();
+        return avg_val > 0 ? (cost_per_trade() / avg_val) * 100.0 : 0.0;
+    }
+
     // === Mutators (for writer) ===
     void set_cash(double value) {
         cash_x8.store(static_cast<int64_t>(value * 1e8));
@@ -178,6 +250,22 @@ struct SharedPortfolioState {
     void record_target() { total_targets.fetch_add(1); }
     void record_stop() { total_stops.fetch_add(1); }
     void record_event() { total_events.fetch_add(1); }
+
+    void add_slippage(double value) {
+        total_slippage_x8.fetch_add(static_cast<int64_t>(value * 1e8));
+    }
+
+    void add_commission(double value) {
+        total_commissions_x8.fetch_add(static_cast<int64_t>(value * 1e8));
+    }
+
+    void add_spread_cost(double value) {
+        total_spread_cost_x8.fetch_add(static_cast<int64_t>(value * 1e8));
+    }
+
+    void add_volume(double value) {
+        total_volume_x8.fetch_add(static_cast<int64_t>(value * 1e8));
+    }
 
     // Find or create position slot for symbol
     PositionSlot* get_or_create_position(const char* symbol) {
@@ -319,6 +407,10 @@ struct SharedPortfolioState {
         total_stops.store(0);
         start_time_ns.store(std::chrono::steady_clock::now().time_since_epoch().count());
         trading_active.store(1);
+        total_slippage_x8.store(0);
+        total_commissions_x8.store(0);
+        total_spread_cost_x8.store(0);
+        total_volume_x8.store(0);
 
         for (size_t i = 0; i < MAX_PORTFOLIO_SYMBOLS; ++i) {
             positions[i].clear();
@@ -393,7 +485,8 @@ struct SharedPortfolioState {
     }
 };
 
-static_assert(sizeof(PositionSlot) == 64, "PositionSlot size mismatch");
+// PositionSlot size increased due to PositionSnapshot for OHLC tracking
+static_assert(sizeof(PositionSlot) == 136, "PositionSlot size mismatch");
 
 }  // namespace ipc
 }  // namespace hft

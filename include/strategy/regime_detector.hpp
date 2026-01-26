@@ -19,7 +19,8 @@ enum class MarketRegime {
     TrendingDown,    // Strong downward trend
     Ranging,         // Sideways, mean-reverting
     HighVolatility,  // Choppy, high uncertainty
-    LowVolatility    // Quiet, low movement
+    LowVolatility,   // Quiet, low movement
+    Spike            // Sudden price spike detected
 };
 
 inline std::string regime_to_string(MarketRegime regime) {
@@ -29,6 +30,7 @@ inline std::string regime_to_string(MarketRegime regime) {
         case MarketRegime::Ranging: return "RANGING";
         case MarketRegime::HighVolatility: return "HIGH_VOL";
         case MarketRegime::LowVolatility: return "LOW_VOL";
+        case MarketRegime::Spike: return "SPIKE";
         default: return "UNKNOWN";
     }
 }
@@ -51,6 +53,12 @@ struct RegimeConfig {
     // Mean reversion detection (simplified Hurst)
     double mean_reversion_threshold = 0.4;  // < 0.4 = mean reverting
     double trending_threshold = 0.6;        // > 0.6 = trending
+
+    // Spike detection
+    double spike_threshold = 3.0;      // Multiplier of avg move for spike detection
+    int spike_lookback = 10;           // Bars to use for average move calculation
+    double spike_min_move = 0.005;     // Minimum move (0.5%) to consider as spike
+    int spike_cooldown = 5;            // Bars to wait after spike before re-detection
 };
 
 /**
@@ -141,6 +149,21 @@ public:
     bool is_trending() const {
         return current_regime_ == MarketRegime::TrendingUp ||
                current_regime_ == MarketRegime::TrendingDown;
+    }
+
+    /**
+     * Is there a price spike detected?
+     */
+    bool is_spike() const {
+        return current_regime_ == MarketRegime::Spike;
+    }
+
+    /**
+     * Is the market in a dangerous state (high vol or spike)?
+     */
+    bool is_dangerous() const {
+        return current_regime_ == MarketRegime::HighVolatility ||
+               current_regime_ == MarketRegime::Spike;
     }
 
     void reset() {
