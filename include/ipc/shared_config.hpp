@@ -1,21 +1,21 @@
 #pragma once
 
 /**
- * SharedConfig - Bidirectional config exchange between HFT and Dashboard
+ * SharedConfig - Bidirectional config exchange between Trader and Dashboard
  *
- * Dashboard can modify config values, HFT reads them on next check.
+ * Dashboard can modify config values, Trader reads them on next check.
  * Lock-free using atomic operations.
  *
  * Usage:
- *   HFT (reader):
- *     auto cfg = SharedConfig::open("/hft_config");
+ *   Trader (reader):
+ *     auto cfg = SharedConfig::open("/trader_config");
  *     if (cfg->sequence() != last_seq) {
  *         apply_config(*cfg);
  *         last_seq = cfg->sequence();
  *     }
  *
  *   Dashboard (writer):
- *     auto cfg = SharedConfig::open_rw("/hft_config");
+ *     auto cfg = SharedConfig::open_rw("/trader_config");
  *     cfg->set_spread_multiplier(20);  // 2.0x
  */
 
@@ -45,8 +45,8 @@ constexpr uint32_t hex_to_u32(const char* s) {
 
 struct SharedConfig {
     static constexpr uint64_t MAGIC = 0x4846544346494700ULL;  // "HFTCFG\0"
-#ifdef HFT_BUILD_HASH
-    static constexpr uint32_t VERSION = hex_to_u32(HFT_BUILD_HASH);
+#ifdef TRADER_BUILD_HASH
+    static constexpr uint32_t VERSION = hex_to_u32(TRADER_BUILD_HASH);
 #else
     static constexpr uint32_t VERSION = 0;  // Fallback
 #endif
@@ -66,26 +66,82 @@ struct SharedConfig {
     std::atomic<int32_t> max_position_pct_x100;   // Default: 500 (5%)
     std::atomic<int32_t> target_pct_x100;         // Default: 150 (1.5%)
     std::atomic<int32_t> stop_pct_x100;           // Default: 100 (1%)
+    std::atomic<int32_t> pullback_pct_x100;       // Default: 50 (0.5%) - trend exit threshold
+
+    // Trading costs (for paper trading simulation)
+    std::atomic<int32_t> commission_rate_x10000;  // Default: 10 (0.1% = 0.001)
+    std::atomic<int32_t> slippage_bps_x100;       // Default: 0 (slippage in basis points)
+
+    // Trade filtering (anti-overtrading)
+    std::atomic<int32_t> min_trade_value_x100;    // Default: 10000 ($100 minimum trade)
+    std::atomic<int32_t> cooldown_ms;             // Default: 2000 (2 second cooldown)
+    std::atomic<int32_t> signal_strength;         // Default: 2 (1=Medium, 2=Strong)
+    std::atomic<uint8_t> auto_tune_enabled;       // Default: 1 (auto-tune on)
+
+    // EMA deviation thresholds (max % above EMA to allow buy)
+    std::atomic<int32_t> ema_dev_trending_x1000;  // Default: 10 (1% = 0.01)
+    std::atomic<int32_t> ema_dev_ranging_x1000;   // Default: 5 (0.5% = 0.005)
+    std::atomic<int32_t> ema_dev_highvol_x1000;   // Default: 2 (0.2% = 0.002)
 
     // Mode overrides
     std::atomic<uint8_t> force_mode;    // 0 = auto, 1-5 = force specific mode
     std::atomic<uint8_t> trading_enabled;  // 0 = paused, 1 = active
+    std::atomic<uint8_t> paper_trading;    // 1 = paper trading mode (simulation)
 
-    // HFT writes these (dashboard reads)
-    std::atomic<uint8_t> active_mode;   // Current active mode (HFT sets this)
+    // Tuner integration
+    std::atomic<uint8_t> tuner_mode;       // 0 = OFF (traditional strategies), 1 = ON (AI-controlled)
+    std::atomic<uint8_t> manual_override;  // 0 = normal, 1 = manual control (tuner ignored)
+    std::atomic<uint8_t> tuner_paused;     // 0 = active, 1 = paused (tuner skips scheduled runs)
+    std::atomic<uint8_t> reserved_tuner;   // Padding for alignment
+
+    // Manual tune trigger (dashboard can request immediate tuning)
+    std::atomic<int64_t> manual_tune_request_ns;  // Non-zero = tune immediately, then clear
+
+    // Order execution defaults (global, symbols can override)
+    std::atomic<uint8_t> order_type_default;      // 0=Auto, 1=MarketOnly, 2=LimitOnly, 3=Adaptive
+    std::atomic<int16_t> limit_offset_bps_x100;   // Default limit offset (bps * 100)
+    std::atomic<int32_t> limit_timeout_ms;        // Default adaptive timeout (ms)
+
+    // Trader writes these (dashboard reads)
+    std::atomic<uint8_t> active_mode;   // Current active mode (Trader sets this)
     std::atomic<uint8_t> active_signals; // Number of active signals
     std::atomic<int32_t> consecutive_losses; // Current loss streak
     std::atomic<int32_t> consecutive_wins;   // Current win streak
 
-    // HFT lifecycle (heartbeat)
+    // Trader lifecycle (heartbeat)
     std::atomic<int64_t> heartbeat_ns;  // Last update timestamp (epoch ns)
-    std::atomic<int32_t> hft_pid;       // HFT process ID
-    std::atomic<uint8_t> hft_status;    // 0=stopped, 1=starting, 2=running, 3=shutting_down
+    std::atomic<int32_t> trader_pid;       // Trader process ID
+    std::atomic<uint8_t> trader_status;    // 0=stopped, 1=starting, 2=running, 3=shutting_down
+
+    // Trader start time (for dashboard restart detection)
+    std::atomic<int64_t> trader_start_time_ns;  // When Trader process started
+
+    // WebSocket connection status (Trader writes, dashboard reads)
+    std::atomic<uint8_t> ws_market_status;     // 0=disconnected, 1=degraded, 2=healthy
+    std::atomic<uint8_t> ws_user_status;       // 0=disconnected, 1=degraded, 2=healthy
+    std::atomic<uint8_t> ws_reserved1;         // Padding for alignment
+    std::atomic<uint8_t> ws_reserved2;         // Padding for alignment
+    std::atomic<uint32_t> ws_reconnect_count;  // Total reconnection attempts
+    std::atomic<int64_t> ws_last_message_ns;   // Last received message timestamp
 
     // Build info
     char build_hash[12];  // Git commit hash (8 chars + null + padding)
 
-    uint8_t padding[1];
+    // Display settings (dashboard uses these)
+    std::atomic<int32_t> price_decimals;   // Decimal places for prices (default 4)
+    std::atomic<int32_t> money_decimals;   // Decimal places for money/P&L (default 2)
+    std::atomic<int32_t> qty_decimals;     // Decimal places for quantities (default 4)
+
+    // Regime → Strategy mapping (configurable)
+    // Index: 0=Unknown, 1=TrendingUp, 2=TrendingDown, 3=Ranging, 4=HighVol, 5=LowVol, 6=Spike
+    // Value: StrategyType enum (0=NONE, 1=MOMENTUM, 2=MEAN_REV, 3=MKT_MAKER, 4=DEFENSIVE, 5=CAUTIOUS, 6=SMART)
+    std::atomic<uint8_t> regime_strategy[8];  // 7 regimes + 1 padding
+
+    // Position sizing mode
+    // 0 = Percentage-based (use portfolio_value * position_pct, recommended)
+    // 1 = Unit-based (use max_units directly)
+    std::atomic<uint8_t> position_sizing_mode;
+    std::atomic<int32_t> max_position_units;  // Max units when unit-based mode (default: 10)
 
     // === Accessors ===
     double spread_multiplier() const { return spread_multiplier_x10.load() / 10.0; }
@@ -95,6 +151,71 @@ struct SharedConfig {
     double max_position_pct() const { return max_position_pct_x100.load() / 100.0; }
     double target_pct() const { return target_pct_x100.load() / 100.0; }
     double stop_pct() const { return stop_pct_x100.load() / 100.0; }
+    double pullback_pct() const { return pullback_pct_x100.load() / 100.0; }
+    double commission_rate() const { return commission_rate_x10000.load() / 10000.0; }
+    double slippage_bps() const { return slippage_bps_x100.load() / 100.0; }
+    double min_trade_value() const { return min_trade_value_x100.load() / 100.0; }
+    int32_t get_cooldown_ms() const { return cooldown_ms.load(); }
+    int32_t get_signal_strength() const { return signal_strength.load(); }
+    bool is_auto_tune_enabled() const { return auto_tune_enabled.load() != 0; }
+    bool is_paper_trading() const { return paper_trading.load() != 0; }
+    bool is_tuner_mode() const { return tuner_mode.load() != 0; }
+    bool is_manual_override() const { return manual_override.load() != 0; }
+    bool is_tuner_paused() const { return tuner_paused.load() != 0; }
+
+    // Position sizing accessors
+    bool is_percentage_based_sizing() const { return position_sizing_mode.load() == 0; }
+    bool is_unit_based_sizing() const { return position_sizing_mode.load() == 1; }
+    uint8_t get_position_sizing_mode() const { return position_sizing_mode.load(); }
+    int32_t get_max_position_units() const { return max_position_units.load(); }
+
+    // Check if manual tune was requested
+    bool should_tune_now() const {
+        return manual_tune_request_ns.load() > 0;
+    }
+
+    // Trigger manual tune (dashboard calls this)
+    void request_manual_tune() {
+        auto now = std::chrono::steady_clock::now().time_since_epoch();
+        manual_tune_request_ns.store(
+            std::chrono::duration_cast<std::chrono::nanoseconds>(now).count());
+    }
+
+    // Clear manual tune request (tuner calls this after processing)
+    void clear_manual_tune_request() {
+        manual_tune_request_ns.store(0);
+    }
+
+    // Get manual tune request timestamp
+    int64_t get_manual_tune_request_ns() const {
+        return manual_tune_request_ns.load();
+    }
+
+    // Order execution accessors
+    uint8_t get_order_type_default() const { return order_type_default.load(); }
+    double get_limit_offset_bps() const { return limit_offset_bps_x100.load() / 100.0; }
+    int32_t get_limit_timeout_ms() const { return limit_timeout_ms.load(); }
+    bool is_order_type_market_only() const { return order_type_default.load() == 1; }
+    bool is_order_type_limit_only() const { return order_type_default.load() == 2; }
+    bool is_order_type_adaptive() const { return order_type_default.load() == 3; }
+
+    // EMA deviation accessors (returns as decimal, e.g., 0.01 for 1%)
+    double ema_dev_trending() const { return ema_dev_trending_x1000.load() / 1000.0; }
+    double ema_dev_ranging() const { return ema_dev_ranging_x1000.load() / 1000.0; }
+    double ema_dev_highvol() const { return ema_dev_highvol_x1000.load() / 1000.0; }
+
+    // Regime → Strategy mapping accessors
+    // regime_idx: 0=Unknown, 1=TrendingUp, 2=TrendingDown, 3=Ranging, 4=HighVol, 5=LowVol, 6=Spike
+    uint8_t get_strategy_for_regime(int regime_idx) const {
+        if (regime_idx < 0 || regime_idx > 6) return 0;
+        return regime_strategy[regime_idx].load();
+    }
+
+    void set_strategy_for_regime(int regime_idx, uint8_t strategy_type) {
+        if (regime_idx < 0 || regime_idx > 6) return;
+        regime_strategy[regime_idx].store(strategy_type);
+        sequence.fetch_add(1);
+    }
 
     // === Mutators (for dashboard) ===
     void set_spread_multiplier(double val) {
@@ -125,8 +246,53 @@ struct SharedConfig {
         stop_pct_x100.store(static_cast<int32_t>(val * 100));
         sequence.fetch_add(1);
     }
+    void set_pullback_pct(double val) {
+        pullback_pct_x100.store(static_cast<int32_t>(val * 100));
+        sequence.fetch_add(1);
+    }
+    void set_commission_rate(double val) {
+        commission_rate_x10000.store(static_cast<int32_t>(val * 10000));
+        sequence.fetch_add(1);
+    }
+    void set_slippage_bps(double val) {
+        slippage_bps_x100.store(static_cast<int32_t>(val * 100));
+        sequence.fetch_add(1);
+    }
+    void set_min_trade_value(double val) {
+        min_trade_value_x100.store(static_cast<int32_t>(val * 100));
+        sequence.fetch_add(1);
+    }
+    void set_cooldown_ms(int32_t val) {
+        cooldown_ms.store(val);
+        sequence.fetch_add(1);
+    }
+    void set_signal_strength(int32_t val) {
+        signal_strength.store(val);
+        sequence.fetch_add(1);
+    }
+    void set_auto_tune_enabled(bool enabled) {
+        auto_tune_enabled.store(enabled ? 1 : 0);
+        sequence.fetch_add(1);
+    }
+    // EMA deviation setters (val as percentage, e.g., 1.0 for 1%)
+    void set_ema_dev_trending(double val) {
+        ema_dev_trending_x1000.store(static_cast<int32_t>(val * 10));  // 1.0% -> 10
+        sequence.fetch_add(1);
+    }
+    void set_ema_dev_ranging(double val) {
+        ema_dev_ranging_x1000.store(static_cast<int32_t>(val * 10));   // 0.5% -> 5
+        sequence.fetch_add(1);
+    }
+    void set_ema_dev_highvol(double val) {
+        ema_dev_highvol_x1000.store(static_cast<int32_t>(val * 10));   // 0.2% -> 2
+        sequence.fetch_add(1);
+    }
     void set_trading_enabled(bool enabled) {
         trading_enabled.store(enabled ? 1 : 0);
+        sequence.fetch_add(1);
+    }
+    void set_paper_trading(bool enabled) {
+        paper_trading.store(enabled ? 1 : 0);
         sequence.fetch_add(1);
     }
     void set_force_mode(uint8_t mode) {
@@ -135,7 +301,44 @@ struct SharedConfig {
     }
     uint8_t get_force_mode() const { return force_mode.load(); }
 
-    // HFT updates these (no sequence bump - read-only for dashboard)
+    void set_tuner_mode(bool enabled) {
+        tuner_mode.store(enabled ? 1 : 0);
+        sequence.fetch_add(1);
+    }
+    void set_manual_override(bool enabled) {
+        manual_override.store(enabled ? 1 : 0);
+        sequence.fetch_add(1);
+    }
+    void set_tuner_paused(bool paused) {
+        tuner_paused.store(paused ? 1 : 0);
+        sequence.fetch_add(1);
+    }
+
+    // Position sizing mutators
+    void set_position_sizing_mode(uint8_t mode) {
+        position_sizing_mode.store(mode);
+        sequence.fetch_add(1);
+    }
+    void set_max_position_units(int32_t units) {
+        max_position_units.store(units);
+        sequence.fetch_add(1);
+    }
+
+    // Order execution mutators
+    void set_order_type_default(uint8_t type) {
+        order_type_default.store(type);
+        sequence.fetch_add(1);
+    }
+    void set_limit_offset_bps(double bps) {
+        limit_offset_bps_x100.store(static_cast<int16_t>(bps * 100));
+        sequence.fetch_add(1);
+    }
+    void set_limit_timeout_ms(int32_t ms) {
+        limit_timeout_ms.store(ms);
+        sequence.fetch_add(1);
+    }
+
+    // Trader updates these (no sequence bump - read-only for dashboard)
     void set_active_mode(uint8_t mode) { active_mode.store(mode); }
     void set_active_signals(uint8_t count) { active_signals.store(count); }
     void set_consecutive_losses(int32_t count) { consecutive_losses.store(count); }
@@ -146,20 +349,72 @@ struct SharedConfig {
     int32_t get_consecutive_losses() const { return consecutive_losses.load(); }
     int32_t get_consecutive_wins() const { return consecutive_wins.load(); }
 
-    // HFT lifecycle
-    void set_hft_status(uint8_t status) { hft_status.store(status); }
-    void set_hft_pid(int32_t pid) { hft_pid.store(pid); }
+    // Display settings
+    int get_price_decimals() const { return price_decimals.load(); }
+    int get_money_decimals() const { return money_decimals.load(); }
+    int get_qty_decimals() const { return qty_decimals.load(); }
+    void set_price_decimals(int val) { price_decimals.store(val); sequence.fetch_add(1); }
+    void set_money_decimals(int val) { money_decimals.store(val); sequence.fetch_add(1); }
+    void set_qty_decimals(int val) { qty_decimals.store(val); sequence.fetch_add(1); }
+
+    // Trader lifecycle
+    void set_trader_status(uint8_t status) { trader_status.store(status); }
+    void set_trader_pid(int32_t pid) { trader_pid.store(pid); }
     void update_heartbeat() {
         auto now = std::chrono::steady_clock::now().time_since_epoch();
         heartbeat_ns.store(std::chrono::duration_cast<std::chrono::nanoseconds>(now).count());
     }
 
-    uint8_t get_hft_status() const { return hft_status.load(); }
-    int32_t get_hft_pid() const { return hft_pid.load(); }
+    uint8_t get_trader_status() const { return trader_status.load(); }
+    int32_t get_trader_pid() const { return trader_pid.load(); }
     int64_t get_heartbeat_ns() const { return heartbeat_ns.load(); }
+    int64_t get_trader_start_time_ns() const { return trader_start_time_ns.load(); }
 
-    // Check if HFT is alive (heartbeat within last N seconds)
-    bool is_hft_alive(int timeout_seconds = 5) const {
+    // WebSocket status accessors
+    uint8_t get_ws_market_status() const { return ws_market_status.load(); }
+    uint8_t get_ws_user_status() const { return ws_user_status.load(); }
+    uint32_t get_ws_reconnect_count() const { return ws_reconnect_count.load(); }
+    int64_t get_ws_last_message_ns() const { return ws_last_message_ns.load(); }
+
+    // WebSocket status mutators (Trader calls these)
+    void set_ws_market_status(uint8_t status) { ws_market_status.store(status); }
+    void set_ws_user_status(uint8_t status) { ws_user_status.store(status); }
+    void set_ws_reconnect_count(uint32_t count) { ws_reconnect_count.store(count); }
+    void increment_ws_reconnect_count() { ws_reconnect_count.fetch_add(1); }
+    void set_ws_last_message_ns(int64_t ns) { ws_last_message_ns.store(ns); }
+    void update_ws_last_message() {
+        auto now = std::chrono::steady_clock::now().time_since_epoch();
+        ws_last_message_ns.store(std::chrono::duration_cast<std::chrono::nanoseconds>(now).count());
+    }
+
+    // Check if WebSocket is healthy (receiving data within timeout)
+    bool is_ws_healthy(int timeout_seconds = 10) const {
+        auto now = std::chrono::steady_clock::now().time_since_epoch();
+        int64_t now_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(now).count();
+        int64_t last = ws_last_message_ns.load();
+        if (last == 0) return false;  // Never received a message
+        int64_t diff_ns = now_ns - last;
+        return diff_ns < (timeout_seconds * 1'000'000'000LL);
+    }
+
+    // WebSocket status names for display
+    static const char* ws_status_name(uint8_t status) {
+        switch (status) {
+            case 0: return "Disconnected";
+            case 1: return "Degraded";
+            case 2: return "Healthy";
+            default: return "Unknown";
+        }
+    }
+
+    // Trader start time setter
+    void set_trader_start_time() {
+        auto now = std::chrono::steady_clock::now().time_since_epoch();
+        trader_start_time_ns.store(std::chrono::duration_cast<std::chrono::nanoseconds>(now).count());
+    }
+
+    // Check if Trader is alive (heartbeat within last N seconds)
+    bool is_trader_alive(int timeout_seconds = 5) const {
         auto now = std::chrono::steady_clock::now().time_since_epoch();
         int64_t now_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(now).count();
         int64_t last = heartbeat_ns.load();
@@ -181,23 +436,76 @@ struct SharedConfig {
         max_position_pct_x100.store(500);     // 5%
         target_pct_x100.store(150);           // 1.5%
         stop_pct_x100.store(100);             // 1%
+        pullback_pct_x100.store(50);          // 0.5% - trend exit threshold
+        commission_rate_x10000.store(10);     // 0.1% = 0.001
+        slippage_bps_x100.store(500);         // 5 bps (realistic paper trading default)
+        min_trade_value_x100.store(10000);    // $100 minimum trade
+        cooldown_ms.store(2000);              // 2 second cooldown
+        signal_strength.store(2);             // 2 = Strong signals only
+        auto_tune_enabled.store(1);           // Auto-tune ON by default
+
+        // EMA deviation defaults
+        ema_dev_trending_x1000.store(10);     // 1% above EMA OK in uptrend
+        ema_dev_ranging_x1000.store(5);       // 0.5% above EMA in ranging
+        ema_dev_highvol_x1000.store(2);       // 0.2% above EMA in high vol
+
         force_mode.store(0);                  // auto
         trading_enabled.store(1);             // active
+        paper_trading.store(1);               // paper trading by default
+        tuner_mode.store(0);                  // tuner OFF by default (traditional strategies)
+        manual_override.store(0);             // normal mode (not manual)
+        tuner_paused.store(0);                // tuner not paused
+        reserved_tuner.store(0);              // reserved
+        manual_tune_request_ns.store(0);      // no manual tune request
 
-        // HFT status (defaults)
+        // Order execution defaults
+        order_type_default.store(0);          // 0=Auto (ExecutionEngine decides)
+        limit_offset_bps_x100.store(200);     // 2 bps inside spread
+        limit_timeout_ms.store(500);          // 500ms adaptive timeout
+
+        // Display defaults
+        price_decimals.store(4);              // 4 decimal places for prices
+        money_decimals.store(2);              // 2 decimal places for money
+        qty_decimals.store(4);                // 4 decimal places for quantities
+
+        // Regime → Strategy mapping defaults
+        // StrategyType: 0=NONE, 1=MOMENTUM, 2=MEAN_REV, 3=MKT_MAKER, 4=DEFENSIVE, 5=CAUTIOUS, 6=SMART
+        regime_strategy[0].store(0);  // Unknown → NONE
+        regime_strategy[1].store(1);  // TrendingUp → MOMENTUM
+        regime_strategy[2].store(4);  // TrendingDown → DEFENSIVE
+        regime_strategy[3].store(3);  // Ranging → MKT_MAKER
+        regime_strategy[4].store(5);  // HighVolatility → CAUTIOUS
+        regime_strategy[5].store(3);  // LowVolatility → MKT_MAKER
+        regime_strategy[6].store(0);  // Spike → NONE (danger!)
+        regime_strategy[7].store(0);  // padding
+
+        // Position sizing defaults
+        position_sizing_mode.store(0);        // 0 = percentage-based (recommended)
+        max_position_units.store(10);         // 10 units when unit-based
+
+        // Trader status (defaults)
         active_mode.store(2);                 // NORMAL
         active_signals.store(0);
         consecutive_losses.store(0);
         consecutive_wins.store(0);
 
-        // HFT lifecycle
+        // Trader lifecycle
         heartbeat_ns.store(0);
-        hft_pid.store(0);
-        hft_status.store(0);                  // stopped
+        trader_pid.store(0);
+        trader_status.store(0);                  // stopped
+        trader_start_time_ns.store(0);           // not started yet
+
+        // WebSocket connection status
+        ws_market_status.store(0);            // disconnected
+        ws_user_status.store(0);              // disconnected
+        ws_reserved1.store(0);
+        ws_reserved2.store(0);
+        ws_reconnect_count.store(0);          // no reconnects yet
+        ws_last_message_ns.store(0);          // no messages yet
 
         // Build info
-#ifdef HFT_BUILD_HASH
-        std::strncpy(build_hash, HFT_BUILD_HASH, 11);
+#ifdef TRADER_BUILD_HASH
+        std::strncpy(build_hash, TRADER_BUILD_HASH, 11);
         build_hash[11] = '\0';
 #else
         std::strncpy(build_hash, "unknown", 11);

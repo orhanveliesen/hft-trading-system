@@ -157,6 +157,95 @@ public:
     }
 
     /**
+     * Fetch trading symbols from Binance
+     *
+     * Fetches exchange info and extracts USDT spot trading pairs that are
+     * currently trading. Optionally filters by quote volume.
+     *
+     * @param quote_asset Filter by quote asset (default "USDT")
+     * @param max_symbols Maximum number of symbols to return (0 = all)
+     * @return Vector of symbol strings (e.g., "BTCUSDT", "ETHUSDT")
+     */
+    std::vector<std::string> fetch_trading_symbols(
+        const std::string& quote_asset = "USDT",
+        size_t max_symbols = 30
+    ) {
+        std::vector<std::string> symbols;
+
+        try {
+            std::string json = get_exchange_info();
+
+            // Parse symbols array from exchange info
+            // Format: {"symbols":[{"symbol":"BTCUSDT","status":"TRADING",...},...]}
+            size_t symbols_start = json.find("\"symbols\"");
+            if (symbols_start == std::string::npos) {
+                return symbols;
+            }
+
+            // Find the symbols array
+            size_t array_start = json.find('[', symbols_start);
+            if (array_start == std::string::npos) {
+                return symbols;
+            }
+
+            // Parse each symbol object
+            size_t pos = array_start;
+            while ((pos = json.find("{\"symbol\"", pos)) != std::string::npos) {
+                // Extract symbol name
+                size_t sym_start = json.find("\"symbol\":\"", pos);
+                if (sym_start == std::string::npos) break;
+                sym_start += 10;  // Skip "\"symbol\":\""
+
+                size_t sym_end = json.find("\"", sym_start);
+                if (sym_end == std::string::npos) break;
+
+                std::string symbol = json.substr(sym_start, sym_end - sym_start);
+
+                // Check if trading
+                size_t status_pos = json.find("\"status\"", pos);
+                bool is_trading = false;
+                if (status_pos != std::string::npos && status_pos < pos + 500) {
+                    is_trading = (json.find("\"TRADING\"", status_pos) != std::string::npos &&
+                                  json.find("\"TRADING\"", status_pos) < status_pos + 30);
+                }
+
+                // Check quote asset
+                size_t quote_pos = json.find("\"quoteAsset\"", pos);
+                bool correct_quote = false;
+                if (quote_pos != std::string::npos && quote_pos < pos + 500) {
+                    std::string quote_check = "\"" + quote_asset + "\"";
+                    correct_quote = (json.find(quote_check, quote_pos) != std::string::npos &&
+                                     json.find(quote_check, quote_pos) < quote_pos + 30);
+                }
+
+                // Check if SPOT
+                size_t perms_pos = json.find("\"permissions\"", pos);
+                bool is_spot = false;
+                if (perms_pos != std::string::npos && perms_pos < pos + 800) {
+                    is_spot = (json.find("\"SPOT\"", perms_pos) != std::string::npos &&
+                               json.find("\"SPOT\"", perms_pos) < perms_pos + 100);
+                }
+
+                if (is_trading && correct_quote && is_spot) {
+                    symbols.push_back(symbol);
+
+                    if (max_symbols > 0 && symbols.size() >= max_symbols) {
+                        break;
+                    }
+                }
+
+                pos = sym_end;
+            }
+
+        } catch (const std::exception& e) {
+            // Return empty vector on error - caller should handle fallback
+            return symbols;
+        }
+
+        return symbols;
+    }
+
+    /**
      * Get ticker price
      */
     double get_price(const std::string& symbol) {

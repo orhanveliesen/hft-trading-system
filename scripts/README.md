@@ -5,7 +5,7 @@ Bu klasördeki Python scriptleri, ana C++ trading sistemi için yardımcı araç
 ## Kurulum
 
 ```bash
-cd /path/to/hft
+cd /path/to/trader
 pip install -r requirements.txt
 ```
 
