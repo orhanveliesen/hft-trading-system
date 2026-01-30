@@ -20,11 +20,15 @@ namespace exchange {
  */
 class IExchange : public execution::IExchangeAdapter {
 public:
+    // FillCallback signature
+    // NOTE: qty is double (not Quantity/uint32_t) because crypto trades use
+    // fractional quantities (e.g., 0.01 BTC). Using uint32_t would truncate
+    // these to 0, breaking portfolio accounting.
     using FillCallback = std::function<void(
         uint64_t order_id,
         const char* symbol_name,  // Symbol name directly, no ID conversion needed
         Side side,
-        Quantity qty,
+        double qty,               // Fractional quantity (e.g., 0.01 BTC)
         Price fill_price,
         double commission
     )>;
@@ -39,12 +43,12 @@ public:
 
     /// Send market order - fills immediately at current price + slippage
     uint64_t send_market_order(
-        Symbol symbol, Side side, Quantity qty, Price expected_price
+        Symbol symbol, Side side, double qty, Price expected_price
     ) override = 0;
 
     /// Send limit order - pending until price crosses limit
     uint64_t send_limit_order(
-        Symbol symbol, Side side, Quantity qty, Price limit_price
+        Symbol symbol, Side side, double qty, Price limit_price
     ) override = 0;
 
     /// Cancel a pending order

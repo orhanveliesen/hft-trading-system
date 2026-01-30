@@ -254,6 +254,29 @@ private:
             pos = end + 1;
         }
 
+        // VALIDATION: Recalculate cash from positions to prevent corrupted data
+        // Bug discovered: overselling bug could save inflated cash values
+        // Cash = initial_capital - sum(position_costs) + realized_pnl - commissions - slippage
+        double position_cost = 0.0;
+        for (size_t i = 0; i < ipc::MAX_PORTFOLIO_SYMBOLS; ++i) {
+            if (portfolio.positions[i].active.load()) {
+                double qty = portfolio.positions[i].quantity();
+                double price = portfolio.positions[i].avg_price();
+                position_cost += qty * price;
+            }
+        }
+
+        double calculated_cash = initial_capital - position_cost + total_realized_pnl
+                                - total_commissions - total_slippage;
+
+        // Sanity check: if file cash differs significantly from calculated, use calculated
+        double cash_diff = std::abs(cash - calculated_cash);
+        if (cash_diff > initial_capital * 0.01) {  // More than 1% discrepancy
+            // Log warning would be nice, but avoid iostream in hot path compatible code
+            // Just use the calculated (correct) value
+            portfolio.cash_x8.store(static_cast<int64_t>(calculated_cash * 1e8));
+        }
+
         return true;
     }
 

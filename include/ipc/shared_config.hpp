@@ -503,14 +503,14 @@ struct SharedConfig {
         loss_streak_threshold.store(2);
         base_position_pct_x100.store(200);    // 2%
         max_position_pct_x100.store(500);     // 5%
-        target_pct_x100.store(150);           // 1.5%
-        stop_pct_x100.store(100);             // 1%
+        target_pct_x100.store(300);           // 3% target
+        stop_pct_x100.store(500);             // 5% stop (requires only ~38% win rate)
         pullback_pct_x100.store(50);          // 0.5% - trend exit threshold
         commission_rate_x10000.store(10);     // 0.1% = 0.001
         slippage_bps_x100.store(500);         // 5 bps (realistic paper trading default)
         min_trade_value_x100.store(10000);    // $100 minimum trade
         cooldown_ms.store(2000);              // 2 second cooldown
-        signal_strength.store(2);             // 2 = Strong signals only
+        signal_strength.store(1);             // 1 = Medium signals also (more trades)
         auto_tune_enabled.store(1);           // Auto-tune ON by default
 
         // EMA deviation defaults

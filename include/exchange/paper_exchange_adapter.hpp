@@ -119,7 +119,7 @@ public:
     // =========================================================================
 
     uint64_t send_market_order(
-        Symbol symbol, Side side, Quantity qty, Price expected_price
+        Symbol symbol, Side side, double qty, Price expected_price
     ) override {
         const char* sym_name = symbol_name(symbol);
         double price_dbl = price_to_double(expected_price);
@@ -137,7 +137,7 @@ public:
     }
 
     uint64_t send_limit_order(
-        Symbol symbol, Side side, Quantity qty, Price limit_price
+        Symbol symbol, Side side, double qty, Price limit_price
     ) override {
         const char* sym_name = symbol_name(symbol);
         double price_dbl = price_to_double(limit_price);

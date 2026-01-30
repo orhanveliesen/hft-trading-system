@@ -134,6 +134,10 @@ add_executable(test_paper_exchange tests/test_paper_exchange.cpp)
 target_link_libraries(test_paper_exchange rt)
 add_test(NAME PaperExchangeTests COMMAND test_paper_exchange)
 
+add_executable(test_fractional_quantity tests/test_fractional_quantity.cpp)
+target_link_libraries(test_fractional_quantity rt)
+add_test(NAME FractionalQuantityTests COMMAND test_fractional_quantity)
+
 add_executable(test_udp_telemetry tests/test_udp_telemetry.cpp)
 target_link_libraries(test_udp_telemetry pthread)
 add_test(NAME UdpTelemetryTests COMMAND test_udp_telemetry)
@@ -164,6 +168,27 @@ add_test(NAME PortfolioAccountingTests COMMAND test_portfolio_accounting)
 
 add_executable(test_exit_path_guards tests/test_exit_path_guards.cpp)
 add_test(NAME ExitPathGuardTests COMMAND test_exit_path_guards)
+
+add_executable(test_execution_overselling tests/test_execution_overselling.cpp)
+add_test(NAME ExecutionOversellingTests COMMAND test_execution_overselling)
+
+add_executable(test_portfolio_sell tests/test_portfolio_sell.cpp)
+add_test(NAME PortfolioSellTests COMMAND test_portfolio_sell)
+
+add_executable(test_position_store tests/test_position_store.cpp)
+target_link_libraries(test_position_store rt)
+add_test(NAME PositionStoreTests COMMAND test_position_store)
+
+add_executable(test_trade_recorder tests/test_trade_recorder.cpp)
+target_link_libraries(test_trade_recorder rt)
+add_test(NAME TradeRecorderTests COMMAND test_trade_recorder)
+
+add_executable(test_shared_ledger tests/test_shared_ledger.cpp)
+target_link_libraries(test_shared_ledger rt)
+add_test(NAME SharedLedgerTests COMMAND test_shared_ledger)
+
+add_executable(test_commission_scaling tests/test_commission_scaling.cpp)
+add_test(NAME CommissionScalingTests COMMAND test_commission_scaling)
 
 # === Tools ===
 add_executable(trader tools/trader.cpp)

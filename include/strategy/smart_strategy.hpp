@@ -100,9 +100,9 @@ struct SmartStrategyConfig {
     double signal_threshold_cautious = 0.7;
 
     // Position sizing
-    double base_position_pct = 0.02;    // 2% of capital per trade
-    double max_position_pct = 0.05;     // Max 5% per trade
-    double min_position_pct = 0.005;    // Min 0.5% per trade
+    double base_position_pct = 0.05;    // 5% of capital per trade
+    double max_position_pct = 0.15;     // Max 15% per trade
+    double min_position_pct = 0.01;     // Min 1% per trade
 
     // Target/Stop
     double default_target_pct = 0.015;  // 1.5% target

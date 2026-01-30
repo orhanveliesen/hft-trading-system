@@ -24,7 +24,7 @@ struct PendingOrder {
     uint64_t order_id = 0;
     Symbol symbol = 0;
     Side side = Side::Buy;
-    Quantity quantity = 0;
+    double quantity = 0;  // double for fractional crypto quantities
     Price limit_price = 0;
     Price expected_fill_price = 0;  // For slippage tracking
     uint64_t submit_time_ns = 0;
@@ -75,6 +75,10 @@ struct ExecutionConfig {
  * IExchangeAdapter - Interface that ExecutionEngine uses to send orders
  *
  * This allows ExecutionEngine to work with both paper and real exchanges.
+ *
+ * NOTE: qty parameter is double (not Quantity/uint32_t) because crypto trading
+ * uses fractional quantities (e.g., 0.01 BTC). Using uint32_t would truncate
+ * these to 0.
  */
 class IExchangeAdapter {
 public:
@@ -82,12 +86,12 @@ public:
 
     /// Send market order, returns order ID (0 on failure)
     virtual uint64_t send_market_order(
-        Symbol symbol, Side side, Quantity qty, Price expected_price
+        Symbol symbol, Side side, double qty, Price expected_price
     ) = 0;
 
     /// Send limit order, returns order ID (0 on failure)
     virtual uint64_t send_limit_order(
-        Symbol symbol, Side side, Quantity qty, Price limit_price
+        Symbol symbol, Side side, double qty, Price limit_price
     ) = 0;
 
     /// Cancel order by ID
@@ -126,8 +130,13 @@ public:
  */
 class ExecutionEngine {
 public:
-    using OrderCallback = std::function<void(uint64_t order_id, Symbol symbol, Side side, Quantity qty, Price price, OrderType type)>;
-    using FillCallback = std::function<void(uint64_t order_id, Symbol symbol, Side side, Quantity qty, Price price, double slippage)>;
+    // Callbacks use double qty for fractional crypto quantities
+    using OrderCallback = std::function<void(uint64_t order_id, Symbol symbol, Side side, double qty, Price price, OrderType type)>;
+    using FillCallback = std::function<void(uint64_t order_id, Symbol symbol, Side side, double qty, Price price, double slippage)>;
+    using PositionCallback = std::function<double(Symbol symbol)>;  // Returns current position for symbol
+
+    // Minimum position threshold - below this is considered zero (dust)
+    static constexpr double MIN_POSITION_THRESHOLD = 0.0001;
 
     explicit ExecutionEngine(const ExecutionConfig& config = {})
         : config_(config)
@@ -145,6 +154,10 @@ public:
 
     void set_fill_callback(FillCallback cb) {
         on_fill_ = std::move(cb);
+    }
+
+    void set_position_callback(PositionCallback cb) {
+        get_position_ = std::move(cb);
     }
 
     // =========================================================================
@@ -180,8 +193,23 @@ public:
         Price expected_price = (side == Side::Buy) ? market.ask : market.bid;
         Price limit_price = calculate_limit_price(signal, market, side);
 
-        // Convert quantity
-        Quantity qty = static_cast<Quantity>(signal.suggested_qty);
+        // Use quantity directly (double, for fractional crypto quantities)
+        double qty = signal.suggested_qty;
+
+        // CRITICAL: For SELL orders, check position to prevent overselling
+        if (side == Side::Sell && get_position_) {
+            double current_position = get_position_(symbol);
+
+            // If position is dust (below threshold), reject the order
+            if (current_position < MIN_POSITION_THRESHOLD) {
+                return 0;  // No position to sell
+            }
+
+            // Limit qty to available position
+            if (qty > current_position) {
+                qty = current_position;
+            }
+        }
 
         // Send order
         uint64_t order_id = 0;
@@ -208,7 +236,7 @@ public:
     // =========================================================================
 
     /// Called when a fill occurs - calculate slippage and notify
-    void on_fill(uint64_t order_id, Symbol symbol, Side side, Quantity qty, Price fill_price) {
+    void on_fill(uint64_t order_id, Symbol symbol, Side side, double qty, Price fill_price) {
         double slippage = 0;
 
         // Find pending order to calculate slippage
@@ -268,6 +296,7 @@ private:
     std::vector<PendingOrder> pending_orders_;
     OrderCallback on_order_;
     FillCallback on_fill_;
+    PositionCallback get_position_;
 
     /**
      * Decide whether to use Market or Limit order
@@ -347,7 +376,7 @@ private:
         uint64_t order_id,
         Symbol symbol,
         Side side,
-        Quantity qty,
+        double qty,
         Price limit_price,
         Price expected_price
     ) {

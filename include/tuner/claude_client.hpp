@@ -120,7 +120,8 @@ public:
         }
 
         const char* model_env = std::getenv("HFT_TUNER_MODEL");
-        model_ = model_env ? model_env : "claude-3-haiku-20240307";
+        // Opus has superior math and reasoning for complex trading decisions
+        model_ = model_env ? model_env : "claude-3-opus-20240229";
 
         const char* url_env = std::getenv("CLAUDE_API_URL");
         api_url_ = url_env ? url_env : "https://api.anthropic.com/v1/messages";
@@ -157,6 +158,12 @@ public:
     }
 
     const char* model() const { return model_.c_str(); }
+
+    void set_model(const std::string& model) {
+        if (!model.empty()) {
+            model_ = model;
+        }
+    }
 
     /**
      * Request tuning recommendation from Claude
@@ -338,6 +345,57 @@ private:
             ss << "- Is win rate adequate for the risk/reward ratio?\n";
             ss << "- Are stops being hit more than targets? (signals may be poor)\n";
             ss << "\nYou must determine appropriate actions based on these metrics.\n\n";
+
+            // CRITICAL: Trade Frequency Warning
+            if (costs->trades_per_hour < 5 && costs->session_duration_sec > 1800) {
+                ss << "## ⚠️ LOW TRADE FREQUENCY WARNING\n";
+                ss << "- Trades per hour: " << std::setprecision(1) << costs->trades_per_hour << "\n";
+                ss << "- This is TOO LOW! The EMA thresholds might be too tight.\n";
+                ss << "- **ema_dev_trending_pct should be 0.5-2.0%, NOT 3-4%**\n";
+                ss << "- **ema_dev_ranging_pct should be 0.3-1.0%**\n";
+                ss << "- If no trades happen, we cannot make profit!\n";
+                ss << "- Balance: reduce costs BUT keep trading activity\n\n";
+            }
+
+            // CRITICAL: Stop/Target Ratio Analysis with Math
+            if (costs->total_stops > 0 || costs->total_targets > 0) {
+                ss << "## 🚨 STOP/TARGET RATIO ANALYSIS (CRITICAL - READ THIS FIRST)\n";
+                double stop_target_ratio = costs->total_targets > 0 ?
+                    (double)costs->total_stops / costs->total_targets : 999.0;
+                ss << "- Stops hit: " << costs->total_stops << "\n";
+                ss << "- Targets hit: " << costs->total_targets << "\n";
+                ss << "- **Stop/Target Ratio: " << std::setprecision(1) << stop_target_ratio << ":1**\n\n";
+
+                ss << "**THE MATH (MANDATORY - you MUST apply this):**\n";
+                ss << "Break-even formula: Required Win Rate = stop / (stop + target)\n\n";
+                ss << "| Stop | Target | Required Win Rate |\n";
+                ss << "|------|--------|------------------|\n";
+                ss << "| 1%   | 3%     | 75% ← TOO HARD   |\n";
+                ss << "| 1%   | 4%     | 80% ← TOO HARD   |\n";
+                ss << "| 2%   | 3%     | 60% ← STILL HARD |\n";
+                ss << "| 3%   | 3%     | 50% ← ACHIEVABLE |\n";
+                ss << "| 4%   | 3%     | 43% ← REALISTIC  |\n";
+                ss << "| 5%   | 3%     | 37% ← EASIER     |\n\n";
+
+                ss << "**Current State:**\n";
+                ss << "- Win rate: " << std::setprecision(1) << costs->win_rate << "%\n";
+
+                if (stop_target_ratio > 3) {
+                    ss << "\n⚠️ **ACTION REQUIRED: Stop is TOO TIGHT!**\n";
+                    ss << "With " << std::setprecision(1) << costs->win_rate << "% win rate, you MUST:\n";
+                    if (costs->win_rate < 30) {
+                        ss << "1. Set stop_pct >= 4% (recommended: 5%)\n";
+                        ss << "2. Set target_pct around 2-3%\n";
+                        ss << "3. This gives ~60% required win rate which is achievable\n";
+                    } else if (costs->win_rate < 50) {
+                        ss << "1. Set stop_pct >= 3%\n";
+                        ss << "2. Set target_pct around 2-3%\n";
+                    } else {
+                        ss << "1. Set stop_pct >= 2%\n";
+                    }
+                    ss << "\n**DO NOT keep stop_pct at 1% - IT DOES NOT WORK!**\n\n";
+                }
+            }
         }
 
         // Include news context if provided
@@ -429,16 +487,22 @@ private:
         ss << "}\n";
         ss << "```\n\n";
 
-        ss << "## Parameter Meanings\n";
-        ss << "- ema_dev_trending_pct: Max % price can be above EMA to allow buy in uptrend\n";
-        ss << "- ema_dev_ranging_pct: Max % price can be above EMA in ranging markets\n";
-        ss << "- ema_dev_highvol_pct: Max % price can be above EMA in high volatility\n";
+        ss << "## ⚠️ MANDATORY RULES (NEVER VIOLATE)\n";
+        ss << "1. **stop_pct MUST be >= 3%** - Tight stops cause excessive losses\n";
+        ss << "2. **stop_pct SHOULD be >= target_pct** - With low win rate, stop must be wider than target\n";
+        ss << "3. **signal_strength = 1** is fine - We need more trades to capture opportunities\n";
+        ss << "4. If win_rate < 30%, set stop_pct = 5% minimum\n\n";
+
+        ss << "## Parameter Meanings (with REALISTIC ranges)\n";
+        ss << "- ema_dev_trending_pct: Max % price can deviate from EMA in uptrend. **REALISTIC: 0.5-2.0%** (NOT 3-4%!)\n";
+        ss << "- ema_dev_ranging_pct: Max % price can deviate from EMA in ranging markets. **REALISTIC: 0.3-1.0%**\n";
+        ss << "- ema_dev_highvol_pct: Max % deviation in high volatility. **REALISTIC: 0.2-0.5%**\n";
         ss << "- base_position_pct: Position size as % of portfolio for normal trades\n";
         ss << "- max_position_pct: Max position size as % of portfolio\n";
         ss << "- cooldown_ms: Minimum time between trades in milliseconds\n";
-        ss << "- signal_strength: Required signal strength (1=Medium, 2=Strong, 3=VeryStrong)\n";
-        ss << "- target_pct: Take profit threshold as % of entry price\n";
-        ss << "- stop_pct: Stop loss threshold as % of entry price\n";
+        ss << "- signal_strength: Required signal strength (1=Medium, 2=Strong, 3=VeryStrong) - **USE 1 for more trades**\n";
+        ss << "- target_pct: Take profit threshold as % of entry price (REALISTIC: 2-4%)\n";
+        ss << "- stop_pct: Stop loss threshold as % of entry price (REALISTIC: 3-5%, NEVER below 3%)\n";
         ss << "- pullback_pct: Exit when price drops this % from peak unrealized profit\n";
         ss << "- order_type: Order execution preference for THIS symbol:\n";
         ss << "  - \"Auto\": ExecutionEngine decides based on signal strength, regime, spread\n";

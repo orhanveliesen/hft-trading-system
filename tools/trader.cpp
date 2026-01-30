@@ -35,7 +35,9 @@
 #include "../include/exchange/paper_exchange.hpp"
 #include "../include/strategy/rolling_sharpe.hpp"
 #include "../include/strategy/market_health_monitor.hpp"
-#include "../include/strategy/position_store.hpp"
+#include "../include/trading/trade_recorder.hpp"
+#include "../include/ipc/shared_ledger.hpp"
+// Position persistence removed - paper trading restarts fresh
 
 // New unified architecture includes
 #include "../include/strategy/istrategy.hpp"
@@ -212,10 +214,6 @@ struct CLIArgs {
     double capital = 100000.0;
     int max_position = 10;
 
-    // Position persistence options
-    bool restore_positions = false;  // Restore positions from previous session
-    bool persist_positions = true;   // Save position state to file
-    std::string position_file = "positions.json";
 };
 
 void print_help() {
@@ -238,11 +236,6 @@ Options:
   --unified              Use unified strategy architecture (IStrategy + ExecutionEngine)
   -v, --verbose          Verbose output (fills, targets, stops)
   -h, --help             Show this help
-
-Position Persistence:
-  --restore              Restore positions from previous session
-  --no-persist           Don't save position state to file
-  --position-file FILE   Position file path (default: positions.json)
 
 Examples:
   hft --paper                      # Paper trading, all symbols
@@ -303,15 +296,6 @@ bool parse_args(int argc, char* argv[], CLIArgs& args) {
         }
         else if (arg == "--unified") {
             args.unified_strategy = true;
-        }
-        else if (arg == "--restore") {
-            args.restore_positions = true;
-        }
-        else if (arg == "--no-persist") {
-            args.persist_positions = false;
-        }
-        else if (arg == "--position-file" && i + 1 < argc) {
-            args.position_file = argv[++i];
         }
         else {
             std::cerr << "Unknown option: " << arg << "\n";
@@ -384,7 +368,10 @@ public:
 
     enum class Event { Accepted, Filled, Cancelled, Rejected };
 
-    using FillCallback = std::function<void(Symbol, OrderId, Side, Quantity, Price)>;
+    // NOTE: qty is double (not Quantity/uint32_t) because crypto trades use
+    // fractional quantities (e.g., 0.01 BTC). Using uint32_t would truncate to 0.
+    // TODO these callbacks create overhead fix them by using template pattern
+    using FillCallback = std::function<void(Symbol, OrderId, Side, double qty, Price)>;
     using SlippageCallback = std::function<void(double)>;  // Track slippage cost
 
     PaperOrderSender() : next_id_(1), total_orders_(0), total_fills_(0),
@@ -396,7 +383,8 @@ public:
     // 5-param version with expected_price for slippage tracking
     // is_market: true = market order (immediate fill with slippage)
     //            false = limit order (no slippage, only fills if price is favorable)
-    bool send_order(Symbol symbol, Side side, Quantity qty, Price expected_price, bool is_market) {
+    // NOTE: qty is double to support fractional crypto quantities (e.g., 0.01 BTC)
+    bool send_order(Symbol symbol, Side side, double qty, Price expected_price, bool is_market) {
         OrderId id = PAPER_ID_MASK | next_id_++;
         total_orders_++;
         pending_.push_back({symbol, id, side, qty, expected_price, is_market});
@@ -404,7 +392,7 @@ public:
     }
 
     // 4-param backward-compatible version (satisfies OrderSender concept)
-    bool send_order(Symbol symbol, Side side, Quantity qty, bool is_market) {
+    bool send_order(Symbol symbol, Side side, double qty, bool is_market) {
         return send_order(symbol, side, qty, 0, is_market);  // No expected_price tracking
     }
 
@@ -507,7 +495,7 @@ private:
         Symbol symbol;
         OrderId id;
         Side side;
-        Quantity qty;
+        double qty;            // double to support fractional crypto quantities (e.g., 0.01 BTC)
         Price expected_price;  // For limit: limit price, for market: expected fill
         bool is_market;        // true = market (slippage), false = limit (no slippage)
     };
@@ -531,7 +519,8 @@ public:
     ProductionOrderSender() : total_orders_(0) {}
 
     // 5-param version with expected_price for slippage tracking
-    bool send_order(Symbol /*symbol*/, Side /*side*/, Quantity /*qty*/, Price /*expected_price*/, bool /*is_market*/) {
+    // NOTE: qty is double to support fractional crypto quantities (e.g., 0.01 BTC)
+    bool send_order(Symbol /*symbol*/, Side /*side*/, double /*qty*/, Price /*expected_price*/, bool /*is_market*/) {
         // TODO: Implement real order submission
         // - Sign request with API key/secret
         // - Send via REST API
@@ -543,7 +532,7 @@ public:
     }
 
     // 4-param backward-compatible version (satisfies OrderSender concept)
-    bool send_order(Symbol symbol, Side side, Quantity qty, bool is_market) {
+    bool send_order(Symbol symbol, Side side, double qty, bool is_market) {
         return send_order(symbol, side, qty, 0, is_market);  // No expected_price tracking
     }
 
@@ -559,9 +548,10 @@ private:
 };
 
 // Local OrderSender concept with expected_price for slippage tracking
+// NOTE: qty is double to support fractional crypto quantities (e.g., 0.01 BTC)
 template<typename T>
-concept LocalOrderSender = requires(T& sender, Symbol s, Side side, Quantity q, Price p, OrderId id, bool is_market) {
-    { sender.send_order(s, side, q, p, is_market) } -> std::convertible_to<bool>;
+concept LocalOrderSender = requires(T& sender, Symbol s, Side side, double qty, Price p, OrderId id, bool is_market) {
+    { sender.send_order(s, side, qty, p, is_market) } -> std::convertible_to<bool>;
     { sender.cancel_order(s, id) } -> std::convertible_to<bool>;
 };
 
@@ -816,9 +806,10 @@ struct Portfolio {
     // Buy and create position with target/stop-loss - O(1) no allocation
     // spread_cost = (ask - mid) * qty (half spread paid on buy)
     // commission = passed from ExecutionReport (0 = calculate internally)
-    void buy(Symbol s, double price, double qty, double spread_cost = 0, double commission = 0) {
-        if (qty <= 0 || price <= 0) return;
-        if (s >= MAX_SYMBOLS) return;
+    // RETURNS: actual commission applied (0 if position not added due to MAX_POSITIONS limit)
+    double buy(Symbol s, double price, double qty, double spread_cost = 0, double commission = 0) {
+        if (qty <= 0 || price <= 0) return 0;
+        if (s >= MAX_SYMBOLS) return 0;
 
         double target = price * (1.0 + target_pct());
         double stop_loss = price * (1.0 - stop_pct());
@@ -826,33 +817,33 @@ struct Portfolio {
         if (positions[s].add(price, qty, target, stop_loss)) {
             double trade_value = price * qty;
             // If commission not provided, calculate it (backwards compatibility)
+            double actual_commission = commission;
             if (commission <= 0) {
-                commission = trade_value * commission_rate();
+                actual_commission = trade_value * commission_rate();
             }
-            cash -= trade_value + commission;  // Pay price + commission
-            total_commissions += commission;
+            cash -= trade_value + actual_commission;  // Pay price + commission
+            total_commissions += actual_commission;
             total_spread_cost += spread_cost;
             total_volume += trade_value;
             symbol_active[s] = true;
+            return actual_commission;
         }
+        return 0;  // Position not added
     }
 
     // Sell specific quantity, FIFO order - O(n) where n = positions for symbol
     // spread_cost = (mid - bid) * qty (half spread paid on sell)
     // commission = passed from ExecutionReport (0 = calculate internally)
-    void sell(Symbol s, double price, double qty, double spread_cost = 0, double commission = 0) {
-        if (qty <= 0 || price <= 0) return;
-        if (s >= MAX_SYMBOLS) return;
+    // RETURNS: actual commission applied (may be scaled if overselling protection triggered)
+    double sell(Symbol s, double price, double qty, double spread_cost = 0, double commission = 0) {
+        if (qty <= 0 || price <= 0) return 0;
+        if (s >= MAX_SYMBOLS) return 0;
 
         double remaining = qty;
-        double trade_value = price * qty;
-
-        // If commission not provided, calculate it (backwards compatibility)
-        if (commission <= 0) {
-            commission = trade_value * commission_rate();
-        }
-
         auto& sym_pos = positions[s];
+
+        // Track actual quantity sold (may be less than requested if overselling)
+        double actual_sold = 0;
 
         for (auto& slot : sym_pos.slots) {
             if (!slot.active || remaining <= 0) continue;
@@ -860,6 +851,7 @@ struct Portfolio {
             double sell_qty = std::min(remaining, slot.quantity);
             slot.quantity -= sell_qty;
             remaining -= sell_qty;
+            actual_sold += sell_qty;
 
             if (slot.quantity <= 0.0001) {
                 slot.clear();
@@ -867,15 +859,32 @@ struct Portfolio {
             }
         }
 
-        // Apply commission and volume once for entire trade
-        cash += trade_value - commission;  // Receive price - commission
-        total_commissions += commission;
+        // CRITICAL: Use actual_sold, not requested qty, to prevent overselling bug
+        // If requested more than available, only credit cash for what was actually sold
+        double trade_value = price * actual_sold;
+
+        // If commission not provided, calculate it based on actual trade value
+        double actual_commission = commission;
+        if (commission <= 0) {
+            actual_commission = trade_value * commission_rate();
+        } else {
+            // Scale provided commission proportionally if we sold less than requested
+            if (actual_sold < qty && qty > 0) {
+                actual_commission = commission * (actual_sold / qty);
+            }
+        }
+
+        // Apply commission and volume for ACTUAL trade
+        cash += trade_value - actual_commission;  // Receive price - commission
+        total_commissions += actual_commission;
         total_volume += trade_value;
         total_spread_cost += spread_cost;
 
         if (sym_pos.count == 0) {
             symbol_active[s] = false;
         }
+
+        return actual_commission;
     }
 
     // Get average entry price for a symbol
@@ -1004,56 +1013,27 @@ public:
     {
         portfolio_.init(args.capital);
 
+        // Initialize TradeRecorder - single source of truth for P&L
+        trade_recorder_.init(args.capital);
+
         // Initialize shared portfolio state for dashboard/observer
         if (args.paper_mode) {
-            // Initialize position store for crash recovery
-            if (args.persist_positions) {
-                position_store_ = std::make_unique<strategy::PositionStore>(args.position_file.c_str());
-            }
-
-            // Try to open existing state first (crash recovery) - read-write mode
-            portfolio_state_ = SharedPortfolioState::open_rw("/trader_portfolio");
+            // Always create fresh portfolio state (no crash recovery for paper trading)
+            SharedPortfolioState::destroy("/trader_portfolio");
+            portfolio_state_ = SharedPortfolioState::create("/trader_portfolio", args.capital);
             if (portfolio_state_) {
-                std::cout << "[IPC] Recovered existing portfolio state "
-                          << "(cash=$" << portfolio_state_->cash()
-                          << ", fills=" << portfolio_state_->total_fills.load() << ")\n";
-                // Sync local portfolio with shared state
-                portfolio_.cash = portfolio_state_->cash();
-                portfolio_state_->trading_active.store(1);
-            } else {
-                // Create new state
-                portfolio_state_ = SharedPortfolioState::create("/trader_portfolio", args.capital);
-                if (portfolio_state_) {
-                    std::cout << "[IPC] Portfolio state initialized "
-                              << "(session=" << std::hex << std::uppercase << portfolio_state_->session_id
-                              << std::dec << ", cash=$" << args.capital << ")\n";
-                }
+                std::cout << "[IPC] Portfolio state initialized "
+                          << "(session=" << std::hex << std::uppercase << portfolio_state_->session_id
+                          << std::dec << ", cash=$" << args.capital << ")\n";
             }
 
-            // Restore positions from file if requested
-            if (args.restore_positions && position_store_ && portfolio_state_) {
-                if (position_store_->exists()) {
-                    if (position_store_->restore(*portfolio_state_)) {
-                        portfolio_.cash = portfolio_state_->cash();
-                        // Count restored positions
-                        size_t restored = 0;
-                        for (size_t i = 0; i < ipc::MAX_PORTFOLIO_SYMBOLS; ++i) {
-                            if (portfolio_state_->positions[i].active.load() &&
-                                portfolio_state_->positions[i].quantity() != 0) {
-                                ++restored;
-                            }
-                        }
-                        std::cout << "[RESTORE] Loaded " << restored
-                                  << " positions from " << args.position_file << "\n"
-                                  << "  Cash: $" << std::fixed << std::setprecision(2)
-                                  << portfolio_state_->cash() << "\n"
-                                  << "  Realized P&L: $" << portfolio_state_->total_realized_pnl() << "\n";
-                    } else {
-                        std::cerr << "[RESTORE] Failed to parse position file\n";
-                    }
-                } else {
-                    std::cout << "[RESTORE] No position file found, starting fresh\n";
-                }
+            // Initialize SharedLedger for IPC visibility
+            ipc::SharedLedger::destroy("/trader_ledger");
+            shared_ledger_ = ipc::SharedLedger::create("/trader_ledger");
+            if (shared_ledger_) {
+                trade_recorder_.connect_shared_ledger(shared_ledger_);
+                std::cout << "[IPC] Ledger initialized (max entries: "
+                          << ipc::MAX_SHARED_LEDGER_ENTRIES << ")\n";
             }
 
             // Open shared config (dashboard can modify this)
@@ -1110,7 +1090,7 @@ public:
         if constexpr (std::is_same_v<OrderSender, PaperOrderSender>) {
             // Configure PaperOrderSender with slippage settings
             sender_.set_config(shared_config_);
-            sender_.set_fill_callback([this](Symbol s, OrderId id, Side side, Quantity q, Price p) {
+            sender_.set_fill_callback([this](Symbol s, OrderId id, Side side, double q, Price p) {
                 on_fill(s, id, side, q, p);
             });
             sender_.set_slippage_callback([this](double slippage_cost) {
@@ -1148,16 +1128,17 @@ public:
             paper_adapter_->set_paper_config(shared_paper_config_);  // Paper-specific settings
 
             // Set up fill callback to route through on_execution_report
+            // NOTE: qty is double (not Quantity/uint32_t) for fractional crypto quantities
             paper_adapter_->set_fill_callback([this](
                 uint64_t order_id, const char* symbol_name, Side side,
-                Quantity qty, Price fill_price, double commission
+                double qty, Price fill_price, double commission
             ) {
                 // Convert back to ExecutionReport format
                 ipc::ExecutionReport report;
                 report.clear();  // CRITICAL: Initialize all fields to zero
                 report.order_id = order_id;
                 report.side = side;
-                report.filled_qty = static_cast<double>(qty);
+                report.filled_qty = qty;  // Already double, no conversion needed
                 report.filled_price = static_cast<double>(fill_price) / risk::PRICE_SCALE;
                 report.commission = commission;
                 report.status = ipc::OrderStatus::Filled;
@@ -1180,6 +1161,12 @@ public:
             // Wire ExecutionEngine to use the adapter
             execution_engine_.set_exchange(paper_adapter_.get());
 
+            // Set position callback to prevent overselling
+            // This ensures we never sell more than we own
+            execution_engine_.set_position_callback([this](Symbol symbol) -> double {
+                return portfolio_.positions[symbol].total_quantity();
+            });
+
             std::cout << "[EXEC] ExecutionEngine initialized with PaperExchangeAdapter\n";
         }
 
@@ -1198,11 +1185,6 @@ public:
             event_log_->log(e);
         }
 
-        // Final save of positions before cleanup
-        if (position_store_ && portfolio_state_) {
-            position_store_->save_immediate(*portfolio_state_);
-            std::cout << "[PERSIST] Final position state saved to " << position_store_->path() << "\n";
-        }
 
         // Normal shutdown - cleanup shared memory
         if (portfolio_state_) {
@@ -1434,6 +1416,15 @@ public:
                     double trade_value = exit * qty;
                     double commission = trade_value * portfolio_.commission_rate();
 
+                    // Record exit in TradeRecorder (ledger + IPC)
+                    trading::TradeInput exit_input{};
+                    exit_input.symbol = id;
+                    exit_input.price = exit;
+                    exit_input.quantity = qty;
+                    exit_input.commission = commission;
+                    std::strncpy(exit_input.ticker, ticker, sizeof(exit_input.ticker) - 1);
+                    trade_recorder_.record_exit(trading::ExitReason::TARGET, exit_input);
+
                     // Update shared portfolio state (~5ns)
                     if (portfolio_state_) {
                         portfolio_state_->set_cash(portfolio_.cash);
@@ -1476,6 +1467,15 @@ public:
                     double trade_value = exit * qty;
                     double commission = trade_value * portfolio_.commission_rate();
 
+                    // Record exit in TradeRecorder (ledger + IPC)
+                    trading::TradeInput exit_input{};
+                    exit_input.symbol = id;
+                    exit_input.price = exit;
+                    exit_input.quantity = qty;
+                    exit_input.commission = commission;
+                    std::strncpy(exit_input.ticker, ticker, sizeof(exit_input.ticker) - 1);
+                    trade_recorder_.record_exit(trading::ExitReason::STOP, exit_input);
+
                     // Update shared portfolio state (~5ns)
                     if (portfolio_state_) {
                         portfolio_state_->set_cash(portfolio_.cash);
@@ -1517,6 +1517,15 @@ public:
                     double profit = (exit - entry) * qty;
                     double trade_value = exit * qty;
                     double commission = trade_value * portfolio_.commission_rate();
+
+                    // Record exit in TradeRecorder (ledger + IPC)
+                    trading::TradeInput exit_input{};
+                    exit_input.symbol = id;
+                    exit_input.price = exit;
+                    exit_input.quantity = qty;
+                    exit_input.commission = commission;
+                    std::strncpy(exit_input.ticker, ticker, sizeof(exit_input.ticker) - 1);
+                    trade_recorder_.record_exit(trading::ExitReason::PULLBACK, exit_input);
 
                     // Update shared portfolio state
                     if (portfolio_state_) {
@@ -1636,10 +1645,11 @@ private:
     ipc::TelemetryPublisher telemetry_;  // UDP multicast for remote monitoring
     SharedPortfolioState* portfolio_state_ = nullptr;  // Shared state for dashboard
     SharedConfig* shared_config_ = nullptr;           // Shared config from dashboard
+    trading::TradeRecorder trade_recorder_;           // Single source of truth for P&L
+    ipc::SharedLedger* shared_ledger_ = nullptr;      // IPC ledger for dashboard
     SharedPaperConfig* shared_paper_config_ = nullptr; // Paper trading settings
     SharedEventLog* event_log_ = nullptr;             // Event log for tuner/web
     uint32_t last_config_seq_ = 0;                    // Track config changes
-    std::unique_ptr<strategy::PositionStore> position_store_;  // Position persistence
 
     // Paper exchange (only used in paper mode)
     hft::exchange::PaperExchange paper_exchange_;
@@ -1975,12 +1985,27 @@ private:
             double value = bid_usd * qty;
 
             // Execute market sell
-            portfolio_.sell(static_cast<Symbol>(s), bid_usd, qty);
+            // NOTE: sell() returns actual_commission which may be scaled if overselling protection triggered
+            double trade_value = bid_usd * qty;
+            double commission = trade_value * portfolio_.commission_rate();
+            double actual_commission = portfolio_.sell(static_cast<Symbol>(s), bid_usd, qty, 0, commission);
+
+            // Record exit in TradeRecorder (ledger + IPC)
+            // IMPORTANT: Use actual_commission for accurate accounting
+            trading::TradeInput exit_input{};
+            exit_input.symbol = static_cast<uint32_t>(s);
+            exit_input.price = bid_usd;
+            exit_input.quantity = qty;
+            exit_input.commission = actual_commission;
+            std::strncpy(exit_input.ticker, strategies_[s].ticker, sizeof(exit_input.ticker) - 1);
+            trade_recorder_.record_exit(trading::ExitReason::EMERGENCY, exit_input);
 
             // Update shared state
             if (portfolio_state_) {
                 portfolio_state_->set_cash(portfolio_.cash);
                 portfolio_state_->add_realized_pnl(pnl);
+                portfolio_state_->add_commission(actual_commission);  // Use actual commission
+                portfolio_state_->add_volume(trade_value);
                 portfolio_state_->record_stop();  // Count as emergency stop
                 portfolio_state_->record_event();
                 portfolio_state_->update_position(
@@ -2013,12 +2038,12 @@ private:
         std::cout << "[EMERGENCY] Cooldown active for " << market_health_.cooldown_remaining() << " ticks\n\n";
     }
 
-    void on_fill(Symbol symbol, OrderId id, Side side, Quantity qty, Price price) {
+    void on_fill(Symbol symbol, OrderId id, Side side, double qty, Price price) {
         auto* world = engine_.get_symbol_world(symbol);
         if (!world) return;
 
         double price_usd = static_cast<double>(price) / risk::PRICE_SCALE;
-        double qty_d = static_cast<double>(qty);
+        double qty_d = qty;  // Already double, no cast needed
         double trade_value = price_usd * qty_d;
 
         // Calculate spread cost (half spread paid per trade)
@@ -2028,17 +2053,42 @@ private:
         double spread = ask_usd - bid_usd;
         double spread_cost = (spread / 2.0) * qty_d;  // Half spread per trade
 
+        // For SELL fills, capture avg entry BEFORE the sell to calculate P&L
+        double avg_entry_before_sell = 0.0;
+        double qty_before_sell = 0.0;
+        if (side == Side::Sell) {
+            avg_entry_before_sell = portfolio_.positions[symbol].avg_entry();
+            qty_before_sell = portfolio_.positions[symbol].total_quantity();
+        }
+
+        // Commission for this trade (calculate BEFORE updating portfolio)
+        double commission = trade_value * portfolio_.commission_rate();
+
         // Update portfolio (spot trading: no leverage, no shorting)
+        // NOTE: buy()/sell() return actual_commission which may be 0 if position limit reached or scaled
+        double actual_commission = 0;
         if (side == Side::Buy) {
             // Release reserved cash (was reserved when order was sent)
             portfolio_.release_reserved_cash(price_usd * qty_d);
-            portfolio_.buy(symbol, price_usd, qty_d, spread_cost);
+            actual_commission = portfolio_.buy(symbol, price_usd, qty_d, spread_cost, commission);
         } else {
-            portfolio_.sell(symbol, price_usd, qty_d, spread_cost);
+            actual_commission = portfolio_.sell(symbol, price_usd, qty_d, spread_cost, commission);
         }
 
-        // Commission for this trade
-        double commission = trade_value * portfolio_.commission_rate();
+        // Record in TradeRecorder (ledger + IPC)
+        // IMPORTANT: Use actual_commission for accurate accounting
+        trading::TradeInput fill_input{};
+        fill_input.symbol = symbol;
+        fill_input.price = price_usd;
+        fill_input.quantity = qty_d;
+        fill_input.commission = actual_commission;
+        fill_input.spread_cost = spread_cost;
+        std::strncpy(fill_input.ticker, world->ticker().c_str(), sizeof(fill_input.ticker) - 1);
+        if (side == Side::Buy) {
+            trade_recorder_.record_buy(fill_input);
+        } else {
+            trade_recorder_.record_sell(fill_input);
+        }
 
         // Update shared portfolio state for dashboard (~5ns)
         if (portfolio_state_) {
@@ -2046,8 +2096,8 @@ private:
             portfolio_state_->record_fill();
             portfolio_state_->record_event();
 
-            // Track trading costs
-            portfolio_state_->add_commission(commission);
+            // Track trading costs - use ACTUAL commission for accurate accounting
+            portfolio_state_->add_commission(actual_commission);
             portfolio_state_->add_spread_cost(spread_cost);
             portfolio_state_->add_volume(trade_value);
 
@@ -2063,6 +2113,12 @@ private:
                 portfolio_state_->record_buy(world->ticker().c_str());
             } else {
                 portfolio_state_->record_sell(world->ticker().c_str());
+
+                // Track realized P&L for SELL fills (BUG FIX: was missing before!)
+                if (avg_entry_before_sell > 0 && qty_before_sell > 0) {
+                    double realized_pnl = (price_usd - avg_entry_before_sell) * qty_d;
+                    portfolio_state_->add_realized_pnl(realized_pnl);
+                }
             }
         }
 
@@ -2096,10 +2152,6 @@ private:
         world->on_fill(side, qty, price);
         world->on_our_fill(id, qty);
 
-        // Save positions to file for crash recovery
-        if (position_store_ && portfolio_state_) {
-            position_store_->save_immediate(*portfolio_state_);
-        }
     }
 
     /**
@@ -2148,11 +2200,28 @@ private:
         }
 
         // Update portfolio with commission from report
+        // NOTE: buy()/sell() return actual_commission which may be 0 if position limit reached or scaled
+        double actual_commission = 0;
         if (is_buy) {
             portfolio_.release_reserved_cash(price_usd * qty);
-            portfolio_.buy(symbol, price_usd, qty, spread_cost, commission);
+            actual_commission = portfolio_.buy(symbol, price_usd, qty, spread_cost, commission);
         } else {
-            portfolio_.sell(symbol, price_usd, qty, spread_cost, commission);
+            actual_commission = portfolio_.sell(symbol, price_usd, qty, spread_cost, commission);
+        }
+
+        // Record in TradeRecorder (ledger + IPC)
+        // IMPORTANT: Use actual_commission for accurate accounting
+        trading::TradeInput exec_input{};
+        exec_input.symbol = symbol;
+        exec_input.price = price_usd;
+        exec_input.quantity = qty;
+        exec_input.commission = actual_commission;
+        exec_input.spread_cost = spread_cost;
+        std::strncpy(exec_input.ticker, report.symbol, sizeof(exec_input.ticker) - 1);
+        if (is_buy) {
+            trade_recorder_.record_buy(exec_input);
+        } else {
+            trade_recorder_.record_sell(exec_input);
         }
 
         // Update shared portfolio state for dashboard
@@ -2161,8 +2230,8 @@ private:
             portfolio_state_->record_fill();
             portfolio_state_->record_event();
 
-            // Track trading costs (from report)
-            portfolio_state_->add_commission(commission);
+            // Track trading costs - use ACTUAL commission for accurate accounting
+            portfolio_state_->add_commission(actual_commission);
             portfolio_state_->add_spread_cost(spread_cost);
             portfolio_state_->add_volume(trade_value);
 
@@ -2224,10 +2293,6 @@ private:
         world->on_fill(side, qty_scaled, price_scaled);
         world->on_our_fill(report.order_id, qty_scaled);
 
-        // Save positions to file for crash recovery
-        if (position_store_ && portfolio_state_) {
-            position_store_->save_immediate(*portfolio_state_);
-        }
     }
 
     // Note: check_targets_and_stops removed - now handled inline in on_quote
@@ -2423,16 +2488,31 @@ private:
 
             if (should_exit && world->can_trade(Side::Sell, 1)) {
                 // Market sell entire position
+                // NOTE: sell() returns actual_commission which may be scaled if overselling protection triggered
                 double qty = holding;
                 double entry = portfolio_.avg_entry_price(id);
                 double pnl = (bid_usd - entry) * qty;
+                double trade_value = bid_usd * qty;
+                double commission = trade_value * portfolio_.commission_rate();
 
-                portfolio_.sell(id, bid_usd, qty);
+                double actual_commission = portfolio_.sell(id, bid_usd, qty, 0, commission);
+
+                // Record exit in TradeRecorder (ledger + IPC)
+                // IMPORTANT: Use actual_commission for accurate accounting
+                trading::TradeInput exit_input{};
+                exit_input.symbol = id;
+                exit_input.price = bid_usd;
+                exit_input.quantity = qty;
+                exit_input.commission = actual_commission;
+                std::strncpy(exit_input.ticker, strat->ticker, sizeof(exit_input.ticker) - 1);
+                trade_recorder_.record_exit(trading::ExitReason::SIGNAL, exit_input);
 
                 // Update shared portfolio state
                 if (portfolio_state_) {
                     portfolio_state_->set_cash(portfolio_.cash);
                     portfolio_state_->add_realized_pnl(pnl);
+                    portfolio_state_->add_commission(actual_commission);  // Use actual commission
+                    portfolio_state_->add_volume(trade_value);     // BUG FIX: was missing!
                     if (pnl > 0) {
                         portfolio_state_->record_target();  // Count as win
                     } else {

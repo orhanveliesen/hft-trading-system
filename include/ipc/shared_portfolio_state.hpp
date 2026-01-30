@@ -196,8 +196,24 @@ struct SharedPortfolioState {
         return total;
     }
 
+    double total_market_value() const {
+        double total = 0;
+        for (size_t i = 0; i < MAX_PORTFOLIO_SYMBOLS; ++i) {
+            if (positions[i].active.load()) {
+                total += positions[i].market_value();
+            }
+        }
+        return total;
+    }
+
+    // Equity = cash + market value of all positions
     double total_equity() const {
-        return total_realized_pnl() + total_unrealized_pnl();
+        return cash() + total_market_value();
+    }
+
+    // P&L = current equity - initial capital
+    double total_pnl() const {
+        return total_equity() - initial_cash();
     }
 
     double win_rate() const {

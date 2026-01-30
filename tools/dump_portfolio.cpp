@@ -60,15 +60,32 @@ int main() {
     std::cout << "\n";
 
     std::cout << "[ Calculated Values ]\n";
-    double correct_equity = state->cash() + state->total_unrealized_pnl();
-    double buggy_equity = state->total_equity();  // This is the buggy one
-    double pnl = state->cash() - state->initial_cash() + state->total_unrealized_pnl();
+    double market_value = state->total_market_value();
+    double equity = state->total_equity();  // cash + market_value
+    double pnl = state->total_pnl();        // equity - initial_cash
     double pnl_pct = (pnl / state->initial_cash()) * 100.0;
 
-    std::cout << "  CORRECT equity:   $" << correct_equity << " (cash + unrealized)\n";
-    std::cout << "  BUGGY equity:     $" << buggy_equity << " (realized + unrealized - WRONG!)\n";
-    std::cout << "  CORRECT P&L:      $" << pnl << "\n";
-    std::cout << "  CORRECT P&L %:    " << pnl_pct << "%\n";
+    std::cout << "  market_value:     $" << market_value << "\n";
+    std::cout << "  equity:           $" << equity << " (cash + market_value)\n";
+    std::cout << "  P&L:              $" << pnl << "\n";
+    std::cout << "  P&L %:            " << pnl_pct << "%\n";
+    std::cout << "\n";
+
+    std::cout << "[ P&L Reconciliation ]\n";
+    double realized = state->total_realized_pnl();
+    double unrealized = state->total_unrealized_pnl();
+    double commission = state->total_commissions();
+    double slippage = state->total_slippage();
+    double component_pnl = realized + unrealized - commission;
+    double difference = pnl - component_pnl;
+
+    std::cout << "  Equity-based P&L: $" << pnl << " (cash + mkt_val - initial)\n";
+    std::cout << "  Component P&L:    $" << component_pnl << " (R + U - C)\n";
+    std::cout << "    Realized:       $" << realized << "\n";
+    std::cout << "    Unrealized:     $" << unrealized << "\n";
+    std::cout << "    Commission:     $" << commission << "\n";
+    std::cout << "  DIFFERENCE:       $" << difference << "\n";
+    std::cout << "  (Slippage $" << slippage << " already in R/U - not subtracted)\n";
     std::cout << "\n";
 
     std::cout << "[ Trade Stats ]\n";

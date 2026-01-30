@@ -394,14 +394,23 @@ struct DashboardData {
         return total;
     }
 
-    // FIXED: Equity = cash + unrealized P&L (not realized + unrealized!)
-    double total_equity() const {
-        return current_cash + total_unrealized_pnl();
+    // Total market value of all positions (qty * last_price)
+    double total_market_value() const {
+        double total = 0;
+        for (const auto& [sym, pos] : positions) {
+            total += pos.market_value();
+        }
+        return total;
     }
 
-    // Total P&L from initial capital
+    // Equity = cash + position market value
+    double total_equity() const {
+        return current_cash + total_market_value();
+    }
+
+    // Total P&L from initial capital = current equity - initial
     double total_pnl() const {
-        return current_cash - initial_cash + total_unrealized_pnl();
+        return total_equity() - initial_cash;
     }
 
     double total_pnl_pct() const {
@@ -926,11 +935,10 @@ void render_dashboard(DashboardData& data, const SharedPortfolioState* portfolio
     ImGui::PopStyleColor();
     ImGui::NextColumn();
 
-    // Total Costs
-    double total_costs = data.total_commissions + data.total_spread_cost + data.total_slippage;
-    ImGui::Text("Total Costs");
+    // Total Costs (only commission affects cash - slippage/spread are informational)
+    ImGui::Text("Actual Cost");
     ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.4f, 0.4f, 1.0f));
-    ImGui::Text("$%.2f", total_costs);
+    ImGui::Text("$%.2f", data.total_commissions);  // Only commission is actual cost
     ImGui::PopStyleColor();
     ImGui::NextColumn();
 
@@ -945,6 +953,48 @@ void render_dashboard(DashboardData& data, const SharedPortfolioState* portfolio
         ImGui::Text("$%.0f", data.total_volume);
     }
     ImGui::PopStyleColor();
+
+    ImGui::Columns(1);
+    ImGui::EndChild();
+
+    // P&L Reconciliation Section
+    ImGui::BeginChild("PnLRecon", ImVec2(0, 55), true);
+    ImGui::Text("P&L RECONCILIATION");
+    ImGui::Separator();
+
+    // Calculate both P&L methods
+    double equity_pnl = data.total_pnl();  // cash + market_value - initial (THE TRUTH)
+    double component_pnl = data.realized_pnl + data.unrealized_pnl - data.total_commissions;
+    double difference = equity_pnl - component_pnl;
+
+    ImGui::Columns(4, "recon_cols", false);
+
+    // Equity P&L (truth)
+    ImGui::Text("Equity P&L");
+    ImVec4 eq_color = equity_pnl >= 0 ? ImVec4(0.3f, 1.0f, 0.3f, 1.0f) : ImVec4(1.0f, 0.3f, 0.3f, 1.0f);
+    ImGui::PushStyleColor(ImGuiCol_Text, eq_color);
+    ImGui::Text("$%.2f", equity_pnl);
+    ImGui::PopStyleColor();
+    ImGui::NextColumn();
+
+    // Component P&L
+    ImGui::Text("R+U-C");
+    ImVec4 comp_color = component_pnl >= 0 ? ImVec4(0.3f, 1.0f, 0.3f, 1.0f) : ImVec4(1.0f, 0.3f, 0.3f, 1.0f);
+    ImGui::PushStyleColor(ImGuiCol_Text, comp_color);
+    ImGui::Text("$%.2f", component_pnl);
+    ImGui::PopStyleColor();
+    ImGui::NextColumn();
+
+    // Difference
+    ImGui::Text("Diff");
+    ImVec4 diff_color = std::abs(difference) < 1.0 ? ImVec4(0.5f, 0.5f, 0.5f, 1.0f) : ImVec4(1.0f, 1.0f, 0.0f, 1.0f);
+    ImGui::PushStyleColor(ImGuiCol_Text, diff_color);
+    ImGui::Text("$%.2f", difference);
+    ImGui::PopStyleColor();
+    ImGui::NextColumn();
+
+    // Note about slippage
+    ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "Slip in R/U");
 
     ImGui::Columns(1);
     ImGui::EndChild();
@@ -1037,7 +1087,7 @@ void render_dashboard(DashboardData& data, const SharedPortfolioState* portfolio
         ImGui::TableSetupColumn("Symbol", ImGuiTableColumnFlags_WidthFixed, 80);
         ImGui::TableSetupColumn("Regime", ImGuiTableColumnFlags_WidthFixed, 50);
         ImGui::TableSetupColumn("Strategy", ImGuiTableColumnFlags_WidthFixed, 70);
-        ImGui::TableSetupColumn("Qty", ImGuiTableColumnFlags_WidthFixed, 45);
+        ImGui::TableSetupColumn("Qty", ImGuiTableColumnFlags_WidthFixed, 85);
         ImGui::TableSetupColumn("Entry", ImGuiTableColumnFlags_WidthFixed, 70);
         ImGui::TableSetupColumn("Last", ImGuiTableColumnFlags_WidthFixed, 70);
         ImGui::TableSetupColumn("P&L", ImGuiTableColumnFlags_WidthFixed, 65);
@@ -1080,9 +1130,11 @@ void render_dashboard(DashboardData& data, const SharedPortfolioState* portfolio
                 ImGui::PopStyleColor();
             }
 
-            // Quantity
+            // Quantity (use configurable decimals for crypto fractional amounts)
             ImGui::TableNextColumn();
-            ImGui::Text("%.0f", pos.quantity);
+            char qty_fmt[16];
+            snprintf(qty_fmt, sizeof(qty_fmt), "%%.%df", qty_dec);
+            ImGui::Text(qty_fmt, pos.quantity);
 
             // Entry price
             ImGui::TableNextColumn();

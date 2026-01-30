@@ -277,6 +277,7 @@ struct TunerArgs {
     int interval_sec = 300;     // 5 minutes default
     int loss_threshold = 3;     // Tune after N consecutive losses
     double loss_pct_trigger = 2.0;  // Tune if symbol loses >N%
+    std::string model;          // Claude model (empty = use default/env)
 };
 
 TunerArgs parse_args(int argc, char* argv[]) {
@@ -290,6 +291,8 @@ TunerArgs parse_args(int argc, char* argv[]) {
             args.interval_sec = atoi(argv[++i]);
         } else if (strcmp(argv[i], "--loss-threshold") == 0 && i + 1 < argc) {
             args.loss_threshold = atoi(argv[++i]);
+        } else if (strcmp(argv[i], "--model") == 0 && i + 1 < argc) {
+            args.model = argv[++i];
         } else if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
             std::cout << "HFT AI Tuner - Claude-powered parameter optimization\n\n"
                       << "Usage: hft_tuner [options]\n\n"
@@ -298,10 +301,15 @@ TunerArgs parse_args(int argc, char* argv[]) {
                       << "  --verbose, -v      Verbose logging\n"
                       << "  --interval N       Tune every N seconds (default: 300)\n"
                       << "  --loss-threshold N Tune after N consecutive losses (default: 3)\n"
+                      << "  --model MODEL      Claude model to use (default: claude-3-opus-20240229)\n"
                       << "  --help, -h         Show this help\n\n"
+                      << "Models:\n"
+                      << "  claude-3-opus-20240229     Best reasoning (default, recommended)\n"
+                      << "  claude-3-5-sonnet-20241022 Good balance of speed/quality\n"
+                      << "  claude-3-haiku-20240307    Fastest, basic reasoning\n\n"
                       << "Environment:\n"
                       << "  CLAUDE_API_KEY     Required: Anthropic API key\n"
-                      << "  HFT_TUNER_MODEL    Optional: Model to use\n";
+                      << "  HFT_TUNER_MODEL    Optional: Model (overridden by --model)\n";
             exit(0);
         }
     }
@@ -375,6 +383,8 @@ public:
         shared_config_ = SharedConfig::open_rw("/trader_config");
         if (shared_config_) {
             std::cout << "[IPC] Connected to shared config\n";
+        } else {
+            std::cerr << "[WARN] Could not connect to shared config - manual tune requests will not work!\n";
         }
 
         portfolio_state_ = SharedPortfolioState::open("/trader_portfolio");
@@ -394,8 +404,13 @@ public:
         }
 
         // Initialize Claude client
+        if (!args_.model.empty()) {
+            claude_.set_model(args_.model);
+        }
         if (!claude_.is_valid()) {
             std::cerr << "[WARN] Claude API not configured, running in monitor-only mode\n";
+        } else {
+            std::cout << "[AI] Using model: " << claude_.model() << "\n";
         }
 
         // Initialize news client
@@ -807,6 +822,12 @@ private:
         // Handle error case
         if (!response.success) {
             history_logger_.log_error(response.error, trigger);
+            // Still count this as a tuning attempt (even though it failed)
+            if (symbol_configs_) {
+                symbol_configs_->tune_count.fetch_add(1);
+                symbol_configs_->last_tune_ns.store(
+                    std::chrono::steady_clock::now().time_since_epoch().count());
+            }
             return;
         }
 
@@ -847,6 +868,14 @@ private:
             event_log_->tuner_stats.total_latency_ms.fetch_add(response.latency_ms);
             event_log_->tuner_stats.total_tokens_in.fetch_add(response.input_tokens);
             event_log_->tuner_stats.total_tokens_out.fetch_add(response.output_tokens);
+        }
+
+        // Update tune count (regardless of whether command was applied)
+        // This tracks ALL tuning attempts, not just applied changes
+        if (symbol_configs_) {
+            symbol_configs_->tune_count.fetch_add(1);
+            symbol_configs_->last_tune_ns.store(
+                std::chrono::steady_clock::now().time_since_epoch().count());
         }
     }
 
@@ -979,11 +1008,7 @@ private:
             default:
                 break;
         }
-
-        // Update tuner stats
-        symbol_configs_->tune_count.fetch_add(1);
-        symbol_configs_->last_tune_ns.store(
-            std::chrono::steady_clock::now().time_since_epoch().count());
+        // Note: tune_count is now updated in run_tuning() after this returns
     }
 
     const char* regime_name(uint8_t regime) {
