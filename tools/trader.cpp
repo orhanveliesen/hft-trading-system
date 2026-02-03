@@ -52,6 +52,7 @@
 #include "../include/exchange/paper_exchange_adapter.hpp"
 #include "../include/exchange/binance_rest.hpp"
 #include "../include/trading/portfolio.hpp"
+#include "../include/strategy/strategy_constants.hpp"
 #include <iostream>
 #include <iomanip>
 #include <chrono>
@@ -83,14 +84,11 @@ using hft::trading::SymbolPositions;
 // ============================================================================
 // EMA Deviation Thresholds (max price above EMA to allow buy)
 // ============================================================================
-// These control how strict the EMA filter is for buy signals.
-// Higher values = more permissive (allows buying further above EMA)
-// Lower values = more conservative (requires price closer to/below EMA)
-
-constexpr double EMA_MAX_DEVIATION_TRENDING_UP = 0.01;   // 1% above EMA OK in uptrend
-constexpr double EMA_MAX_DEVIATION_RANGING     = 0.005;  // 0.5% in ranging/low vol
-constexpr double EMA_MAX_DEVIATION_HIGH_VOL    = 0.002;  // 0.2% in high volatility
-constexpr double EMA_MAX_DEVIATION_DEFAULT     = 0.005;  // 0.5% default
+// Strategy constants - reference strategy_constants.hpp
+// These control EMA filter strictness, streak thresholds, and auto-tune multipliers
+using EmaThresholds = hft::strategy::EmaThresholds;
+using StreakThresholds = hft::strategy::StreakThresholds;
+using AutoTuneMultipliers = hft::strategy::AutoTuneMultipliers;
 
 // ============================================================================
 // Global State
@@ -1352,55 +1350,59 @@ private:
         }
 
         // ===== LOSS STREAK: Tighten parameters =====
-        if (consecutive_losses_ >= 5) {
+        if (consecutive_losses_ >= StreakThresholds::LOSSES_TO_PAUSE) {
             // 5+ losses: PAUSE TRADING
             if (shared_config_->trading_enabled.load()) {
                 shared_config_->set_trading_enabled(false);
                 publisher_.status(0, "ALL", StatusCode::AutoTunePaused, 0,
                                   static_cast<uint8_t>(consecutive_losses_));
                 if (args_.verbose) {
-                    std::cout << "[AUTO-TUNE] 5+ consecutive losses - TRADING PAUSED\n";
+                    std::cout << "[AUTO-TUNE] " << StreakThresholds::LOSSES_TO_PAUSE
+                              << "+ consecutive losses - TRADING PAUSED\n";
                 }
             }
         }
-        else if (consecutive_losses_ >= 4) {
+        else if (consecutive_losses_ >= StreakThresholds::LOSSES_TO_DEFENSIVE) {
             // 4 losses: min_trade_value +50%
-            double new_min = base_min_trade_value_ * 1.5;
+            double new_min = base_min_trade_value_ * AutoTuneMultipliers::TIGHTEN_FACTOR;
             if (shared_config_->min_trade_value() < new_min) {
                 shared_config_->set_min_trade_value(new_min);
                 publisher_.status(0, "ALL", StatusCode::AutoTuneMinTrade, new_min,
                                   static_cast<uint8_t>(consecutive_losses_));
                 if (args_.verbose) {
-                    std::cout << "[AUTO-TUNE] 4 losses - min_trade_value -> $" << new_min << "\n";
+                    std::cout << "[AUTO-TUNE] " << StreakThresholds::LOSSES_TO_DEFENSIVE
+                              << " losses - min_trade_value -> $" << new_min << "\n";
                 }
             }
         }
-        else if (consecutive_losses_ >= 3) {
+        else if (consecutive_losses_ >= StreakThresholds::LOSSES_TO_TIGHTEN_SIGNAL) {
             // 3 losses: signal_strength = Strong
             if (shared_config_->get_signal_strength() < 2) {
                 shared_config_->set_signal_strength(2);
                 publisher_.status(0, "ALL", StatusCode::AutoTuneSignal, 2,
                                   static_cast<uint8_t>(consecutive_losses_));
                 if (args_.verbose) {
-                    std::cout << "[AUTO-TUNE] 3 losses - signal_strength -> Strong\n";
+                    std::cout << "[AUTO-TUNE] " << StreakThresholds::LOSSES_TO_TIGHTEN_SIGNAL
+                              << " losses - signal_strength -> Strong\n";
                 }
             }
         }
-        else if (consecutive_losses_ >= 2) {
+        else if (consecutive_losses_ >= StreakThresholds::LOSSES_TO_CAUTIOUS) {
             // 2 losses: cooldown +50%
-            int32_t new_cooldown = static_cast<int32_t>(base_cooldown_ms_ * 1.5);
+            int32_t new_cooldown = static_cast<int32_t>(base_cooldown_ms_ * AutoTuneMultipliers::TIGHTEN_FACTOR);
             if (shared_config_->get_cooldown_ms() < new_cooldown) {
                 shared_config_->set_cooldown_ms(new_cooldown);
                 publisher_.status(0, "ALL", StatusCode::AutoTuneCooldown, new_cooldown,
                                   static_cast<uint8_t>(consecutive_losses_));
                 if (args_.verbose) {
-                    std::cout << "[AUTO-TUNE] 2 losses - cooldown_ms -> " << new_cooldown << "\n";
+                    std::cout << "[AUTO-TUNE] " << StreakThresholds::LOSSES_TO_CAUTIOUS
+                              << " losses - cooldown_ms -> " << new_cooldown << "\n";
                 }
             }
         }
 
         // ===== WIN STREAK: Relax parameters gradually =====
-        if (consecutive_wins_ >= 3) {
+        if (consecutive_wins_ >= StreakThresholds::WINS_TO_AGGRESSIVE) {
             bool relaxed = false;
 
             // Re-enable trading if it was paused
@@ -1408,29 +1410,32 @@ private:
                 shared_config_->set_trading_enabled(true);
                 relaxed = true;
                 if (args_.verbose) {
-                    std::cout << "[AUTO-TUNE] 3 wins - TRADING RE-ENABLED\n";
+                    std::cout << "[AUTO-TUNE] " << StreakThresholds::WINS_TO_AGGRESSIVE
+                              << " wins - TRADING RE-ENABLED\n";
                 }
             }
 
             // Relax min_trade_value back toward base
             double current_min = shared_config_->min_trade_value();
             if (current_min > base_min_trade_value_) {
-                double new_min = std::max(base_min_trade_value_, current_min * 0.9);
+                double new_min = std::max(base_min_trade_value_, current_min * AutoTuneMultipliers::RELAX_FACTOR);
                 shared_config_->set_min_trade_value(new_min);
                 relaxed = true;
                 if (args_.verbose) {
-                    std::cout << "[AUTO-TUNE] 3 wins - min_trade_value -> $" << new_min << "\n";
+                    std::cout << "[AUTO-TUNE] " << StreakThresholds::WINS_TO_AGGRESSIVE
+                              << " wins - min_trade_value -> $" << new_min << "\n";
                 }
             }
 
             // Relax cooldown back toward base
             int32_t current_cooldown = shared_config_->get_cooldown_ms();
             if (current_cooldown > base_cooldown_ms_) {
-                int32_t new_cooldown = std::max(base_cooldown_ms_, static_cast<int32_t>(current_cooldown * 0.9));
+                int32_t new_cooldown = std::max(base_cooldown_ms_, static_cast<int32_t>(current_cooldown * AutoTuneMultipliers::RELAX_FACTOR));
                 shared_config_->set_cooldown_ms(new_cooldown);
                 relaxed = true;
                 if (args_.verbose) {
-                    std::cout << "[AUTO-TUNE] 3 wins - cooldown_ms -> " << new_cooldown << "\n";
+                    std::cout << "[AUTO-TUNE] " << StreakThresholds::WINS_TO_AGGRESSIVE
+                              << " wins - cooldown_ms -> " << new_cooldown << "\n";
                 }
             }
 
@@ -2239,9 +2244,9 @@ private:
             double deviation = (ask_usd - ema) / ema;
             // Allow buying above EMA in uptrends, more restrictive in other regimes
             // Get EMA deviation thresholds from config (or use defaults)
-            double dev_trending = shared_config_ ? shared_config_->ema_dev_trending() : EMA_MAX_DEVIATION_TRENDING_UP;
-            double dev_ranging = shared_config_ ? shared_config_->ema_dev_ranging() : EMA_MAX_DEVIATION_RANGING;
-            double dev_highvol = shared_config_ ? shared_config_->ema_dev_highvol() : EMA_MAX_DEVIATION_HIGH_VOL;
+            double dev_trending = shared_config_ ? shared_config_->ema_dev_trending() : EmaThresholds::TRENDING_UP;
+            double dev_ranging = shared_config_ ? shared_config_->ema_dev_ranging() : EmaThresholds::RANGING;
+            double dev_highvol = shared_config_ ? shared_config_->ema_dev_highvol() : EmaThresholds::HIGH_VOL;
 
             double max_deviation;
             switch (strat->current_regime) {

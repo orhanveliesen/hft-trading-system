@@ -2,9 +2,9 @@
 
 #include "iexchange.hpp"
 #include "paper_exchange.hpp"
+#include "../util/time_utils.hpp"
 #include <array>
 #include <cstring>
-#include <chrono>
 
 namespace hft {
 namespace exchange {
@@ -123,7 +123,7 @@ public:
     ) override {
         const char* sym_name = symbol_name(symbol);
         double price_dbl = price_to_double(expected_price);
-        uint64_t ts = now_ns();
+        uint64_t ts = util::now_ns();
 
         // For market orders, we need current bid/ask
         // Use expected_price as both bid and ask (caller should pass the right one)
@@ -141,7 +141,7 @@ public:
     ) override {
         const char* sym_name = symbol_name(symbol);
         double price_dbl = price_to_double(limit_price);
-        uint64_t ts = now_ns();
+        uint64_t ts = util::now_ns();
 
         auto report = paper_.send_limit_order(sym_name, side, qty, price_dbl, ts);
         total_orders_++;
@@ -154,7 +154,7 @@ public:
     }
 
     bool cancel_order(uint64_t order_id) override {
-        return paper_.cancel_order(order_id, now_ns());
+        return paper_.cancel_order(order_id, util::now_ns());
     }
 
     bool is_order_pending(uint64_t order_id) const override {
@@ -311,13 +311,6 @@ private:
         }
         // Return invalid ID - caller should check
         return static_cast<Symbol>(-1);
-    }
-
-    uint64_t now_ns() const {
-        auto now = std::chrono::steady_clock::now();
-        return std::chrono::duration_cast<std::chrono::nanoseconds>(
-            now.time_since_epoch()
-        ).count();
     }
 };
 

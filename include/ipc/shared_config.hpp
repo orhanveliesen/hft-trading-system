@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../config/defaults.hpp"
+#include "../util/string_utils.hpp"
 
 /**
  * SharedConfig - Bidirectional config exchange between Trader and Dashboard
@@ -71,23 +72,10 @@ inline const char* strategy_type_to_short(StrategyType type) {
     return idx < STRATEGY_TYPE_COUNT ? STRATEGY_NAMES[idx].second : "UNK";
 }
 
-// Convert 8-char hex string to uint32_t at compile time
-constexpr uint32_t hex_to_u32(const char* s) {
-    uint32_t result = 0;
-    for (int i = 0; i < 8 && s[i]; ++i) {
-        result <<= 4;
-        char c = s[i];
-        if (c >= '0' && c <= '9') result |= (c - '0');
-        else if (c >= 'a' && c <= 'f') result |= (c - 'a' + 10);
-        else if (c >= 'A' && c <= 'F') result |= (c - 'A' + 10);
-    }
-    return result;
-}
-
 struct SharedConfig {
     static constexpr uint64_t MAGIC = 0x4846544346494700ULL;  // "HFTCFG\0"
 #ifdef TRADER_BUILD_HASH
-    static constexpr uint32_t VERSION = hex_to_u32(TRADER_BUILD_HASH);
+    static constexpr uint32_t VERSION = util::hex_to_u32(TRADER_BUILD_HASH);
 #else
     static constexpr uint32_t VERSION = 0;  // Fallback
 #endif
