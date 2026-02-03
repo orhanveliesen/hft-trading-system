@@ -2,6 +2,7 @@
 
 #include "../types.hpp"
 #include "../strategy/istrategy.hpp"
+#include "../util/time_utils.hpp"
 #include <vector>
 #include <functional>
 #include <cstdint>
@@ -389,19 +390,12 @@ private:
                 po.quantity = qty;
                 po.limit_price = limit_price;
                 po.expected_fill_price = expected_price;
-                po.submit_time_ns = now_ns();
+                po.submit_time_ns = util::now_ns();
                 po.active = true;
                 return;
             }
         }
         // No free slot - should not happen if max_pending_orders is set correctly
-    }
-
-    uint64_t now_ns() const {
-        auto now = std::chrono::steady_clock::now();
-        return std::chrono::duration_cast<std::chrono::nanoseconds>(
-            now.time_since_epoch()
-        ).count();
     }
 };
 

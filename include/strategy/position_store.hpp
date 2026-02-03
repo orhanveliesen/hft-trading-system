@@ -24,8 +24,8 @@
  */
 
 #include "../ipc/shared_portfolio_state.hpp"
+#include "../util/time_utils.hpp"
 #include <fstream>
-#include <chrono>
 #include <cstdio>
 #include <cstring>
 
@@ -47,7 +47,7 @@ public:
      * Call this after every fill for immediate persistence
      */
     bool save(const ipc::SharedPortfolioState& portfolio) {
-        auto now = now_ns();
+        auto now = util::now_ns();
 
         // Rate limit saves to avoid disk thrashing
         if (last_save_ns_ > 0 && (now - last_save_ns_) < SAVE_INTERVAL_NS) {
@@ -101,12 +101,6 @@ private:
     const char* path_;
     uint64_t last_save_ns_;
 
-    static uint64_t now_ns() {
-        return static_cast<uint64_t>(
-            std::chrono::steady_clock::now().time_since_epoch().count()
-        );
-    }
-
     bool write_json(const ipc::SharedPortfolioState& portfolio) {
         // Write to temp file first, then rename (atomic on POSIX)
         std::string temp_path = std::string(path_) + ".tmp";
@@ -116,7 +110,7 @@ private:
         // Write JSON manually (no external JSON library needed)
         out << "{\n";
         out << "  \"version\": 1,\n";
-        out << "  \"timestamp_ns\": " << now_ns() << ",\n";
+        out << "  \"timestamp_ns\": " << util::now_ns() << ",\n";
         out << "  \"initial_capital\": " << portfolio.initial_cash() << ",\n";
         out << "  \"cash\": " << portfolio.cash() << ",\n";
         out << "  \"total_realized_pnl\": " << portfolio.total_realized_pnl() << ",\n";
