@@ -1,5 +1,7 @@
 #pragma once
 
+#include "../util/string_utils.hpp"
+
 /**
  * SharedLedger - Shared memory ledger for real-time transaction monitoring
  *
@@ -142,19 +144,6 @@ struct SharedLedgerEntry {
     }
 };
 
-// Convert 8-char hex string to uint32_t at compile time
-constexpr uint32_t ledger_hex_to_u32(const char* s) {
-    uint32_t result = 0;
-    for (int i = 0; i < 8 && s[i]; ++i) {
-        result <<= 4;
-        char c = s[i];
-        if (c >= '0' && c <= '9') result |= (c - '0');
-        else if (c >= 'a' && c <= 'f') result |= (c - 'a' + 10);
-        else if (c >= 'A' && c <= 'F') result |= (c - 'A' + 10);
-    }
-    return result;
-}
-
 /**
  * SharedLedger - Main shared memory ledger structure
  */
@@ -162,7 +151,7 @@ struct SharedLedger {
     // Magic number for validation
     static constexpr uint64_t MAGIC = 0x4846544C45444752ULL;  // "HFTLEDGR"
 #ifdef TRADER_BUILD_HASH
-    static constexpr uint32_t VERSION = ledger_hex_to_u32(TRADER_BUILD_HASH);
+    static constexpr uint32_t VERSION = util::hex_to_u32(TRADER_BUILD_HASH);
 #else
     static constexpr uint32_t VERSION = 0;
 #endif
