@@ -141,6 +141,63 @@ namespace execution {
 }
 
 // =============================================================================
+// SmartStrategy Configuration
+// =============================================================================
+namespace smart_strategy {
+    // Performance tracking
+    constexpr int32_t PERFORMANCE_WINDOW = 20;         // Track last N trades
+    constexpr double MIN_CONFIDENCE = 0.3;             // Below this, no signal
+    constexpr int32_t MIN_CONFIDENCE_X100 = 30;        // 0.3 * 100
+
+    // Mode transitions - streak based
+    constexpr int32_t LOSSES_TO_CAUTIOUS = 2;          // Consecutive losses → CAUTIOUS
+    constexpr int32_t LOSSES_TO_TIGHTEN_SIGNAL = 3;    // Consecutive losses → require stronger signals
+    constexpr int32_t LOSSES_TO_DEFENSIVE = 4;         // Consecutive losses → DEFENSIVE
+    constexpr int32_t LOSSES_TO_PAUSE = 5;             // Consecutive losses → PAUSE trading
+    constexpr int32_t LOSSES_TO_EXIT_ONLY = 6;         // Consecutive losses → EXIT_ONLY
+
+    // Win streak thresholds
+    constexpr int32_t WINS_TO_AGGRESSIVE = 3;          // Consecutive wins → can be AGGRESSIVE
+    constexpr int32_t WINS_MAX_AGGRESSIVE = 5;         // Cap on aggression bonus
+
+    // Mode transitions - drawdown based
+    constexpr double DRAWDOWN_TO_DEFENSIVE = 0.03;     // 3% drawdown → DEFENSIVE
+    constexpr int32_t DRAWDOWN_DEFENSIVE_X100 = 300;   // 3% * 100
+    constexpr double DRAWDOWN_TO_EXIT = 0.05;          // 5% drawdown → EXIT_ONLY
+    constexpr int32_t DRAWDOWN_EXIT_X100 = 500;        // 5% * 100
+
+    // Win rate thresholds
+    constexpr double WIN_RATE_AGGRESSIVE = 0.60;       // >60% → can be AGGRESSIVE
+    constexpr int32_t WIN_RATE_AGGRESSIVE_X100 = 60;   // 60%
+    constexpr double WIN_RATE_CAUTIOUS = 0.40;         // <40% → be CAUTIOUS
+    constexpr int32_t WIN_RATE_CAUTIOUS_X100 = 40;     // 40%
+
+    // Sharpe ratio thresholds
+    constexpr double SHARPE_AGGRESSIVE = 1.0;          // Sharpe > 1.0 → AGGRESSIVE
+    constexpr int32_t SHARPE_AGGRESSIVE_X100 = 100;    // 1.0 * 100
+    constexpr double SHARPE_CAUTIOUS = 0.3;            // Sharpe < 0.3 → CAUTIOUS
+    constexpr int32_t SHARPE_CAUTIOUS_X100 = 30;       // 0.3 * 100
+    constexpr double SHARPE_DEFENSIVE = 0.0;           // Sharpe < 0 → DEFENSIVE
+    constexpr int32_t SHARPE_DEFENSIVE_X100 = 0;       // 0 * 100
+
+    // Signal thresholds by mode
+    constexpr double SIGNAL_AGGRESSIVE = 0.3;          // Lower threshold when aggressive
+    constexpr int32_t SIGNAL_AGGRESSIVE_X100 = 30;     // 0.3 * 100
+    constexpr double SIGNAL_NORMAL = 0.5;              // Normal threshold
+    constexpr int32_t SIGNAL_NORMAL_X100 = 50;         // 0.5 * 100
+    constexpr double SIGNAL_CAUTIOUS = 0.7;            // Higher threshold when cautious
+    constexpr int32_t SIGNAL_CAUTIOUS_X100 = 70;       // 0.7 * 100
+
+    // Position sizing
+    constexpr double MIN_POSITION_PCT = 0.01;          // 1% min position
+    constexpr int32_t MIN_POSITION_X100 = 100;         // 1% * 100
+
+    // Risk/reward
+    constexpr double MIN_RISK_REWARD = 0.6;            // Allow stop > target for low win rate
+    constexpr int32_t MIN_RISK_REWARD_X100 = 60;       // 0.6 * 100
+}
+
+// =============================================================================
 // Feature Flags
 // =============================================================================
 namespace flags {

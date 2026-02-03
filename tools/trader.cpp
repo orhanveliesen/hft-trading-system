@@ -1350,19 +1350,25 @@ private:
         }
 
         // ===== LOSS STREAK: Tighten parameters =====
-        if (consecutive_losses_ >= StreakThresholds::LOSSES_TO_PAUSE) {
+        // Thresholds read from SharedConfig for runtime configurability
+        const int losses_to_pause = shared_config_->get_losses_to_pause();
+        const int losses_to_defensive = shared_config_->get_losses_to_defensive();
+        const int losses_to_tighten = shared_config_->get_losses_to_tighten_signal();
+        const int losses_to_cautious = shared_config_->get_losses_to_cautious();
+
+        if (consecutive_losses_ >= losses_to_pause) {
             // 5+ losses: PAUSE TRADING
             if (shared_config_->trading_enabled.load()) {
                 shared_config_->set_trading_enabled(false);
                 publisher_.status(0, "ALL", StatusCode::AutoTunePaused, 0,
                                   static_cast<uint8_t>(consecutive_losses_));
                 if (args_.verbose) {
-                    std::cout << "[AUTO-TUNE] " << StreakThresholds::LOSSES_TO_PAUSE
+                    std::cout << "[AUTO-TUNE] " << losses_to_pause
                               << "+ consecutive losses - TRADING PAUSED\n";
                 }
             }
         }
-        else if (consecutive_losses_ >= StreakThresholds::LOSSES_TO_DEFENSIVE) {
+        else if (consecutive_losses_ >= losses_to_defensive) {
             // 4 losses: min_trade_value +50%
             double new_min = base_min_trade_value_ * AutoTuneMultipliers::TIGHTEN_FACTOR;
             if (shared_config_->min_trade_value() < new_min) {
@@ -1370,24 +1376,24 @@ private:
                 publisher_.status(0, "ALL", StatusCode::AutoTuneMinTrade, new_min,
                                   static_cast<uint8_t>(consecutive_losses_));
                 if (args_.verbose) {
-                    std::cout << "[AUTO-TUNE] " << StreakThresholds::LOSSES_TO_DEFENSIVE
+                    std::cout << "[AUTO-TUNE] " << losses_to_defensive
                               << " losses - min_trade_value -> $" << new_min << "\n";
                 }
             }
         }
-        else if (consecutive_losses_ >= StreakThresholds::LOSSES_TO_TIGHTEN_SIGNAL) {
+        else if (consecutive_losses_ >= losses_to_tighten) {
             // 3 losses: signal_strength = Strong
             if (shared_config_->get_signal_strength() < 2) {
                 shared_config_->set_signal_strength(2);
                 publisher_.status(0, "ALL", StatusCode::AutoTuneSignal, 2,
                                   static_cast<uint8_t>(consecutive_losses_));
                 if (args_.verbose) {
-                    std::cout << "[AUTO-TUNE] " << StreakThresholds::LOSSES_TO_TIGHTEN_SIGNAL
+                    std::cout << "[AUTO-TUNE] " << losses_to_tighten
                               << " losses - signal_strength -> Strong\n";
                 }
             }
         }
-        else if (consecutive_losses_ >= StreakThresholds::LOSSES_TO_CAUTIOUS) {
+        else if (consecutive_losses_ >= losses_to_cautious) {
             // 2 losses: cooldown +50%
             int32_t new_cooldown = static_cast<int32_t>(base_cooldown_ms_ * AutoTuneMultipliers::TIGHTEN_FACTOR);
             if (shared_config_->get_cooldown_ms() < new_cooldown) {
@@ -1395,14 +1401,16 @@ private:
                 publisher_.status(0, "ALL", StatusCode::AutoTuneCooldown, new_cooldown,
                                   static_cast<uint8_t>(consecutive_losses_));
                 if (args_.verbose) {
-                    std::cout << "[AUTO-TUNE] " << StreakThresholds::LOSSES_TO_CAUTIOUS
+                    std::cout << "[AUTO-TUNE] " << losses_to_cautious
                               << " losses - cooldown_ms -> " << new_cooldown << "\n";
                 }
             }
         }
 
         // ===== WIN STREAK: Relax parameters gradually =====
-        if (consecutive_wins_ >= StreakThresholds::WINS_TO_AGGRESSIVE) {
+        const int wins_to_aggressive = shared_config_->get_wins_to_aggressive();
+
+        if (consecutive_wins_ >= wins_to_aggressive) {
             bool relaxed = false;
 
             // Re-enable trading if it was paused
@@ -1410,7 +1418,7 @@ private:
                 shared_config_->set_trading_enabled(true);
                 relaxed = true;
                 if (args_.verbose) {
-                    std::cout << "[AUTO-TUNE] " << StreakThresholds::WINS_TO_AGGRESSIVE
+                    std::cout << "[AUTO-TUNE] " << wins_to_aggressive
                               << " wins - TRADING RE-ENABLED\n";
                 }
             }
@@ -1422,7 +1430,7 @@ private:
                 shared_config_->set_min_trade_value(new_min);
                 relaxed = true;
                 if (args_.verbose) {
-                    std::cout << "[AUTO-TUNE] " << StreakThresholds::WINS_TO_AGGRESSIVE
+                    std::cout << "[AUTO-TUNE] " << wins_to_aggressive
                               << " wins - min_trade_value -> $" << new_min << "\n";
                 }
             }
@@ -1434,7 +1442,7 @@ private:
                 shared_config_->set_cooldown_ms(new_cooldown);
                 relaxed = true;
                 if (args_.verbose) {
-                    std::cout << "[AUTO-TUNE] " << StreakThresholds::WINS_TO_AGGRESSIVE
+                    std::cout << "[AUTO-TUNE] " << wins_to_aggressive
                               << " wins - cooldown_ms -> " << new_cooldown << "\n";
                 }
             }
