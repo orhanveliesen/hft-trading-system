@@ -39,14 +39,11 @@ if(LWS_VERSION VERSION_GREATER_EQUAL "4.3")
     message(STATUS "Using lws 4.3+ callback enum compatibility")
 endif()
 
-# === Library ===
-add_library(trader_core
-    src/orderbook/orderbook.cpp
-    src/engine/trading_engine.cpp
-    src/engine/matching_engine.cpp
-    src/benchmark/timer.cpp
-    src/trading/portfolio.cpp
-)
+# === Library (Header-only) ===
+# All core classes are header-only for maximum inlining on hot path.
+# This eliminates function call overhead (~15-25 cycles per call).
+add_library(trader_core INTERFACE)
+target_include_directories(trader_core INTERFACE ${CMAKE_SOURCE_DIR}/include)
 
 # === Tests ===
 enable_testing()
