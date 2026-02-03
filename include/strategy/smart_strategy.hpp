@@ -17,6 +17,7 @@
 #include "regime_detector.hpp"
 #include "technical_indicators.hpp"
 #include "rolling_sharpe.hpp"
+#include "strategy_constants.hpp"
 #include "../types.hpp"
 #include <cmath>
 #include <algorithm>
@@ -78,10 +79,10 @@ struct SmartStrategyConfig {
     int performance_window = 20;        // Track last N trades
     double min_confidence = 0.3;        // Below this, no signal
 
-    // Mode transitions
-    int losses_to_cautious = 2;         // Consecutive losses → CAUTIOUS
-    int losses_to_defensive = 4;        // Consecutive losses → DEFENSIVE
-    int losses_to_exit_only = 6;        // Consecutive losses → EXIT_ONLY
+    // Mode transitions (reference strategy_constants.hpp for defaults)
+    int losses_to_cautious = StreakThresholds::LOSSES_TO_CAUTIOUS;
+    int losses_to_defensive = StreakThresholds::LOSSES_TO_DEFENSIVE;
+    int losses_to_exit_only = StreakThresholds::LOSSES_TO_EXIT_ONLY;
     double drawdown_to_defensive = 0.03; // 3% drawdown → DEFENSIVE
     double drawdown_to_exit = 0.05;     // 5% drawdown → EXIT_ONLY
 
