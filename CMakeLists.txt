@@ -45,6 +45,7 @@ add_library(trader_core
     src/engine/trading_engine.cpp
     src/engine/matching_engine.cpp
     src/benchmark/timer.cpp
+    src/trading/portfolio.cpp
 )
 
 # === Tests ===

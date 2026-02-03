@@ -495,51 +495,49 @@ struct SharedConfig {
 
     // === Initialization ===
     void init() {
-        using namespace config;
-
         magic = MAGIC;
         version = VERSION;
         sequence.store(0);
 
         // Risk management (from centralized defaults)
-        spread_multiplier_x10.store(risk::SPREAD_MULTIPLIER_X10);
-        drawdown_threshold_x100.store(risk::DRAWDOWN_THRESHOLD_X100);
-        loss_streak_threshold.store(risk::LOSS_STREAK_THRESHOLD);
+        spread_multiplier_x10.store(config::risk::SPREAD_MULTIPLIER_X10);
+        drawdown_threshold_x100.store(config::risk::DRAWDOWN_THRESHOLD_X100);
+        loss_streak_threshold.store(config::risk::LOSS_STREAK_THRESHOLD);
 
         // Position sizing
-        base_position_pct_x100.store(position::BASE_X100);
-        max_position_pct_x100.store(position::MAX_X100);
-        min_trade_value_x100.store(position::MIN_TRADE_VALUE_X100);
+        base_position_pct_x100.store(config::position::BASE_X100);
+        max_position_pct_x100.store(config::position::MAX_X100);
+        min_trade_value_x100.store(config::position::MIN_TRADE_VALUE_X100);
 
         // Target/stop (derived from round-trip costs)
-        target_pct_x100.store(targets::TARGET_X100);
-        stop_pct_x100.store(targets::STOP_X100);
-        pullback_pct_x100.store(targets::PULLBACK_X100);
+        target_pct_x100.store(config::targets::TARGET_X100);
+        stop_pct_x100.store(config::targets::STOP_X100);
+        pullback_pct_x100.store(config::targets::PULLBACK_X100);
 
         // Trading costs
-        commission_rate_x10000.store(costs::COMMISSION_X10000);
-        slippage_bps_x100.store(costs::SLIPPAGE_BPS_X100);
+        commission_rate_x10000.store(config::costs::COMMISSION_X10000);
+        slippage_bps_x100.store(config::costs::SLIPPAGE_BPS_X100);
 
         // Order execution
-        cooldown_ms.store(execution::COOLDOWN_MS);
-        signal_strength.store(execution::SIGNAL_STRENGTH);
-        auto_tune_enabled.store(flags::AUTO_TUNE_ENABLED ? 1 : 0);
+        cooldown_ms.store(config::execution::COOLDOWN_MS);
+        signal_strength.store(config::execution::SIGNAL_STRENGTH);
+        auto_tune_enabled.store(config::flags::AUTO_TUNE_ENABLED ? 1 : 0);
 
         // EMA deviation thresholds
-        ema_dev_trending_x1000.store(ema::DEV_TRENDING_X1000);
-        ema_dev_ranging_x1000.store(ema::DEV_RANGING_X1000);
-        ema_dev_highvol_x1000.store(ema::DEV_HIGHVOL_X1000);
+        ema_dev_trending_x1000.store(config::ema::DEV_TRENDING_X1000);
+        ema_dev_ranging_x1000.store(config::ema::DEV_RANGING_X1000);
+        ema_dev_highvol_x1000.store(config::ema::DEV_HIGHVOL_X1000);
 
         // Spike detection
-        spike_threshold_x100.store(spike::THRESHOLD_X100);
-        spike_lookback.store(spike::LOOKBACK_BARS);
-        spike_min_move_x10000.store(spike::MIN_MOVE_X10000);
-        spike_cooldown.store(spike::COOLDOWN_BARS);
+        spike_threshold_x100.store(config::spike::THRESHOLD_X100);
+        spike_lookback.store(config::spike::LOOKBACK_BARS);
+        spike_min_move_x10000.store(config::spike::MIN_MOVE_X10000);
+        spike_cooldown.store(config::spike::COOLDOWN_BARS);
 
         // Feature flags
         force_mode.store(0);                  // auto
-        trading_enabled.store(flags::TRADING_ENABLED ? 1 : 0);
-        paper_trading.store(flags::PAPER_TRADING ? 1 : 0);
+        trading_enabled.store(config::flags::TRADING_ENABLED ? 1 : 0);
+        paper_trading.store(config::flags::PAPER_TRADING ? 1 : 0);
         tuner_mode.store(0);                  // tuner OFF by default
         manual_override.store(0);             // normal mode
         tuner_paused.store(0);
@@ -547,9 +545,9 @@ struct SharedConfig {
         manual_tune_request_ns.store(0);
 
         // Order execution settings
-        order_type_default.store(execution::ORDER_TYPE_AUTO);
-        limit_offset_bps_x100.store(execution::LIMIT_OFFSET_BPS_X100);
-        limit_timeout_ms.store(execution::LIMIT_TIMEOUT_MS);
+        order_type_default.store(config::execution::ORDER_TYPE_AUTO);
+        limit_offset_bps_x100.store(config::execution::LIMIT_OFFSET_BPS_X100);
+        limit_timeout_ms.store(config::execution::LIMIT_TIMEOUT_MS);
 
         // Display defaults (not in centralized config - UI specific)
         price_decimals.store(4);
@@ -569,7 +567,7 @@ struct SharedConfig {
 
         // Position sizing mode
         position_sizing_mode.store(0);        // percentage-based
-        max_position_units.store(position::MAX_UNITS);
+        max_position_units.store(config::position::MAX_UNITS);
 
         // Trader status
         active_mode.store(2);                 // NORMAL
