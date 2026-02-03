@@ -1,5 +1,7 @@
 #pragma once
 
+#include "../config/defaults.hpp"
+
 /**
  * SharedConfig - Bidirectional config exchange between Trader and Dashboard
  *
@@ -103,8 +105,8 @@ struct SharedConfig {
     // SmartStrategy config
     std::atomic<int32_t> base_position_pct_x100;  // Default: 200 (2%)
     std::atomic<int32_t> max_position_pct_x100;   // Default: 500 (5%)
-    std::atomic<int32_t> target_pct_x100;         // Default: 150 (1.5%)
-    std::atomic<int32_t> stop_pct_x100;           // Default: 100 (1%)
+    std::atomic<int32_t> target_pct_x100;         // Default: 300 (3%)
+    std::atomic<int32_t> stop_pct_x100;           // Default: 500 (5%)
     std::atomic<int32_t> pullback_pct_x100;       // Default: 50 (0.5%) - trend exit threshold
 
     // Trading costs (for paper trading simulation)
@@ -497,53 +499,62 @@ struct SharedConfig {
         version = VERSION;
         sequence.store(0);
 
-        // Defaults
-        spread_multiplier_x10.store(15);      // 1.5x
-        drawdown_threshold_x100.store(200);   // 2%
-        loss_streak_threshold.store(2);
-        base_position_pct_x100.store(200);    // 2%
-        max_position_pct_x100.store(500);     // 5%
-        target_pct_x100.store(300);           // 3% target
-        stop_pct_x100.store(500);             // 5% stop (requires only ~38% win rate)
-        pullback_pct_x100.store(50);          // 0.5% - trend exit threshold
-        commission_rate_x10000.store(10);     // 0.1% = 0.001
-        slippage_bps_x100.store(500);         // 5 bps (realistic paper trading default)
-        min_trade_value_x100.store(10000);    // $100 minimum trade
-        cooldown_ms.store(2000);              // 2 second cooldown
-        signal_strength.store(1);             // 1 = Medium signals also (more trades)
-        auto_tune_enabled.store(1);           // Auto-tune ON by default
+        // Risk management (from centralized defaults)
+        spread_multiplier_x10.store(config::risk::SPREAD_MULTIPLIER_X10);
+        drawdown_threshold_x100.store(config::risk::DRAWDOWN_THRESHOLD_X100);
+        loss_streak_threshold.store(config::risk::LOSS_STREAK_THRESHOLD);
 
-        // EMA deviation defaults
-        ema_dev_trending_x1000.store(10);     // 1% above EMA OK in uptrend
-        ema_dev_ranging_x1000.store(5);       // 0.5% above EMA in ranging
-        ema_dev_highvol_x1000.store(2);       // 0.2% above EMA in high vol
+        // Position sizing
+        base_position_pct_x100.store(config::position::BASE_X100);
+        max_position_pct_x100.store(config::position::MAX_X100);
+        min_trade_value_x100.store(config::position::MIN_TRADE_VALUE_X100);
 
-        // Spike detection defaults (empirically tuned for crypto markets)
-        spike_threshold_x100.store(300);      // 3.0σ - statistical significance threshold
-        spike_lookback.store(10);             // 10 bars for stable average
-        spike_min_move_x10000.store(50);      // 0.5% minimum move filter
-        spike_cooldown.store(5);              // 5 bars between detections
+        // Target/stop (derived from round-trip costs)
+        target_pct_x100.store(config::targets::TARGET_X100);
+        stop_pct_x100.store(config::targets::STOP_X100);
+        pullback_pct_x100.store(config::targets::PULLBACK_X100);
 
+        // Trading costs
+        commission_rate_x10000.store(config::costs::COMMISSION_X10000);
+        slippage_bps_x100.store(config::costs::SLIPPAGE_BPS_X100);
+
+        // Order execution
+        cooldown_ms.store(config::execution::COOLDOWN_MS);
+        signal_strength.store(config::execution::SIGNAL_STRENGTH);
+        auto_tune_enabled.store(config::flags::AUTO_TUNE_ENABLED ? 1 : 0);
+
+        // EMA deviation thresholds
+        ema_dev_trending_x1000.store(config::ema::DEV_TRENDING_X1000);
+        ema_dev_ranging_x1000.store(config::ema::DEV_RANGING_X1000);
+        ema_dev_highvol_x1000.store(config::ema::DEV_HIGHVOL_X1000);
+
+        // Spike detection
+        spike_threshold_x100.store(config::spike::THRESHOLD_X100);
+        spike_lookback.store(config::spike::LOOKBACK_BARS);
+        spike_min_move_x10000.store(config::spike::MIN_MOVE_X10000);
+        spike_cooldown.store(config::spike::COOLDOWN_BARS);
+
+        // Feature flags
         force_mode.store(0);                  // auto
-        trading_enabled.store(1);             // active
-        paper_trading.store(1);               // paper trading by default
-        tuner_mode.store(0);                  // tuner OFF by default (traditional strategies)
-        manual_override.store(0);             // normal mode (not manual)
-        tuner_paused.store(0);                // tuner not paused
-        reserved_tuner.store(0);              // reserved
-        manual_tune_request_ns.store(0);      // no manual tune request
+        trading_enabled.store(config::flags::TRADING_ENABLED ? 1 : 0);
+        paper_trading.store(config::flags::PAPER_TRADING ? 1 : 0);
+        tuner_mode.store(0);                  // tuner OFF by default
+        manual_override.store(0);             // normal mode
+        tuner_paused.store(0);
+        reserved_tuner.store(0);
+        manual_tune_request_ns.store(0);
 
-        // Order execution defaults
-        order_type_default.store(0);          // 0=Auto (ExecutionEngine decides)
-        limit_offset_bps_x100.store(200);     // 2 bps inside spread
-        limit_timeout_ms.store(500);          // 500ms adaptive timeout
+        // Order execution settings
+        order_type_default.store(config::execution::ORDER_TYPE_AUTO);
+        limit_offset_bps_x100.store(config::execution::LIMIT_OFFSET_BPS_X100);
+        limit_timeout_ms.store(config::execution::LIMIT_TIMEOUT_MS);
 
-        // Display defaults
-        price_decimals.store(4);              // 4 decimal places for prices
-        money_decimals.store(2);              // 2 decimal places for money
-        qty_decimals.store(4);                // 4 decimal places for quantities
+        // Display defaults (not in centralized config - UI specific)
+        price_decimals.store(4);
+        money_decimals.store(2);
+        qty_decimals.store(4);
 
-        // Regime → Strategy mapping defaults
+        // Regime → Strategy mapping
         // StrategyType: 0=NONE, 1=MOMENTUM, 2=MEAN_REV, 3=MKT_MAKER, 4=DEFENSIVE, 5=CAUTIOUS, 6=SMART
         regime_strategy[0].store(0);  // Unknown → NONE
         regime_strategy[1].store(1);  // TrendingUp → MOMENTUM
@@ -551,14 +562,14 @@ struct SharedConfig {
         regime_strategy[3].store(3);  // Ranging → MKT_MAKER
         regime_strategy[4].store(5);  // HighVolatility → CAUTIOUS
         regime_strategy[5].store(3);  // LowVolatility → MKT_MAKER
-        regime_strategy[6].store(0);  // Spike → NONE (danger!)
+        regime_strategy[6].store(0);  // Spike → NONE
         regime_strategy[7].store(0);  // padding
 
-        // Position sizing defaults
-        position_sizing_mode.store(0);        // 0 = percentage-based (recommended)
-        max_position_units.store(10);         // 10 units when unit-based
+        // Position sizing mode
+        position_sizing_mode.store(0);        // percentage-based
+        max_position_units.store(config::position::MAX_UNITS);
 
-        // Trader status (defaults)
+        // Trader status
         active_mode.store(2);                 // NORMAL
         active_signals.store(0);
         consecutive_losses.store(0);
@@ -567,7 +578,7 @@ struct SharedConfig {
         // Trader lifecycle
         heartbeat_ns.store(0);
         trader_pid.store(0);
-        trader_status.store(0);                  // stopped
+        trader_status.store(0);               // stopped
         trader_start_time_ns.store(0);           // not started yet
 
         // WebSocket connection status

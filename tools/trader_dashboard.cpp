@@ -964,7 +964,7 @@ void render_dashboard(DashboardData& data, const SharedPortfolioState* portfolio
 
     // Calculate both P&L methods
     double equity_pnl = data.total_pnl();  // cash + market_value - initial (THE TRUTH)
-    double component_pnl = data.realized_pnl + data.unrealized_pnl - data.total_commissions;
+    double component_pnl = data.realized_pnl + data.total_unrealized_pnl() - data.total_commissions;
     double difference = equity_pnl - component_pnl;
 
     ImGui::Columns(4, "recon_cols", false);
@@ -1036,6 +1036,7 @@ void render_dashboard(DashboardData& data, const SharedPortfolioState* portfolio
 
     // Cost Per Trade
     ImGui::Text("Cost/Trade");
+    double total_costs = data.total_commissions + data.total_spread_cost + data.total_slippage;
     double cost_per_trade = data.fills > 0 ? total_costs / data.fills : 0.0;
     ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.6f, 0.2f, 1.0f));
     ImGui::Text("$%.3f", cost_per_trade);

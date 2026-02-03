@@ -19,6 +19,8 @@
 #include <fcntl.h>
 #include <unistd.h>
 
+#include "../config/defaults.hpp"
+
 namespace hft {
 namespace ipc {
 
@@ -87,31 +89,43 @@ struct SymbolTuningConfig {
     // === Helper methods ===
 
     void init(const char* sym) {
+        using namespace config;
+
         std::memset(this, 0, sizeof(*this));
         std::strncpy(symbol, sym, SYMBOL_NAME_LEN - 1);
         symbol[SYMBOL_NAME_LEN - 1] = '\0';
 
-        // Defaults
-        enabled = 1;
-        regime_override = 0;  // auto
-        ema_dev_trending_x100 = 100;   // 1%
-        ema_dev_ranging_x100 = 50;     // 0.5%
-        ema_dev_highvol_x100 = 20;     // 0.2%
-        base_position_x100 = 200;      // 2%
-        max_position_x100 = 500;       // 5%
-        cooldown_ms = 2000;            // 2 seconds
-        signal_strength = 1;           // Medium
-        target_pct_x100 = 400;         // 4%
-        stop_pct_x100 = 100;           // 1%
-        pullback_pct_x100 = 50;        // 0.5%
-        slippage_bps_x100 = 500;       // 5 bps
-        commission_x10000 = 10;        // 0.1%
+        // Trading costs
+        slippage_bps_x100 = costs::SLIPPAGE_BPS_X100;
+        commission_x10000 = costs::COMMISSION_X10000;
 
-        // Order execution defaults
-        order_type_preference = 0;     // Auto (ExecutionEngine decides)
-        use_global_flags = 0x0F;       // Use global for all by default
-        limit_offset_bps_x100 = 200;   // 2 bps inside spread
-        limit_timeout_ms = 500;        // 500ms before converting to market
+        // Target/stop (derived from round-trip costs in defaults.hpp)
+        target_pct_x100 = targets::TARGET_X100;
+        stop_pct_x100 = targets::STOP_X100;
+        pullback_pct_x100 = targets::PULLBACK_X100;
+
+        // Position sizing
+        base_position_x100 = position::BASE_X100;
+        max_position_x100 = position::MAX_X100;
+
+        // EMA deviation thresholds
+        ema_dev_trending_x100 = ema::DEV_TRENDING_X100;
+        ema_dev_ranging_x100 = ema::DEV_RANGING_X100;
+        ema_dev_highvol_x100 = ema::DEV_HIGHVOL_X100;
+
+        // Execution settings
+        cooldown_ms = execution::COOLDOWN_MS;
+        signal_strength = execution::SIGNAL_STRENGTH;
+
+        // Order execution
+        order_type_preference = execution::ORDER_TYPE_AUTO;
+        limit_offset_bps_x100 = execution::LIMIT_OFFSET_BPS_X100;
+        limit_timeout_ms = execution::LIMIT_TIMEOUT_MS;
+
+        // Feature flags
+        enabled = 1;
+        regime_override = 0;           // auto
+        use_global_flags = flags::USE_GLOBAL_ALL;
     }
 
     // Accessors (convert from fixed-point)
