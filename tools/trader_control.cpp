@@ -56,6 +56,28 @@ void print_usage(const char* prog) {
               << "\nRisk Parameters:\n"
               << "  drawdown_threshold     Max drawdown before defensive (%)\n"
               << "  loss_streak            Consecutive losses before cautious\n"
+              << "\nSmartStrategy Streak Thresholds:\n"
+              << "  losses_to_cautious     Consecutive losses -> CAUTIOUS mode (default: 2)\n"
+              << "  losses_to_tighten      Consecutive losses -> require stronger signals (default: 3)\n"
+              << "  losses_to_defensive    Consecutive losses -> DEFENSIVE mode (default: 4)\n"
+              << "  losses_to_pause        Consecutive losses -> PAUSE trading (default: 5)\n"
+              << "  losses_to_exit_only    Consecutive losses -> EXIT_ONLY mode (default: 6)\n"
+              << "  wins_to_aggressive     Consecutive wins -> can be AGGRESSIVE (default: 3)\n"
+              << "  wins_max_aggressive    Cap on aggression bonus (default: 5)\n"
+              << "\nSmartStrategy Thresholds:\n"
+              << "  min_confidence         Minimum confidence for signal (0-1, default: 0.3)\n"
+              << "  min_position_pct       Minimum position size (%)\n"
+              << "  min_risk_reward        Minimum risk/reward ratio (default: 0.6)\n"
+              << "  drawdown_to_defensive  Drawdown % -> DEFENSIVE mode (default: 3%)\n"
+              << "  drawdown_to_exit       Drawdown % -> EXIT_ONLY mode (default: 5%)\n"
+              << "  win_rate_aggressive    Win rate to allow AGGRESSIVE (default: 0.6 = 60%)\n"
+              << "  win_rate_cautious      Win rate below triggers CAUTIOUS (default: 0.4 = 40%)\n"
+              << "  sharpe_aggressive      Sharpe ratio for AGGRESSIVE (default: 1.0)\n"
+              << "  sharpe_cautious        Sharpe ratio below triggers CAUTIOUS (default: 0.3)\n"
+              << "  sharpe_defensive       Sharpe ratio below triggers DEFENSIVE (default: 0.0)\n"
+              << "  signal_aggressive      Signal threshold in AGGRESSIVE mode (default: 0.3)\n"
+              << "  signal_normal          Signal threshold in NORMAL mode (default: 0.5)\n"
+              << "  signal_cautious        Signal threshold in CAUTIOUS mode (default: 0.7)\n"
               << "\nEMA Filter (buy entry filter):\n"
               << "  ema_dev_trending       Max % above EMA in uptrend (e.g., 1.0 = 1%)\n"
               << "  ema_dev_ranging        Max % above EMA in ranging (e.g., 0.5 = 0.5%)\n"
@@ -152,13 +174,29 @@ void print_status(const SharedConfig* config, const SharedPaperConfig* paper_con
     std::cout << "  auto_tune:       " << (config->is_auto_tune_enabled() ? "ON" : "OFF") << "\n\n";
 
     if (config->is_auto_tune_enabled()) {
-        std::cout << "[ Auto-Tune Rules ]\n";
-        std::cout << "  2 losses  -> cooldown +50%\n";
-        std::cout << "  3 losses  -> signal_strength = Strong\n";
-        std::cout << "  4 losses  -> min_trade_value +50%\n";
-        std::cout << "  5+ losses -> TRADING PAUSED\n";
-        std::cout << "  3 wins    -> gradually relax params\n\n";
+        std::cout << "[ Auto-Tune Rules (configurable) ]\n";
+        std::cout << "  " << config->get_losses_to_cautious() << " losses  -> cooldown +50%\n";
+        std::cout << "  " << config->get_losses_to_tighten_signal() << " losses  -> signal_strength = Strong\n";
+        std::cout << "  " << config->get_losses_to_defensive() << " losses  -> min_trade_value +50%\n";
+        std::cout << "  " << config->get_losses_to_pause() << "+ losses -> TRADING PAUSED\n";
+        std::cout << "  " << config->get_wins_to_aggressive() << " wins    -> gradually relax params\n\n";
     }
+
+    // SmartStrategy thresholds
+    std::cout << "[ SmartStrategy Thresholds ]\n";
+    std::cout << "  min_confidence:      " << std::setprecision(2) << config->min_confidence() << " (min for signal)\n";
+    std::cout << "  min_position_pct:    " << config->min_position_pct() << "% (min position)\n";
+    std::cout << "  min_risk_reward:     " << config->min_risk_reward() << " (risk/reward ratio)\n";
+    std::cout << "  drawdown_to_def:     " << (config->drawdown_to_defensive() * 100) << "% -> DEFENSIVE\n";
+    std::cout << "  drawdown_to_exit:    " << (config->drawdown_to_exit() * 100) << "% -> EXIT_ONLY\n";
+    std::cout << "  win_rate_aggressive: " << config->win_rate_aggressive() << " (>= for AGGRESSIVE)\n";
+    std::cout << "  win_rate_cautious:   " << config->win_rate_cautious() << " (< for CAUTIOUS)\n";
+    std::cout << "  sharpe_aggressive:   " << config->sharpe_aggressive() << " (>= for AGGRESSIVE)\n";
+    std::cout << "  sharpe_cautious:     " << config->sharpe_cautious() << " (< for CAUTIOUS)\n";
+    std::cout << "  sharpe_defensive:    " << config->sharpe_defensive() << " (< for DEFENSIVE)\n";
+    std::cout << "  signal_aggressive:   " << config->signal_threshold_aggressive() << " (threshold in AGGRESSIVE)\n";
+    std::cout << "  signal_normal:       " << config->signal_threshold_normal() << " (threshold in NORMAL)\n";
+    std::cout << "  signal_cautious:     " << config->signal_threshold_cautious() << " (threshold in CAUTIOUS)\n\n";
 
     // Position sizing
     std::cout << "[ Position Sizing ]\n";
@@ -329,6 +367,48 @@ int main(int argc, char* argv[]) {
             std::cout << config->get_limit_offset_bps() << "\n";
         } else if (param == "limit_timeout_ms") {
             std::cout << config->get_limit_timeout_ms() << "\n";
+        // SmartStrategy streak thresholds
+        } else if (param == "losses_to_cautious") {
+            std::cout << config->get_losses_to_cautious() << "\n";
+        } else if (param == "losses_to_tighten") {
+            std::cout << config->get_losses_to_tighten_signal() << "\n";
+        } else if (param == "losses_to_defensive") {
+            std::cout << config->get_losses_to_defensive() << "\n";
+        } else if (param == "losses_to_pause") {
+            std::cout << config->get_losses_to_pause() << "\n";
+        } else if (param == "losses_to_exit_only") {
+            std::cout << config->get_losses_to_exit_only() << "\n";
+        } else if (param == "wins_to_aggressive") {
+            std::cout << config->get_wins_to_aggressive() << "\n";
+        } else if (param == "wins_max_aggressive") {
+            std::cout << config->get_wins_max_aggressive() << "\n";
+        // SmartStrategy thresholds
+        } else if (param == "min_confidence") {
+            std::cout << config->min_confidence() << "\n";
+        } else if (param == "min_position_pct") {
+            std::cout << config->min_position_pct() << "\n";
+        } else if (param == "min_risk_reward") {
+            std::cout << config->min_risk_reward() << "\n";
+        } else if (param == "drawdown_to_defensive") {
+            std::cout << (config->drawdown_to_defensive() * 100) << "\n";
+        } else if (param == "drawdown_to_exit") {
+            std::cout << (config->drawdown_to_exit() * 100) << "\n";
+        } else if (param == "win_rate_aggressive") {
+            std::cout << config->win_rate_aggressive() << "\n";
+        } else if (param == "win_rate_cautious") {
+            std::cout << config->win_rate_cautious() << "\n";
+        } else if (param == "sharpe_aggressive") {
+            std::cout << config->sharpe_aggressive() << "\n";
+        } else if (param == "sharpe_cautious") {
+            std::cout << config->sharpe_cautious() << "\n";
+        } else if (param == "sharpe_defensive") {
+            std::cout << config->sharpe_defensive() << "\n";
+        } else if (param == "signal_aggressive") {
+            std::cout << config->signal_threshold_aggressive() << "\n";
+        } else if (param == "signal_normal") {
+            std::cout << config->signal_threshold_normal() << "\n";
+        } else if (param == "signal_cautious") {
+            std::cout << config->signal_threshold_cautious() << "\n";
         } else {
             std::cerr << "Unknown parameter: " << param << "\n";
             munmap(config, sizeof(SharedConfig));
@@ -443,6 +523,68 @@ int main(int argc, char* argv[]) {
         } else if (param == "limit_timeout_ms") {
             config->set_limit_timeout_ms(static_cast<int32_t>(value));
             std::cout << "limit_timeout_ms = " << static_cast<int>(value) << "ms (adaptive timeout)\n";
+        // SmartStrategy streak thresholds
+        } else if (param == "losses_to_cautious") {
+            config->set_losses_to_cautious(static_cast<int32_t>(value));
+            std::cout << "losses_to_cautious = " << static_cast<int>(value) << " (losses -> CAUTIOUS)\n";
+        } else if (param == "losses_to_tighten") {
+            config->set_losses_to_tighten_signal(static_cast<int32_t>(value));
+            std::cout << "losses_to_tighten = " << static_cast<int>(value) << " (losses -> stronger signals)\n";
+        } else if (param == "losses_to_defensive") {
+            config->set_losses_to_defensive(static_cast<int32_t>(value));
+            std::cout << "losses_to_defensive = " << static_cast<int>(value) << " (losses -> DEFENSIVE)\n";
+        } else if (param == "losses_to_pause") {
+            config->set_losses_to_pause(static_cast<int32_t>(value));
+            std::cout << "losses_to_pause = " << static_cast<int>(value) << " (losses -> PAUSE trading)\n";
+        } else if (param == "losses_to_exit_only") {
+            config->set_losses_to_exit_only(static_cast<int32_t>(value));
+            std::cout << "losses_to_exit_only = " << static_cast<int>(value) << " (losses -> EXIT_ONLY)\n";
+        } else if (param == "wins_to_aggressive") {
+            config->set_wins_to_aggressive(static_cast<int32_t>(value));
+            std::cout << "wins_to_aggressive = " << static_cast<int>(value) << " (wins -> can be AGGRESSIVE)\n";
+        } else if (param == "wins_max_aggressive") {
+            config->set_wins_max_aggressive(static_cast<int32_t>(value));
+            std::cout << "wins_max_aggressive = " << static_cast<int>(value) << " (cap on aggression)\n";
+        // SmartStrategy thresholds
+        } else if (param == "min_confidence") {
+            config->set_min_confidence(value);
+            std::cout << "min_confidence = " << value << " (minimum for signal)\n";
+        } else if (param == "min_position_pct") {
+            config->set_min_position_pct(value);
+            std::cout << "min_position_pct = " << value << "% (minimum position)\n";
+        } else if (param == "min_risk_reward") {
+            config->set_min_risk_reward(value);
+            std::cout << "min_risk_reward = " << value << " (risk/reward ratio)\n";
+        } else if (param == "drawdown_to_defensive") {
+            config->set_drawdown_to_defensive(value / 100.0);  // Convert % to decimal
+            std::cout << "drawdown_to_defensive = " << value << "% -> DEFENSIVE mode\n";
+        } else if (param == "drawdown_to_exit") {
+            config->set_drawdown_to_exit(value / 100.0);  // Convert % to decimal
+            std::cout << "drawdown_to_exit = " << value << "% -> EXIT_ONLY mode\n";
+        } else if (param == "win_rate_aggressive") {
+            config->set_win_rate_aggressive(value);
+            std::cout << "win_rate_aggressive = " << value << " (>= for AGGRESSIVE)\n";
+        } else if (param == "win_rate_cautious") {
+            config->set_win_rate_cautious(value);
+            std::cout << "win_rate_cautious = " << value << " (< for CAUTIOUS)\n";
+        } else if (param == "sharpe_aggressive") {
+            config->set_sharpe_aggressive(value);
+            std::cout << "sharpe_aggressive = " << value << " (>= for AGGRESSIVE)\n";
+        } else if (param == "sharpe_cautious") {
+            config->set_sharpe_cautious(value);
+            std::cout << "sharpe_cautious = " << value << " (< for CAUTIOUS)\n";
+        } else if (param == "sharpe_defensive") {
+            config->set_sharpe_defensive(value);
+            std::cout << "sharpe_defensive = " << value << " (< for DEFENSIVE)\n";
+        } else if (param == "signal_aggressive") {
+            config->set_signal_aggressive(value);
+            std::cout << "signal_aggressive = " << value << " (threshold in AGGRESSIVE)\n";
+        } else if (param == "signal_normal") {
+            config->set_signal_normal(value);
+            std::cout << "signal_normal = " << value << " (threshold in NORMAL)\n";
+        } else if (param == "signal_cautious") {
+            config->set_signal_cautious(value);
+            std::cout << "signal_cautious = " << value << " (threshold in CAUTIOUS)\n";
         } else {
             std::cerr << "Unknown parameter: " << param << "\n";
             munmap(config, sizeof(SharedConfig));
