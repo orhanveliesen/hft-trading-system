@@ -13,6 +13,14 @@
  *   tracker.record_win();
  *   tracker.record_loss();
  *   if (tracker.is_loss_streak_critical()) { ... }
+ *
+ * NOTE: Header-only by design.
+ * All methods are trivial (1-4 lines, simple increments/comparisons).
+ * Separating to .cpp would:
+ * - Prevent inlining at call sites
+ * - Add ~15-25 cycle function call overhead per invocation
+ * - For a simple ++counter operation that takes ~1-3 cycles, this is unacceptable
+ * See: https://isocpp.github.io/CppCoreGuidelines/CppCoreGuidelines#Rf-inline
  */
 
 #include "strategy_constants.hpp"
