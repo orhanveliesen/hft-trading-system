@@ -104,10 +104,10 @@ struct SmartStrategyConfig {
     double max_position_pct = 0.15;     // Max 15% per trade
     double min_position_pct = 0.01;     // Min 1% per trade
 
-    // Target/Stop
-    double default_target_pct = 0.015;  // 1.5% target
-    double default_stop_pct = 0.01;     // 1% stop
-    double min_risk_reward = 1.5;       // Minimum R:R ratio
+    // Target/Stop - wider stops to avoid frequent stop-outs
+    double default_target_pct = 0.03;   // 3% target
+    double default_stop_pct = 0.05;     // 5% stop (requires ~38% win rate)
+    double min_risk_reward = 0.6;       // Allow stop > target for low win rate
 };
 
 // =============================================================================

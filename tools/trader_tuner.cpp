@@ -514,6 +514,11 @@ private:
     TuningHistoryLogger history_logger_;
     std::atomic<uint32_t> event_seq_{0};  // Sequence number for trade events
 
+    // API failure tracking - tuner enters disconnected mode but strategies continue
+    static constexpr int MAX_CONSECUTIVE_API_FAILURES = 3;
+    int consecutive_api_failures_ = 0;
+    bool tuner_disconnected_ = false;  // When true, skip AI tuning but strategies run autonomously
+
     // Per-symbol performance tracking
     std::array<SymbolPerformance, 32> symbol_perf_{};
 
@@ -828,7 +833,48 @@ private:
                 symbol_configs_->last_tune_ns.store(
                     std::chrono::steady_clock::now().time_since_epoch().count());
             }
+
+            // Track consecutive failures - tuner enters degraded mode
+            consecutive_api_failures_++;
+            std::cerr << "[WARN] API call failed (" << consecutive_api_failures_
+                      << "/" << MAX_CONSECUTIVE_API_FAILURES << "): " << response.error << "\n";
+
+            // Enter disconnected mode - tuner stops making decisions but strategies continue
+            if (consecutive_api_failures_ >= MAX_CONSECUTIVE_API_FAILURES && !tuner_disconnected_) {
+                std::cerr << "\n";
+                std::cerr << "╔══════════════════════════════════════════════════════════════════════════════╗\n";
+                std::cerr << "║ ⚠️  TUNER DISCONNECTED - ENTERING AUTONOMOUS MODE                             ║\n";
+                std::cerr << "╠══════════════════════════════════════════════════════════════════════════════╣\n";
+                std::cerr << "║ The tuner has failed to connect to Claude API " << MAX_CONSECUTIVE_API_FAILURES << " consecutive times.          ║\n";
+                std::cerr << "║                                                                              ║\n";
+                std::cerr << "║ Strategies will CONTINUE running with current parameters.                    ║\n";
+                std::cerr << "║ Tuner will SKIP AI-driven parameter adjustments until reconnected.           ║\n";
+                std::cerr << "║                                                                              ║\n";
+                std::cerr << "║ Tuner will automatically resume when API connection is restored.             ║\n";
+                std::cerr << "╚══════════════════════════════════════════════════════════════════════════════╝\n";
+                std::cerr << "\n";
+
+                tuner_disconnected_ = true;
+                history_logger_.log_error("TUNER DISCONNECTED: Strategies continue autonomously", trigger);
+            }
             return;
+        }
+
+        // API success - reset failure counter and exit disconnected mode
+        if (consecutive_api_failures_ > 0) {
+            std::cout << "[INFO] API connection restored after " << consecutive_api_failures_ << " failures\n";
+            consecutive_api_failures_ = 0;
+        }
+
+        if (tuner_disconnected_) {
+            std::cout << "\n";
+            std::cout << "╔══════════════════════════════════════════════════════════════════════════════╗\n";
+            std::cout << "║ ✅ TUNER RECONNECTED - AI-DRIVEN TUNING RESUMED                               ║\n";
+            std::cout << "╚══════════════════════════════════════════════════════════════════════════════╝\n";
+            std::cout << "\n";
+
+            tuner_disconnected_ = false;
+            history_logger_.log_error("TUNER RECONNECTED: AI-driven tuning resumed", trigger);
         }
 
         // Check for actual change recommendation

@@ -98,6 +98,23 @@ struct SymbolTuningData {
     bool has_snapshot = false;
 };
 
+// Valid Claude model IDs - updated for 2025/2026
+static constexpr const char* VALID_CLAUDE_MODELS[] = {
+    // Current generation (2025+)
+    "claude-opus-4-5-20251101",     // Most capable - complex reasoning (DEFAULT)
+    "claude-sonnet-4-5-20241022",   // Balanced performance/cost
+    "claude-sonnet-4-20250514",     // Sonnet 4
+    "claude-haiku-3-5-20241022",    // Fast model
+    // Legacy models (may still work)
+    "claude-3-opus-20240229",
+    "claude-3-5-sonnet-20241022",
+    "claude-3-haiku-20240307",
+};
+static constexpr size_t VALID_MODEL_COUNT = sizeof(VALID_CLAUDE_MODELS) / sizeof(VALID_CLAUDE_MODELS[0]);
+
+// Default to most capable current model
+static constexpr const char* DEFAULT_MODEL = "claude-opus-4-5-20251101";
+
 /**
  * Claude API Client
  *
@@ -120,8 +137,24 @@ public:
         }
 
         const char* model_env = std::getenv("HFT_TUNER_MODEL");
-        // Opus has superior math and reasoning for complex trading decisions
-        model_ = model_env ? model_env : "claude-3-opus-20240229";
+        if (model_env) {
+            if (is_valid_model(model_env)) {
+                model_ = model_env;
+            } else {
+                std::cerr << "[WARN] Invalid model ID '" << model_env
+                          << "' - falling back to " << DEFAULT_MODEL << "\n";
+                std::cerr << "[WARN] Valid models: ";
+                for (size_t i = 0; i < VALID_MODEL_COUNT; ++i) {
+                    std::cerr << VALID_CLAUDE_MODELS[i];
+                    if (i < VALID_MODEL_COUNT - 1) std::cerr << ", ";
+                }
+                std::cerr << "\n";
+                model_ = DEFAULT_MODEL;
+            }
+        } else {
+            // Opus has superior math and reasoning for complex trading decisions
+            model_ = DEFAULT_MODEL;
+        }
 
         const char* url_env = std::getenv("CLAUDE_API_URL");
         api_url_ = url_env ? url_env : "https://api.anthropic.com/v1/messages";
@@ -160,9 +193,39 @@ public:
     const char* model() const { return model_.c_str(); }
 
     void set_model(const std::string& model) {
-        if (!model.empty()) {
+        if (model.empty()) return;
+
+        if (is_valid_model(model.c_str())) {
             model_ = model;
+        } else {
+            std::cerr << "[WARN] set_model: Invalid model ID '" << model
+                      << "' - keeping current model " << model_ << "\n";
         }
+    }
+
+    /**
+     * Check if a model ID is valid
+     */
+    static bool is_valid_model(const char* model) {
+        if (!model) return false;
+        for (size_t i = 0; i < VALID_MODEL_COUNT; ++i) {
+            if (std::strcmp(model, VALID_CLAUDE_MODELS[i]) == 0) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Get list of valid model IDs (for display/help)
+     */
+    static std::string get_valid_models_list() {
+        std::string result;
+        for (size_t i = 0; i < VALID_MODEL_COUNT; ++i) {
+            if (i > 0) result += ", ";
+            result += VALID_CLAUDE_MODELS[i];
+        }
+        return result;
     }
 
     /**
@@ -687,41 +750,67 @@ private:
 
                     double val;
                     // EMA deviation thresholds
+                    bool ema_changed = false;
                     if ((val = extract_number(config_json, "ema_dev_trending_pct")) > 0) {
                         cmd.config.ema_dev_trending_x100 = static_cast<int16_t>(val * 100);
+                        ema_changed = true;
                     }
                     if ((val = extract_number(config_json, "ema_dev_ranging_pct")) > 0) {
                         cmd.config.ema_dev_ranging_x100 = static_cast<int16_t>(val * 100);
+                        ema_changed = true;
                     }
                     if ((val = extract_number(config_json, "ema_dev_highvol_pct")) > 0) {
                         cmd.config.ema_dev_highvol_x100 = static_cast<int16_t>(val * 100);
+                        ema_changed = true;
+                    }
+                    if (ema_changed) {
+                        cmd.config.set_use_global_ema(false);
                     }
 
                     // Position sizing
+                    bool position_changed = false;
                     if ((val = extract_number(config_json, "base_position_pct")) > 0) {
                         cmd.config.base_position_x100 = static_cast<int16_t>(val * 100);
+                        position_changed = true;
                     }
                     if ((val = extract_number(config_json, "max_position_pct")) > 0) {
                         cmd.config.max_position_x100 = static_cast<int16_t>(val * 100);
+                        position_changed = true;
+                    }
+                    if (position_changed) {
+                        cmd.config.set_use_global_position(false);
                     }
 
                     // Trade filtering
+                    bool filtering_changed = false;
                     if ((val = extract_number(config_json, "cooldown_ms")) > 0) {
                         cmd.config.cooldown_ms = static_cast<int16_t>(val);
+                        filtering_changed = true;
                     }
                     if ((val = extract_number(config_json, "signal_strength")) > 0) {
                         cmd.config.signal_strength = static_cast<int8_t>(val);
+                        filtering_changed = true;
+                    }
+                    if (filtering_changed) {
+                        cmd.config.set_use_global_filtering(false);
                     }
 
                     // Profit targets
+                    bool target_changed = false;
                     if ((val = extract_number(config_json, "target_pct")) > 0) {
                         cmd.config.target_pct_x100 = static_cast<int16_t>(val * 100);
+                        target_changed = true;
                     }
                     if ((val = extract_number(config_json, "stop_pct")) > 0) {
                         cmd.config.stop_pct_x100 = static_cast<int16_t>(val * 100);
+                        target_changed = true;
                     }
                     if ((val = extract_number(config_json, "pullback_pct")) > 0) {
                         cmd.config.pullback_pct_x100 = static_cast<int16_t>(val * 100);
+                        target_changed = true;
+                    }
+                    if (target_changed) {
+                        cmd.config.set_use_global_target(false);
                     }
 
                     // Order execution preferences (per-symbol)

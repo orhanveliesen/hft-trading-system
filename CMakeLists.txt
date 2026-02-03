@@ -72,6 +72,10 @@ add_executable(test_symbol_config tests/test_symbol_config.cpp)
 target_link_libraries(test_symbol_config trader_core)
 add_test(NAME SymbolConfigTests COMMAND test_symbol_config)
 
+add_executable(test_symbol_tuning_config tests/test_symbol_tuning_config.cpp)
+target_link_libraries(test_symbol_tuning_config trader_core)
+add_test(NAME SymbolTuningConfigTests COMMAND test_symbol_tuning_config)
+
 add_executable(test_matching_engine tests/test_matching_engine.cpp)
 target_link_libraries(test_matching_engine trader_core)
 add_test(NAME MatchingEngineTests COMMAND test_matching_engine)
@@ -189,6 +193,10 @@ add_test(NAME SharedLedgerTests COMMAND test_shared_ledger)
 
 add_executable(test_commission_scaling tests/test_commission_scaling.cpp)
 add_test(NAME CommissionScalingTests COMMAND test_commission_scaling)
+
+add_executable(test_symbol_position_sizing tests/test_symbol_position_sizing.cpp)
+target_link_libraries(test_symbol_position_sizing rt)
+add_test(NAME SymbolPositionSizingTests COMMAND test_symbol_position_sizing)
 
 # === Tools ===
 add_executable(trader tools/trader.cpp)
