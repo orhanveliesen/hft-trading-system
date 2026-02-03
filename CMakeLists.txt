@@ -199,6 +199,9 @@ add_executable(test_symbol_position_sizing tests/test_symbol_position_sizing.cpp
 target_link_libraries(test_symbol_position_sizing rt)
 add_test(NAME SymbolPositionSizingTests COMMAND test_symbol_position_sizing)
 
+add_executable(test_streak_tracker tests/test_streak_tracker.cpp)
+add_test(NAME StreakTrackerTests COMMAND test_streak_tracker)
+
 # === Tools ===
 add_executable(trader tools/trader.cpp)
 target_link_libraries(trader trader_core websockets pthread rt curl)
