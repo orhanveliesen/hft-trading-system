@@ -61,6 +61,15 @@ struct EmaThresholds {
 };
 
 /**
+ * Drawdown thresholds for risk mode transitions.
+ * Controls when to switch to defensive or exit-only modes based on portfolio drawdown.
+ */
+struct DrawdownThresholds {
+    static constexpr double TO_DEFENSIVE = 0.03;  // 3% drawdown → DEFENSIVE mode
+    static constexpr double TO_EXIT_ONLY = 0.05;  // 5% drawdown → EXIT_ONLY mode
+};
+
+/**
  * Minimum position threshold - below this, consider position closed.
  * Prevents dust positions from triggering unnecessary trades.
  */

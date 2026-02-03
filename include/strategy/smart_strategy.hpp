@@ -83,8 +83,8 @@ struct SmartStrategyConfig {
     int losses_to_cautious = StreakThresholds::LOSSES_TO_CAUTIOUS;
     int losses_to_defensive = StreakThresholds::LOSSES_TO_DEFENSIVE;
     int losses_to_exit_only = StreakThresholds::LOSSES_TO_EXIT_ONLY;
-    double drawdown_to_defensive = 0.03; // 3% drawdown → DEFENSIVE
-    double drawdown_to_exit = 0.05;     // 5% drawdown → EXIT_ONLY
+    double drawdown_to_defensive = DrawdownThresholds::TO_DEFENSIVE;
+    double drawdown_to_exit = DrawdownThresholds::TO_EXIT_ONLY;
 
     // Win rate thresholds
     double win_rate_aggressive = 0.60;  // >60% → can be AGGRESSIVE
