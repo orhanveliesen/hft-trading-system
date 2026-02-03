@@ -27,6 +27,7 @@
 #include "../include/ipc/shared_ring_buffer.hpp"
 #include "../include/ipc/shared_portfolio_state.hpp"
 #include "../include/ipc/shared_config.hpp"
+#include "../include/ipc/symbol_config.hpp"
 #include "../include/ipc/shared_paper_config.hpp"
 #include "../include/ipc/udp_telemetry.hpp"
 #include "../include/ipc/execution_report.hpp"
@@ -50,6 +51,7 @@
 #include "../include/exchange/iexchange.hpp"
 #include "../include/exchange/paper_exchange_adapter.hpp"
 #include "../include/exchange/binance_rest.hpp"
+#include "../include/trading/portfolio.hpp"
 #include <iostream>
 #include <iomanip>
 #include <chrono>
@@ -71,12 +73,12 @@ using namespace hft::exchange;
 using namespace hft::strategy;
 using namespace hft::execution;
 
-// ============================================================================
-// Pre-allocation Constants (HFT: no new/delete on hot path)
-// ============================================================================
-
-constexpr size_t MAX_SYMBOLS = 64;              // Max symbols we can track
-constexpr size_t MAX_POSITIONS_PER_SYMBOL = 32; // Max open positions per symbol
+// Use Portfolio constants from trading namespace
+using hft::trading::MAX_SYMBOLS;
+using hft::trading::MAX_POSITIONS_PER_SYMBOL;
+using hft::trading::Portfolio;
+using hft::trading::OpenPosition;
+using hft::trading::SymbolPositions;
 
 // ============================================================================
 // EMA Deviation Thresholds (max price above EMA to allow buy)
@@ -602,401 +604,6 @@ struct SymbolStrategy {
     }
 };
 
-// OpenPosition: tracks a single buy with entry price and targets
-// Pre-allocated slot - uses 'active' flag instead of dynamic allocation
-struct OpenPosition {
-    double entry_price = 0;      // What we paid
-    double quantity = 0;         // How much we hold
-    double target_price = 0;     // Sell limit price (entry + profit margin)
-    double stop_loss_price = 0;  // Cut loss price (entry - max loss)
-    double peak_price = 0;       // Highest price since entry (for trend exit)
-    uint64_t timestamp = 0;      // When we bought
-    bool active = false;         // Is this slot in use?
-
-    void clear() {
-        entry_price = 0;
-        quantity = 0;
-        target_price = 0;
-        stop_loss_price = 0;
-        peak_price = 0;
-        timestamp = 0;
-        active = false;
-    }
-
-    // Update peak and check for trend-based exit
-    // Returns true if we should exit (pullback from peak while in profit)
-    bool update_peak_and_check_trend_exit(double current_price, double pullback_pct = 0.005) {
-        // Update peak if price went higher
-        if (current_price > peak_price) {
-            peak_price = current_price;
-        }
-
-        // Check for trend-based exit:
-        // 1. Must be in profit (current > entry)
-        // 2. Must have pulled back from peak by pullback_pct
-        bool in_profit = current_price > entry_price;
-        double pullback = (peak_price - current_price) / peak_price;
-
-        return in_profit && pullback >= pullback_pct;
-    }
-};
-
-// SymbolPositions: pre-allocated position storage for one symbol
-// No std::vector, no dynamic allocation
-struct SymbolPositions {
-    std::array<OpenPosition, MAX_POSITIONS_PER_SYMBOL> slots;
-    size_t count = 0;  // Number of active positions
-
-    // Add a new position - O(1)
-    bool add(double entry, double qty, double target, double stop_loss) {
-        if (count >= MAX_POSITIONS_PER_SYMBOL) return false;
-
-        // Find first inactive slot
-        for (auto& slot : slots) {
-            if (!slot.active) {
-                slot.entry_price = entry;
-                slot.quantity = qty;
-                slot.target_price = target;
-                slot.stop_loss_price = stop_loss;
-                slot.peak_price = entry;  // Start peak at entry price
-                slot.timestamp = std::chrono::steady_clock::now().time_since_epoch().count();
-                slot.active = true;
-                count++;
-                return true;
-            }
-        }
-        return false;
-    }
-
-    // Get total quantity held
-    double total_quantity() const {
-        double total = 0;
-        for (const auto& slot : slots) {
-            if (slot.active) total += slot.quantity;
-        }
-        return total;
-    }
-
-    // Get average entry price
-    double avg_entry() const {
-        double total_cost = 0, total_qty = 0;
-        for (const auto& slot : slots) {
-            if (slot.active) {
-                total_cost += slot.entry_price * slot.quantity;
-                total_qty += slot.quantity;
-            }
-        }
-        return total_qty > 0 ? total_cost / total_qty : 0;
-    }
-
-    void clear_all() {
-        for (auto& slot : slots) slot.clear();
-        count = 0;
-    }
-};
-
-// Portfolio: tracks cash and positions with pre-allocated storage
-// No std::map, no std::vector, no new/delete
-struct Portfolio {
-    double cash = 0;
-    std::array<SymbolPositions, MAX_SYMBOLS> positions;  // Pre-allocated!
-    std::array<bool, MAX_SYMBOLS> symbol_active;         // Track which symbols have positions
-
-    // Config pointer (optional, falls back to defaults if null)
-    const ipc::SharedConfig* config_ = nullptr;
-
-    // Default values (used when config is null)
-    static constexpr double DEFAULT_TARGET_PCT = 0.015;      // 1.5% profit target
-    static constexpr double DEFAULT_STOP_PCT = 0.01;         // 1% max loss
-    static constexpr double DEFAULT_COMMISSION_RATE = 0.001; // 0.1% Binance taker fee
-    static constexpr double DEFAULT_PULLBACK_PCT = 0.005;    // 0.5% trend exit
-    static constexpr double DEFAULT_BASE_POSITION_PCT = 0.02; // 2% base position size
-    static constexpr double DEFAULT_MAX_POSITION_PCT = 0.05;  // 5% max position size
-
-    // Config accessors (read from SharedConfig or use defaults)
-    double target_pct() const {
-        return config_ ? config_->target_pct() / 100.0 : DEFAULT_TARGET_PCT;
-    }
-    double stop_pct() const {
-        return config_ ? config_->stop_pct() / 100.0 : DEFAULT_STOP_PCT;
-    }
-    double commission_rate() const {
-        return config_ ? config_->commission_rate() : DEFAULT_COMMISSION_RATE;
-    }
-    double pullback_pct() const {
-        return config_ ? config_->pullback_pct() / 100.0 : DEFAULT_PULLBACK_PCT;
-    }
-    double base_position_pct() const {
-        return config_ ? config_->base_position_pct() / 100.0 : DEFAULT_BASE_POSITION_PCT;
-    }
-    double max_position_pct() const {
-        return config_ ? config_->max_position_pct() / 100.0 : DEFAULT_MAX_POSITION_PCT;
-    }
-
-    void set_config(const ipc::SharedConfig* cfg) { config_ = cfg; }
-
-    // Calculate order quantity based on position sizing
-    // Returns quantity to buy for given price, respecting position limits
-    double calculate_qty(double price, double available_cash) const {
-        if (price <= 0) return 0;
-
-        // Base position size (e.g., 2% of available cash)
-        double position_value = available_cash * base_position_pct();
-
-        // Don't exceed max position size
-        double max_value = available_cash * max_position_pct();
-        position_value = std::min(position_value, max_value);
-
-        // Calculate quantity
-        double qty = position_value / price;
-
-        // Round down to 8 decimal places (Binance precision)
-        qty = std::floor(qty * 1e8) / 1e8;
-
-        // Minimum order size check (Binance requires ~$10 minimum)
-        if (qty * price < 10.0) return 0;
-
-        return qty;
-    }
-
-    // Trading costs tracking
-    double total_commissions = 0;
-    double total_spread_cost = 0;
-    double total_volume = 0;
-
-    void init(double capital) {
-        cash = capital;
-        total_commissions = 0;
-        total_spread_cost = 0;
-        total_volume = 0;
-        for (size_t i = 0; i < MAX_SYMBOLS; i++) {
-            positions[i].clear_all();
-            symbol_active[i] = false;
-        }
-    }
-
-    double get_holding(Symbol s) const {
-        if (s >= MAX_SYMBOLS) return 0;
-        return positions[s].total_quantity();
-    }
-
-    // Pending cash (reserved for orders not yet filled)
-    double pending_cash = 0;
-
-    bool can_buy(double price, double qty) const {
-        double available = cash - pending_cash;
-        return available >= price * qty;
-    }
-
-    // Reserve cash when order is sent (before fill)
-    void reserve_cash(double amount) {
-        pending_cash += amount;
-    }
-
-    // Release reserved cash when order fills or cancels
-    void release_reserved_cash(double amount) {
-        pending_cash -= amount;
-        if (pending_cash < 0) pending_cash = 0;  // Safety
-    }
-
-    bool can_sell(Symbol s, double qty) const {
-        return get_holding(s) >= qty;
-    }
-
-    // Buy and create position with target/stop-loss - O(1) no allocation
-    // spread_cost = (ask - mid) * qty (half spread paid on buy)
-    // commission = passed from ExecutionReport (0 = calculate internally)
-    // RETURNS: actual commission applied (0 if position not added due to MAX_POSITIONS limit)
-    double buy(Symbol s, double price, double qty, double spread_cost = 0, double commission = 0) {
-        if (qty <= 0 || price <= 0) return 0;
-        if (s >= MAX_SYMBOLS) return 0;
-
-        double target = price * (1.0 + target_pct());
-        double stop_loss = price * (1.0 - stop_pct());
-
-        if (positions[s].add(price, qty, target, stop_loss)) {
-            double trade_value = price * qty;
-            // If commission not provided, calculate it (backwards compatibility)
-            double actual_commission = commission;
-            if (commission <= 0) {
-                actual_commission = trade_value * commission_rate();
-            }
-            cash -= trade_value + actual_commission;  // Pay price + commission
-            total_commissions += actual_commission;
-            total_spread_cost += spread_cost;
-            total_volume += trade_value;
-            symbol_active[s] = true;
-            return actual_commission;
-        }
-        return 0;  // Position not added
-    }
-
-    // Sell specific quantity, FIFO order - O(n) where n = positions for symbol
-    // spread_cost = (mid - bid) * qty (half spread paid on sell)
-    // commission = passed from ExecutionReport (0 = calculate internally)
-    // RETURNS: actual commission applied (may be scaled if overselling protection triggered)
-    double sell(Symbol s, double price, double qty, double spread_cost = 0, double commission = 0) {
-        if (qty <= 0 || price <= 0) return 0;
-        if (s >= MAX_SYMBOLS) return 0;
-
-        double remaining = qty;
-        auto& sym_pos = positions[s];
-
-        // Track actual quantity sold (may be less than requested if overselling)
-        double actual_sold = 0;
-
-        for (auto& slot : sym_pos.slots) {
-            if (!slot.active || remaining <= 0) continue;
-
-            double sell_qty = std::min(remaining, slot.quantity);
-            slot.quantity -= sell_qty;
-            remaining -= sell_qty;
-            actual_sold += sell_qty;
-
-            if (slot.quantity <= 0.0001) {
-                slot.clear();
-                sym_pos.count--;
-            }
-        }
-
-        // CRITICAL: Use actual_sold, not requested qty, to prevent overselling bug
-        // If requested more than available, only credit cash for what was actually sold
-        double trade_value = price * actual_sold;
-
-        // If commission not provided, calculate it based on actual trade value
-        double actual_commission = commission;
-        if (commission <= 0) {
-            actual_commission = trade_value * commission_rate();
-        } else {
-            // Scale provided commission proportionally if we sold less than requested
-            if (actual_sold < qty && qty > 0) {
-                actual_commission = commission * (actual_sold / qty);
-            }
-        }
-
-        // Apply commission and volume for ACTUAL trade
-        cash += trade_value - actual_commission;  // Receive price - commission
-        total_commissions += actual_commission;
-        total_volume += trade_value;
-        total_spread_cost += spread_cost;
-
-        if (sym_pos.count == 0) {
-            symbol_active[s] = false;
-        }
-
-        return actual_commission;
-    }
-
-    // Get average entry price for a symbol
-    double avg_entry_price(Symbol s) const {
-        if (s >= MAX_SYMBOLS) return 0;
-        return positions[s].avg_entry();
-    }
-
-    // Callback-based target/stop checking - NO allocation!
-    // Returns number of positions closed
-    template<typename OnTargetHit, typename OnStopHit, typename OnTrendExit>
-    int check_and_close(Symbol s, double current_price, OnTargetHit on_target, OnStopHit on_stop, OnTrendExit on_trend_exit, double pullback_pct = 0.005) {
-        if (s >= MAX_SYMBOLS) return 0;
-
-        int closed = 0;
-        auto& sym_pos = positions[s];
-
-        for (auto& slot : sym_pos.slots) {
-            if (!slot.active) continue;
-
-            // TARGET HIT: price went UP to our target
-            if (current_price >= slot.target_price) {
-                double qty = slot.quantity;
-                double trade_value = current_price * qty;
-                double commission = trade_value * commission_rate();
-                cash += trade_value - commission;
-                total_commissions += commission;
-                on_target(qty, slot.entry_price, current_price);
-                slot.clear();
-                sym_pos.count--;
-                closed++;
-                continue;
-            }
-
-            // TREND EXIT: in profit but price pulling back from peak
-            if (slot.update_peak_and_check_trend_exit(current_price, pullback_pct)) {
-                double qty = slot.quantity;
-                double trade_value = current_price * qty;
-                double commission = trade_value * commission_rate();
-                cash += trade_value - commission;
-                total_commissions += commission;
-                on_trend_exit(qty, slot.entry_price, current_price, slot.peak_price);
-                slot.clear();
-                sym_pos.count--;
-                closed++;
-                continue;
-            }
-
-            // STOP-LOSS HIT: price went DOWN to our stop
-            if (current_price <= slot.stop_loss_price) {
-                double qty = slot.quantity;
-                double trade_value = current_price * qty;
-                double commission = trade_value * commission_rate();
-                cash += trade_value - commission;
-                total_commissions += commission;
-                on_stop(qty, slot.entry_price, current_price);
-                slot.clear();
-                sym_pos.count--;
-                closed++;
-            }
-        }
-
-        if (sym_pos.count == 0) {
-            symbol_active[s] = false;
-        }
-
-        return closed;
-    }
-
-    // Calculate total portfolio value (cash + holdings at current prices)
-    // prices array: prices[symbol_id] = current price
-    double total_value(const std::array<double, MAX_SYMBOLS>& prices) const {
-        double value = cash;
-        for (size_t s = 0; s < MAX_SYMBOLS; s++) {
-            if (symbol_active[s] && prices[s] > 0) {
-                value += positions[s].total_quantity() * prices[s];
-            }
-        }
-        return value;
-    }
-
-    // Overload for std::map (backwards compatibility, slightly slower)
-    double total_value(const std::map<Symbol, double>& prices) const {
-        double value = cash;
-        for (size_t s = 0; s < MAX_SYMBOLS; s++) {
-            if (symbol_active[s]) {
-                auto it = prices.find(static_cast<Symbol>(s));
-                if (it != prices.end()) {
-                    value += positions[s].total_quantity() * it->second;
-                }
-            }
-        }
-        return value;
-    }
-
-    int position_count() const {
-        int count = 0;
-        for (size_t s = 0; s < MAX_SYMBOLS; s++) {
-            if (symbol_active[s] && positions[s].count > 0) count++;
-        }
-        return count;
-    }
-
-    int total_position_slots() const {
-        int count = 0;
-        for (size_t s = 0; s < MAX_SYMBOLS; s++) {
-            count += positions[s].count;
-        }
-        return count;
-    }
-};
-
 // ============================================================================
 // Trading Application
 // ============================================================================
@@ -1061,6 +668,18 @@ public:
                           << "stop=" << (portfolio_.stop_pct() * 100) << "%, "
                           << "commission=" << (portfolio_.commission_rate() * 100) << "%, "
                           << "position=" << (portfolio_.base_position_pct() * 100) << "%\n";
+            }
+
+            // Connect to symbol-specific configs from tuner
+            // Tuner sets per-symbol position sizing, targets, etc.
+            symbol_configs_ = ipc::SharedSymbolConfigs::open_rw("/trader_symbol_configs");
+            if (!symbol_configs_) {
+                // Create if doesn't exist (tuner may not have run yet)
+                symbol_configs_ = ipc::SharedSymbolConfigs::create("/trader_symbol_configs");
+            }
+            if (symbol_configs_) {
+                portfolio_.set_symbol_configs(symbol_configs_);
+                std::cout << "[IPC] Symbol configs connected (supports per-symbol tuning)\n";
             }
 
             // Initialize paper trading config (separate from main config for SRP)
@@ -1219,6 +838,12 @@ public:
             g_shared_config = nullptr;
             munmap(shared_config_, sizeof(SharedConfig));
             std::cout << "[IPC] Config unmapped, HFT marked as stopped\n";
+        }
+
+        // Cleanup symbol-specific configs
+        if (symbol_configs_) {
+            munmap(symbol_configs_, sizeof(ipc::SharedSymbolConfigs));
+            std::cout << "[IPC] Symbol configs unmapped\n";
         }
     }
 
@@ -1396,6 +1021,7 @@ public:
 
         // Generate buy signals
         // Skip trading if market is dangerous (spike or high volatility) or in cooldown after crash
+        // Note: Strategies run autonomously - they don't depend on tuner connection
         if (engine_.can_trade() && !world->is_halted() &&
             !strat.regime.is_dangerous() && !market_health_.in_cooldown()) {
             check_signal(id, world, &strat, bid, ask);
@@ -1645,6 +1271,7 @@ private:
     ipc::TelemetryPublisher telemetry_;  // UDP multicast for remote monitoring
     SharedPortfolioState* portfolio_state_ = nullptr;  // Shared state for dashboard
     SharedConfig* shared_config_ = nullptr;           // Shared config from dashboard
+    ipc::SharedSymbolConfigs* symbol_configs_ = nullptr; // Symbol-specific tuning from tuner
     trading::TradeRecorder trade_recorder_;           // Single source of truth for P&L
     ipc::SharedLedger* shared_ledger_ = nullptr;      // IPC ledger for dashboard
     SharedPaperConfig* shared_paper_config_ = nullptr; // Paper trading settings
@@ -2637,8 +2264,9 @@ private:
         }
 
         // Calculate position size based on config
+        // Uses symbol-specific position sizing if tuner has set it
         double available_cash = portfolio_.cash - portfolio_.pending_cash;
-        double qty = portfolio_.calculate_qty(ask_usd, available_cash);
+        double qty = portfolio_.calculate_qty(ask_usd, available_cash, strat->ticker);
 
         // Portfolio constraint - need enough cash for calculated qty
         if (should_buy && (qty <= 0 || !portfolio_.can_buy(ask_usd, qty))) {
