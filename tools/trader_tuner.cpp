@@ -21,6 +21,7 @@
 #include "../include/ipc/shared_portfolio_state.hpp"
 #include "../include/ipc/shared_ring_buffer.hpp"
 #include "../include/ipc/trade_event.hpp"
+#include "../include/ipc/shared_tuner_state.hpp"
 #include "../include/tuner/claude_client.hpp"
 #include "../include/tuner/news_client.hpp"
 #include "../include/tuner/rag_client.hpp"
@@ -79,7 +80,7 @@ class TuningHistoryLogger {
 public:
     TuningHistoryLogger(const std::string& log_dir = "../logs") {
         // Create log directory if needed (relative to build dir)
-        std::string cmd = "mkdir -p " + log_dir;
+        std::string cmd = "mkdir -p " + log_dir; // TODO: why are you using shell commands? what if we dont have that program installed in the OS
         (void)system(cmd.c_str());
 
         // Open log file with date
@@ -152,6 +153,22 @@ public:
                        << std::to_string(cmd.config.target_pct_x100 / 100.0) + "%" << "║\n";
             console_log << "║   Stop Loss:          " << std::left << std::setw(54)
                        << std::to_string(cmd.config.stop_pct_x100 / 100.0) + "%" << "║\n";
+            console_log << "╠──────────────────────────────────────────────────────────────────────────────╣\n";
+            console_log << "║ ACCUMULATION PARAMS:                                                         ║\n";
+            console_log << "║   Floor (Trending):   " << std::left << std::setw(54)
+                       << std::to_string(cmd.config.accum_floor_trending_x100 / 100.0) << "║\n";
+            console_log << "║   Floor (Ranging):    " << std::left << std::setw(54)
+                       << std::to_string(cmd.config.accum_floor_ranging_x100 / 100.0) << "║\n";
+            console_log << "║   Floor (HighVol):    " << std::left << std::setw(54)
+                       << std::to_string(cmd.config.accum_floor_highvol_x100 / 100.0) << "║\n";
+            console_log << "║   Boost/Win:          " << std::left << std::setw(54)
+                       << std::to_string(cmd.config.accum_boost_per_win_x100 / 100.0) << "║\n";
+            console_log << "║   Penalty/Loss:       " << std::left << std::setw(54)
+                       << std::to_string(cmd.config.accum_penalty_per_loss_x100 / 100.0) << "║\n";
+            console_log << "║   Signal Boost:       " << std::left << std::setw(54)
+                       << std::to_string(cmd.config.accum_signal_boost_x100 / 100.0) << "║\n";
+            console_log << "║   Max Factor:         " << std::left << std::setw(54)
+                       << std::to_string(cmd.config.accum_max_x100 / 100.0) << "║\n";
         }
 
         console_log << "╠══════════════════════════════════════════════════════════════════════════════╣\n";
@@ -186,7 +203,14 @@ public:
                         << ",pos=" << (cmd.config.base_position_x100 / 100.0)
                         << ",cool=" << cmd.config.cooldown_ms
                         << ",target=" << (cmd.config.target_pct_x100 / 100.0)
-                        << ",stop=" << (cmd.config.stop_pct_x100 / 100.0);
+                        << ",stop=" << (cmd.config.stop_pct_x100 / 100.0)
+                        << ",accFloor_T=" << (cmd.config.accum_floor_trending_x100 / 100.0)
+                        << ",accFloor_R=" << (cmd.config.accum_floor_ranging_x100 / 100.0)
+                        << ",accFloor_H=" << (cmd.config.accum_floor_highvol_x100 / 100.0)
+                        << ",accBoost=" << (cmd.config.accum_boost_per_win_x100 / 100.0)
+                        << ",accPenalty=" << (cmd.config.accum_penalty_per_loss_x100 / 100.0)
+                        << ",accSigBoost=" << (cmd.config.accum_signal_boost_x100 / 100.0)
+                        << ",accMax=" << (cmd.config.accum_max_x100 / 100.0);
             } else {
                 file_log << "-";
             }
@@ -213,10 +237,40 @@ public:
     void log_no_change(TriggerReason trigger, const ClaudeResponse& response) {
         std::string ts = format_timestamp();
 
-        std::cout << "[" << ts << "] [TUNING] No changes recommended"
-                 << " (HTTP " << response.http_code
-                 << ", " << response.latency_ms << "ms"
-                 << ", tokens: " << response.input_tokens << "/" << response.output_tokens << ")\n";
+        // Verbose console output
+        std::cout << "\n";
+        std::cout << "┌─────────────────────────────────────────────────────────────────────┐\n";
+        std::cout << "│ [" << ts << "] TUNER ANALYSIS COMPLETE                              │\n";
+        std::cout << "├─────────────────────────────────────────────────────────────────────┤\n";
+        std::cout << "│ Decision:    NO CHANGES NEEDED                                      │\n";
+        std::cout << "│ Trigger:     " << std::left << std::setw(54) << trigger_name(trigger) << "│\n";
+        std::cout << "│ Confidence:  " << std::left << std::setw(54) << (std::to_string((int)response.command.confidence) + "%") << "│\n";
+
+        // Show reason (may be multi-line, truncate for display)
+        std::string reason = response.command.reason;
+        if (reason.empty()) reason = "No specific reason provided";
+        if (reason.length() > 52) reason = reason.substr(0, 49) + "...";
+        std::cout << "│ Reason:      " << std::left << std::setw(54) << reason << "│\n";
+
+        // Show symbol if specified
+        if (response.command.symbol[0] != '\0') {
+            std::cout << "│ Symbol:      " << std::left << std::setw(54) << response.command.symbol << "│\n";
+        }
+
+        std::cout << "├─────────────────────────────────────────────────────────────────────┤\n";
+        std::cout << "│ API Stats:   HTTP " << response.http_code
+                  << " | " << response.latency_ms << "ms"
+                  << " | tokens: " << response.input_tokens << "/" << response.output_tokens;
+        // Pad to align
+        int stats_len = 20 + std::to_string(response.http_code).length() +
+                        std::to_string(response.latency_ms).length() +
+                        std::to_string(response.input_tokens).length() +
+                        std::to_string(response.output_tokens).length();
+        for (int i = stats_len; i < 54; ++i) std::cout << " ";
+        std::cout << "│\n";
+        std::cout << "└─────────────────────────────────────────────────────────────────────┘\n";
+        std::cout << std::right;  // Reset alignment
+        std::cout.flush();
 
         if (file_.is_open()) {
             file_ << ts << " | " << trigger_name(trigger)
@@ -275,11 +329,11 @@ struct TunerArgs {
     bool dry_run = false;
     bool verbose = false;
     int interval_sec = 300;     // 5 minutes default
-    int loss_threshold = 3;     // Tune after N consecutive losses
+    int loss_threshold = 1;     // Tune after N consecutive losses
     double loss_pct_trigger = 2.0;  // Tune if symbol loses >N%
     std::string model;          // Claude model (empty = use default/env)
 };
-
+// TODO: another parse_args method? is there a libary that we can use for this one?
 TunerArgs parse_args(int argc, char* argv[]) {
     TunerArgs args;
     for (int i = 1; i < argc; ++i) {
@@ -403,6 +457,14 @@ public:
             trade_events_ = nullptr;
         }
 
+        // Create tuner decision shared memory (for dashboard detail view)
+        tuner_state_ = SharedTunerState::create(SharedTunerState::SHM_NAME);
+        if (tuner_state_) {
+            std::cout << "[IPC] Created tuner decision shared memory\n";
+        } else {
+            std::cerr << "[WARN] Could not create tuner decision shared memory\n";
+        }
+
         // Initialize Claude client
         if (!args_.model.empty()) {
             claude_.set_model(args_.model);
@@ -420,21 +482,55 @@ public:
             std::cerr << "[WARN] News client not available\n";
         }
 
-        // Initialize RAG client
+        // Initialize RAG client (auto-start if not available)
         auto rag_health = rag_.health_check();
         if (rag_health.success && rag_health.is_healthy) {
             std::cout << "[RAG] Connected to RAG service (docs: "
                       << rag_health.collection_size << ", model: "
                       << rag_health.model << ")\n";
         } else {
-            std::cerr << "[WARN] RAG service not available: " << rag_health.error << "\n";
-            std::cerr << "[WARN] Start with: cd rag_service && python rag_server.py\n";
+            std::cout << "[RAG] Service not available, attempting auto-start...\n";
+
+            // Try to start RAG service in background (using venv)
+            int result = std::system(
+                "cd /mnt/c/Users/orhan/projects/hft/rag_service && "
+                "nohup ./venv/bin/python3 rag_server.py > /tmp/rag_server.log 2>&1 &"
+            );
+
+            if (result == 0) {
+                // Wait for service to start (up to 10 seconds)
+                constexpr int MAX_RETRIES = 10; // TODO we should try forever
+                constexpr int RETRY_DELAY_MS = 1000;
+
+                while (true) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(RETRY_DELAY_MS));
+                    rag_health = rag_.health_check();
+                    if (rag_health.success && rag_health.is_healthy) {
+                        std::cout << "[RAG] Auto-started successfully (docs: "
+                                  << rag_health.collection_size << ", model: "
+                                  << rag_health.model << ")\n";
+                        break;
+                    }
+
+                }
+
+                if (!rag_health.success || !rag_health.is_healthy) {
+                    std::cerr << "[WARN] RAG service failed to start after "
+                              << MAX_RETRIES << " attempts\n";
+                    std::cerr << "[WARN] Check /tmp/rag_server.log for errors\n";
+                }
+            } else {
+                std::cerr << "[WARN] Failed to spawn RAG service process\n";
+            }
         }
     }
 
     ~TunerApp() {
         if (symbol_configs_) {
             symbol_configs_->tuner_connected.store(0);
+        }
+        if (tuner_state_) {
+            SharedTunerState::close(tuner_state_);
         }
     }
 
@@ -460,7 +556,10 @@ public:
 
             // Check for scheduled tuning (only if no manual request)
             if (trigger == TriggerReason::None) {
-                uint64_t interval_ns = args_.interval_sec * 1'000'000'000ULL;
+                // Use shared config interval if available, otherwise command-line arg
+                int32_t interval_sec = shared_config_ ?
+                    shared_config_->get_tuner_interval_sec() : args_.interval_sec;
+                uint64_t interval_ns = interval_sec * 1'000'000'000ULL;
                 if (now_ns - last_scheduled_tune > interval_ns) {
                     trigger = TriggerReason::Scheduled;
                     last_scheduled_tune = now_ns;
@@ -508,6 +607,7 @@ private:
     SharedConfig* shared_config_ = nullptr;
     SharedPortfolioState* portfolio_state_ = nullptr;
     SharedRingBuffer<TradeEvent>* trade_events_ = nullptr;
+    SharedTunerState* tuner_state_ = nullptr;  // Detailed tuner decisions for dashboard
     ClaudeClient claude_;
     NewsClient news_;
     RagClient rag_;
@@ -709,6 +809,30 @@ private:
                 cost_metrics.trades_per_hour = 0.0;
             }
 
+            // Expected vs Observed cost analysis (CRITICAL for tuner decisions)
+            // Configured values from defaults.hpp
+            cost_metrics.configured_slippage_bps = 5.0;     // hft::config::costs::SLIPPAGE_BPS
+            cost_metrics.configured_commission_bps = 10.0;  // 0.1% = 10 bps
+            cost_metrics.expected_round_trip_pct = 0.3;     // hft::config::costs::ROUND_TRIP_PCT * 100
+
+            // Calculate observed values from actual trading
+            if (cost_metrics.total_fills > 0 && cost_metrics.avg_trade_value > 0) {
+                // Observed slippage in basis points per fill
+                double slippage_per_fill = cost_metrics.total_slippage / cost_metrics.total_fills;
+                cost_metrics.observed_slippage_bps = (slippage_per_fill / cost_metrics.avg_trade_value) * 10000.0;
+
+                // Observed commission in basis points per fill
+                double comm_per_fill = cost_metrics.total_commissions / cost_metrics.total_fills;
+                cost_metrics.observed_commission_bps = (comm_per_fill / cost_metrics.avg_trade_value) * 10000.0;
+
+                // Actual round-trip cost (2 fills = 1 round trip)
+                cost_metrics.actual_round_trip_pct = cost_metrics.cost_pct_per_trade * 2.0;
+            } else {
+                cost_metrics.observed_slippage_bps = 0;
+                cost_metrics.observed_commission_bps = 0;
+                cost_metrics.actual_round_trip_pct = 0;
+            }
+
             has_cost_data = (cost_metrics.total_fills > 0);
 
             if (args_.verbose && has_cost_data) {
@@ -827,6 +951,32 @@ private:
         // Handle error case
         if (!response.success) {
             history_logger_.log_error(response.error, trigger);
+
+            // Log to shared memory for instant alerting via TunerEvent
+            if (event_log_) {
+                // Determine error code based on error message
+                static constexpr int32_t ERROR_API_FAILED = 1002;
+                static constexpr int32_t ERROR_JSON_PARSE_FAILED = 1001;
+                static constexpr int32_t ERROR_API_TIMEOUT = 1003;
+
+                int32_t error_code = ERROR_API_FAILED;
+                if (response.error.find("JSON") != std::string::npos ||
+                    response.error.find("parse") != std::string::npos) {
+                    error_code = ERROR_JSON_PARSE_FAILED;
+                } else if (response.error.find("timeout") != std::string::npos ||
+                           response.error.find("Timeout") != std::string::npos) {
+                    error_code = ERROR_API_TIMEOUT;
+                }
+
+                auto error_event = TunerEvent::make_error(
+                    "claude_client",
+                    error_code,
+                    true,  // recoverable (API errors are recoverable)
+                    response.error.c_str()
+                );
+                event_log_->log(error_event);
+            }
+
             // Still count this as a tuning attempt (even though it failed)
             if (symbol_configs_) {
                 symbol_configs_->tune_count.fetch_add(1);
@@ -856,6 +1006,18 @@ private:
 
                 tuner_disconnected_ = true;
                 history_logger_.log_error("TUNER DISCONNECTED: Strategies continue autonomously", trigger);
+
+                // Log critical error to shared memory via TunerEvent
+                if (event_log_) {
+                    static constexpr int32_t ERROR_API_FAILED = 1002;
+                    auto error_event = TunerEvent::make_error(
+                        "tuner_app",
+                        ERROR_API_FAILED,
+                        false,  // not recoverable without intervention
+                        "Tuner disconnected after consecutive API failures"
+                    );
+                    event_log_->log(error_event);
+                }
             }
             return;
         }
@@ -943,9 +1105,105 @@ private:
         if (!symbol_configs_) return;
 
         switch (cmd.action) {
-            case TunerCommand::Action::UpdateSymbolConfig:
+            case TunerCommand::Action::UpdateSymbolConfig: {
+                // Capture old config BEFORE update for change tracking
+                SymbolTuningConfig old_config{};
+                const auto* existing = symbol_configs_->find(cmd.symbol);
+                if (existing) {
+                    old_config = *existing;
+                } else {
+                    old_config.init(cmd.symbol);
+                }
+
                 if (symbol_configs_->update(cmd.symbol, cmd.config)) {
                     std::cout << "[APPLY] Updated symbol config for " << cmd.symbol << "\n";
+
+                    // Write detailed decision to SharedTunerState
+                    if (tuner_state_) {
+                        auto* decision = tuner_state_->write_next();
+                        decision->set_symbol(cmd.symbol);
+                        decision->set_reason(cmd.reason);
+                        decision->confidence = cmd.confidence;
+                        decision->urgency = cmd.urgency;
+                        decision->action = static_cast<uint8_t>(cmd.action);
+
+                        // Track parameter changes (compare old vs new)
+                        if (old_config.cooldown_ms != cmd.config.cooldown_ms) {
+                            decision->add_change(TunerParam::Cooldown,
+                                static_cast<float>(old_config.cooldown_ms),
+                                static_cast<float>(cmd.config.cooldown_ms));
+                        }
+                        if (old_config.target_pct_x100 != cmd.config.target_pct_x100) {
+                            decision->add_change(TunerParam::TargetPct,
+                                old_config.target_pct_x100 / 100.0f,
+                                cmd.config.target_pct_x100 / 100.0f);
+                        }
+                        if (old_config.stop_pct_x100 != cmd.config.stop_pct_x100) {
+                            decision->add_change(TunerParam::StopLossPct,
+                                old_config.stop_pct_x100 / 100.0f,
+                                cmd.config.stop_pct_x100 / 100.0f);
+                        }
+                        if (old_config.ema_dev_trending_x100 != cmd.config.ema_dev_trending_x100) {
+                            decision->add_change(TunerParam::EmaDevTrend,
+                                old_config.ema_dev_trending_x100 / 100.0f,
+                                cmd.config.ema_dev_trending_x100 / 100.0f);
+                        }
+                        if (old_config.ema_dev_ranging_x100 != cmd.config.ema_dev_ranging_x100) {
+                            decision->add_change(TunerParam::EmaDevRange,
+                                old_config.ema_dev_ranging_x100 / 100.0f,
+                                cmd.config.ema_dev_ranging_x100 / 100.0f);
+                        }
+                        if (old_config.base_position_x100 != cmd.config.base_position_x100) {
+                            decision->add_change(TunerParam::BasePosition,
+                                old_config.base_position_x100 / 100.0f,
+                                cmd.config.base_position_x100 / 100.0f);
+                        }
+
+                        // Accumulation parameter changes
+                        if (old_config.accum_floor_trending_x100 != cmd.config.accum_floor_trending_x100) {
+                            decision->add_change(TunerParam::AccumFloorTrend,
+                                old_config.accum_floor_trending_x100 / 100.0f,
+                                cmd.config.accum_floor_trending_x100 / 100.0f);
+                        }
+                        if (old_config.accum_floor_ranging_x100 != cmd.config.accum_floor_ranging_x100) {
+                            decision->add_change(TunerParam::AccumFloorRange,
+                                old_config.accum_floor_ranging_x100 / 100.0f,
+                                cmd.config.accum_floor_ranging_x100 / 100.0f);
+                        }
+                        if (old_config.accum_floor_highvol_x100 != cmd.config.accum_floor_highvol_x100) {
+                            decision->add_change(TunerParam::AccumFloorHvol,
+                                old_config.accum_floor_highvol_x100 / 100.0f,
+                                cmd.config.accum_floor_highvol_x100 / 100.0f);
+                        }
+                        if (old_config.accum_boost_per_win_x100 != cmd.config.accum_boost_per_win_x100) {
+                            decision->add_change(TunerParam::AccumBoostWin,
+                                old_config.accum_boost_per_win_x100 / 100.0f,
+                                cmd.config.accum_boost_per_win_x100 / 100.0f);
+                        }
+                        if (old_config.accum_penalty_per_loss_x100 != cmd.config.accum_penalty_per_loss_x100) {
+                            decision->add_change(TunerParam::AccumPenaltyLoss,
+                                old_config.accum_penalty_per_loss_x100 / 100.0f,
+                                cmd.config.accum_penalty_per_loss_x100 / 100.0f);
+                        }
+                        if (old_config.accum_signal_boost_x100 != cmd.config.accum_signal_boost_x100) {
+                            decision->add_change(TunerParam::AccumSignalBoost,
+                                old_config.accum_signal_boost_x100 / 100.0f,
+                                cmd.config.accum_signal_boost_x100 / 100.0f);
+                        }
+                        if (old_config.accum_max_x100 != cmd.config.accum_max_x100) {
+                            decision->add_change(TunerParam::AccumMax,
+                                old_config.accum_max_x100 / 100.0f,
+                                cmd.config.accum_max_x100 / 100.0f);
+                        }
+
+                        tuner_state_->commit_write();
+
+                        if (args_.verbose) {
+                            std::cout << "[TUNER_STATE] Wrote decision #"
+                                      << tuner_state_->total_decisions.load()
+                                      << " with " << (int)decision->num_changes << " changes\n";
+                        }
+                    }
 
                     // Also sync to global shared_config_ so HFT uses these values
                     if (shared_config_) {
@@ -1009,6 +1267,7 @@ private:
                     publish_trade_event(cmd.symbol, StatusCode::TunerConfigUpdate, cmd.confidence);
                 }
                 break;
+            }
 
             case TunerCommand::Action::PauseSymbol: {
                 auto* cfg = symbol_configs_->get_or_create(cmd.symbol);
@@ -1016,6 +1275,18 @@ private:
                     cfg->enabled = 0;
                     symbol_configs_->sequence.fetch_add(1);
                     std::cout << "[APPLY] Paused trading for " << cmd.symbol << "\n";
+
+                    // Write to SharedTunerState
+                    if (tuner_state_) {
+                        auto* decision = tuner_state_->write_next();
+                        decision->set_symbol(cmd.symbol);
+                        decision->set_reason(cmd.reason);
+                        decision->confidence = cmd.confidence;
+                        decision->urgency = cmd.urgency;
+                        decision->action = static_cast<uint8_t>(cmd.action);
+                        decision->add_change(TunerParam::Enabled, 1.0f, 0.0f);
+                        tuner_state_->commit_write();
+                    }
 
                     if (event_log_) {
                         TunerEvent e;
@@ -1036,6 +1307,18 @@ private:
                     cfg->enabled = 1;
                     symbol_configs_->sequence.fetch_add(1);
                     std::cout << "[APPLY] Resumed trading for " << cmd.symbol << "\n";
+
+                    // Write to SharedTunerState
+                    if (tuner_state_) {
+                        auto* decision = tuner_state_->write_next();
+                        decision->set_symbol(cmd.symbol);
+                        decision->set_reason(cmd.reason);
+                        decision->confidence = cmd.confidence;
+                        decision->urgency = cmd.urgency;
+                        decision->action = static_cast<uint8_t>(cmd.action);
+                        decision->add_change(TunerParam::Enabled, 0.0f, 1.0f);
+                        tuner_state_->commit_write();
+                    }
 
                     if (event_log_) {
                         TunerEvent e;

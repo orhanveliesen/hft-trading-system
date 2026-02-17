@@ -1,11 +1,8 @@
 /**
  * Test Symbol-Specific Position Sizing
  *
- * When tuner sets symbol-specific position sizing config,
- * the trader should use those values instead of global config.
- *
- * This is the TDD test for fixing the gap where trader.cpp
- * doesn't read from SharedSymbolConfigs.
+ * Each symbol has its own position sizing parameters in SymbolTuningConfig.
+ * ConfigStrategy uses these directly for position calculations.
  */
 
 #include <iostream>
@@ -51,185 +48,115 @@
 } while(0)
 
 // =============================================================================
-// Mock Portfolio that mirrors trader.cpp Portfolio behavior
-// This allows testing the position sizing logic without full trader dependency
+// TEST 1: Default position sizing values
 // =============================================================================
-class TestablePortfolio {
-public:
-    static constexpr double DEFAULT_BASE_POSITION_PCT = 0.02;  // 2%
-    static constexpr double DEFAULT_MAX_POSITION_PCT = 0.05;   // 5%
-
-    void set_config(const hft::ipc::SharedConfig* cfg) { config_ = cfg; }
-    void set_symbol_configs(const hft::ipc::SharedSymbolConfigs* cfgs) { symbol_configs_ = cfgs; }
-
-    // Symbol-aware position sizing
-    // If symbol has specific config and use_global_position=false, use symbol config
-    // Otherwise fall back to global config
-    double base_position_pct(const char* symbol = nullptr) const {
-        if (symbol && symbol_configs_) {
-            const auto* sym_cfg = symbol_configs_->find(symbol);
-            if (sym_cfg && !sym_cfg->use_global_position()) {
-                return sym_cfg->base_position_x100 / 10000.0;  // x100 -> decimal
-            }
-        }
-        return config_ ? config_->base_position_pct() / 100.0 : DEFAULT_BASE_POSITION_PCT;
-    }
-
-    double max_position_pct(const char* symbol = nullptr) const {
-        if (symbol && symbol_configs_) {
-            const auto* sym_cfg = symbol_configs_->find(symbol);
-            if (sym_cfg && !sym_cfg->use_global_position()) {
-                return sym_cfg->max_position_x100 / 10000.0;  // x100 -> decimal
-            }
-        }
-        return config_ ? config_->max_position_pct() / 100.0 : DEFAULT_MAX_POSITION_PCT;
-    }
-
-private:
-    const hft::ipc::SharedConfig* config_ = nullptr;
-    const hft::ipc::SharedSymbolConfigs* symbol_configs_ = nullptr;
-};
-
-// =============================================================================
-// TEST 1: Without symbol configs, use global config
-// =============================================================================
-TEST(portfolio_uses_global_config_by_default) {
+TEST(symbol_config_default_position_sizing) {
     using namespace hft::ipc;
 
-    SharedConfig global_cfg;
-    global_cfg.init();
-    global_cfg.base_position_pct_x100.store(300);  // 3%
-    global_cfg.max_position_pct_x100.store(800);   // 8%
+    SymbolTuningConfig cfg;
+    cfg.init("BTCUSDT");
 
-    TestablePortfolio portfolio;
-    portfolio.set_config(&global_cfg);
-
-    // Without symbol configs, should use global
-    ASSERT_NEAR(portfolio.base_position_pct(), 0.03, 0.0001);
-    ASSERT_NEAR(portfolio.max_position_pct(), 0.08, 0.0001);
-
-    // Even with symbol name, should use global (no symbol_configs set)
-    ASSERT_NEAR(portfolio.base_position_pct("BTCUSDT"), 0.03, 0.0001);
-    ASSERT_NEAR(portfolio.max_position_pct("BTCUSDT"), 0.08, 0.0001);
+    // Default values (from defaults.hpp)
+    ASSERT_NEAR(cfg.base_position_pct(), 2.0, 0.01);  // 2%
+    ASSERT_NEAR(cfg.max_position_pct(), 5.0, 0.01);   // 5%
+    ASSERT_NEAR(cfg.min_position_pct(), 1.0, 0.01);   // 1% (MIN_POSITION_X100 = 100)
 }
 
 // =============================================================================
-// TEST 2: With symbol configs but use_global_position=true, use global
+// TEST 2: Custom position sizing per symbol
 // =============================================================================
-TEST(portfolio_uses_global_when_use_global_flag_set) {
+TEST(symbol_config_custom_position_sizing) {
     using namespace hft::ipc;
 
-    SharedConfig global_cfg;
-    global_cfg.init();
-    global_cfg.base_position_pct_x100.store(300);  // 3%
-    global_cfg.max_position_pct_x100.store(800);   // 8%
+    SharedSymbolConfigs configs;
+    configs.init();
 
-    SharedSymbolConfigs symbol_cfgs;
-    symbol_cfgs.init();
-
-    // Create symbol config with different values but keep use_global_position=true (default)
-    auto* btc = symbol_cfgs.get_or_create("BTCUSDT");
+    // BTC: aggressive
+    auto* btc = configs.get_or_create("BTCUSDT");
     ASSERT_TRUE(btc != nullptr);
-    btc->base_position_x100 = 500;  // 5% - different from global
-    btc->max_position_x100 = 1200;  // 12% - different from global
-    // use_global_position() is TRUE by default
-    ASSERT_TRUE(btc->use_global_position());
-
-    TestablePortfolio portfolio;
-    portfolio.set_config(&global_cfg);
-    portfolio.set_symbol_configs(&symbol_cfgs);
-
-    // Should use GLOBAL values because use_global_position=true
-    ASSERT_NEAR(portfolio.base_position_pct("BTCUSDT"), 0.03, 0.0001);  // 3% global
-    ASSERT_NEAR(portfolio.max_position_pct("BTCUSDT"), 0.08, 0.0001);   // 8% global
-}
-
-// =============================================================================
-// TEST 3: With symbol configs and use_global_position=false, use symbol-specific
-// THIS IS THE CRITICAL TEST - Currently fails because trader doesn't read symbol configs
-// =============================================================================
-TEST(portfolio_uses_symbol_specific_when_flag_cleared) {
-    using namespace hft::ipc;
-
-    SharedConfig global_cfg;
-    global_cfg.init();
-    global_cfg.base_position_pct_x100.store(300);  // 3%
-    global_cfg.max_position_pct_x100.store(800);   // 8%
-
-    SharedSymbolConfigs symbol_cfgs;
-    symbol_cfgs.init();
-
-    // Create symbol config with different values AND clear use_global_position
-    auto* btc = symbol_cfgs.get_or_create("BTCUSDT");
-    ASSERT_TRUE(btc != nullptr);
-    btc->base_position_x100 = 500;  // 5% symbol-specific
-    btc->max_position_x100 = 1200;  // 12% symbol-specific
-    btc->set_use_global_position(false);  // USE SYMBOL-SPECIFIC
-
-    TestablePortfolio portfolio;
-    portfolio.set_config(&global_cfg);
-    portfolio.set_symbol_configs(&symbol_cfgs);
-
-    // Should use SYMBOL-SPECIFIC values because use_global_position=false
-    ASSERT_NEAR(portfolio.base_position_pct("BTCUSDT"), 0.05, 0.0001);  // 5% symbol
-    ASSERT_NEAR(portfolio.max_position_pct("BTCUSDT"), 0.12, 0.0001);   // 12% symbol
-
-    // Other symbols should still use global
-    ASSERT_NEAR(portfolio.base_position_pct("ETHUSDT"), 0.03, 0.0001);  // 3% global
-    ASSERT_NEAR(portfolio.max_position_pct("ETHUSDT"), 0.08, 0.0001);   // 8% global
-}
-
-// =============================================================================
-// TEST 4: Multiple symbols with different configs
-// =============================================================================
-TEST(portfolio_handles_multiple_symbol_configs) {
-    using namespace hft::ipc;
-
-    SharedConfig global_cfg;
-    global_cfg.init();
-    global_cfg.base_position_pct_x100.store(200);  // 2% global
-    global_cfg.max_position_pct_x100.store(500);   // 5% global
-
-    SharedSymbolConfigs symbol_cfgs;
-    symbol_cfgs.init();
-
-    // BTC: aggressive position sizing
-    auto* btc = symbol_cfgs.get_or_create("BTCUSDT");
     btc->base_position_x100 = 400;  // 4%
     btc->max_position_x100 = 1000;  // 10%
-    btc->set_use_global_position(false);
+    btc->min_position_x100 = 100;   // 1%
 
-    // ETH: conservative position sizing
-    auto* eth = symbol_cfgs.get_or_create("ETHUSDT");
+    // ETH: conservative
+    auto* eth = configs.get_or_create("ETHUSDT");
+    ASSERT_TRUE(eth != nullptr);
     eth->base_position_x100 = 100;  // 1%
     eth->max_position_x100 = 300;   // 3%
-    eth->set_use_global_position(false);
+    eth->min_position_x100 = 50;    // 0.5%
 
-    // SOL: uses global
-    auto* sol = symbol_cfgs.get_or_create("SOLUSDT");
-    sol->base_position_x100 = 999;  // Should be ignored
-    sol->max_position_x100 = 999;   // Should be ignored
-    // use_global_position remains true (default)
+    // Verify BTC values
+    ASSERT_NEAR(btc->base_position_pct(), 4.0, 0.01);
+    ASSERT_NEAR(btc->max_position_pct(), 10.0, 0.01);
+    ASSERT_NEAR(btc->min_position_pct(), 1.0, 0.01);
 
-    TestablePortfolio portfolio;
-    portfolio.set_config(&global_cfg);
-    portfolio.set_symbol_configs(&symbol_cfgs);
+    // Verify ETH values
+    ASSERT_NEAR(eth->base_position_pct(), 1.0, 0.01);
+    ASSERT_NEAR(eth->max_position_pct(), 3.0, 0.01);
+    ASSERT_NEAR(eth->min_position_pct(), 0.5, 0.01);
+}
 
-    // BTC: symbol-specific
-    ASSERT_NEAR(portfolio.base_position_pct("BTCUSDT"), 0.04, 0.0001);
-    ASSERT_NEAR(portfolio.max_position_pct("BTCUSDT"), 0.10, 0.0001);
+// =============================================================================
+// TEST 3: Update position sizing via SharedSymbolConfigs
+// =============================================================================
+TEST(symbol_configs_update_position_sizing) {
+    using namespace hft::ipc;
 
-    // ETH: symbol-specific
-    ASSERT_NEAR(portfolio.base_position_pct("ETHUSDT"), 0.01, 0.0001);
-    ASSERT_NEAR(portfolio.max_position_pct("ETHUSDT"), 0.03, 0.0001);
+    SharedSymbolConfigs configs;
+    configs.init();
 
-    // SOL: global (flag not cleared)
-    ASSERT_NEAR(portfolio.base_position_pct("SOLUSDT"), 0.02, 0.0001);
-    ASSERT_NEAR(portfolio.max_position_pct("SOLUSDT"), 0.05, 0.0001);
+    // Create initial config
+    auto* btc = configs.get_or_create("BTCUSDT");
+    ASSERT_TRUE(btc != nullptr);
+    ASSERT_NEAR(btc->base_position_pct(), 2.0, 0.01);  // Default
 
-    // Unknown symbol: global
-    ASSERT_NEAR(portfolio.base_position_pct("XRPUSDT"), 0.02, 0.0001);
-    ASSERT_NEAR(portfolio.max_position_pct("XRPUSDT"), 0.05, 0.0001);
+    // Create update with new values
+    SymbolTuningConfig new_cfg;
+    new_cfg.init("BTCUSDT");
+    new_cfg.base_position_x100 = 500;  // 5%
+    new_cfg.max_position_x100 = 1500;  // 15%
+    new_cfg.min_position_x100 = 200;   // 2%
+
+    // Apply update
+    bool updated = configs.update("BTCUSDT", new_cfg);
+    ASSERT_TRUE(updated);
+
+    // Verify new values
+    btc = configs.get_or_create("BTCUSDT");
+    ASSERT_NEAR(btc->base_position_pct(), 5.0, 0.01);
+    ASSERT_NEAR(btc->max_position_pct(), 15.0, 0.01);
+    ASSERT_NEAR(btc->min_position_pct(), 2.0, 0.01);
+}
+
+// =============================================================================
+// TEST 4: Each symbol is independent
+// =============================================================================
+TEST(symbols_have_independent_configs) {
+    using namespace hft::ipc;
+
+    SharedSymbolConfigs configs;
+    configs.init();
+
+    // Create configs for multiple symbols
+    auto* btc = configs.get_or_create("BTCUSDT");
+    auto* eth = configs.get_or_create("ETHUSDT");
+    auto* sol = configs.get_or_create("SOLUSDT");
+
+    // Set different values for each
+    btc->base_position_x100 = 400;
+    eth->base_position_x100 = 200;
+    sol->base_position_x100 = 100;
+
+    // Verify each has its own value
+    ASSERT_NEAR(configs.find("BTCUSDT")->base_position_pct(), 4.0, 0.01);
+    ASSERT_NEAR(configs.find("ETHUSDT")->base_position_pct(), 2.0, 0.01);
+    ASSERT_NEAR(configs.find("SOLUSDT")->base_position_pct(), 1.0, 0.01);
+
+    // Modifying one doesn't affect others
+    btc->base_position_x100 = 600;
+    ASSERT_NEAR(configs.find("BTCUSDT")->base_position_pct(), 6.0, 0.01);
+    ASSERT_NEAR(configs.find("ETHUSDT")->base_position_pct(), 2.0, 0.01);  // Unchanged
+    ASSERT_NEAR(configs.find("SOLUSDT")->base_position_pct(), 1.0, 0.01);  // Unchanged
 }
 
 // =============================================================================
@@ -238,10 +165,10 @@ TEST(portfolio_handles_multiple_symbol_configs) {
 int main() {
     std::cout << "Running Symbol Position Sizing Tests:\n";
 
-    RUN_TEST(portfolio_uses_global_config_by_default);
-    RUN_TEST(portfolio_uses_global_when_use_global_flag_set);
-    RUN_TEST(portfolio_uses_symbol_specific_when_flag_cleared);
-    RUN_TEST(portfolio_handles_multiple_symbol_configs);
+    RUN_TEST(symbol_config_default_position_sizing);
+    RUN_TEST(symbol_config_custom_position_sizing);
+    RUN_TEST(symbol_configs_update_position_sizing);
+    RUN_TEST(symbols_have_independent_configs);
 
     std::cout << "\nAll tests passed!\n";
     return 0;

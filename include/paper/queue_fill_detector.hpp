@@ -147,6 +147,32 @@ public:
     {}
 
     /**
+     * Set initial queue depth ahead of our order
+     * Call this AFTER register_order to simulate L2 snapshot data
+     */
+    void set_initial_queue_depth(Symbol symbol, Side side, Price price,
+                                  Quantity depth_ahead) {
+        auto key = make_key(symbol, price, side);
+        auto it = levels_.find(key);
+        if (it == levels_.end()) return;
+
+        auto& level = it->second;
+        if (!level.has_our_order) return;
+
+        // Insert the depth ahead of our order (at front of queue)
+        level.queue.insert(level.queue.begin(), QueueEntry{
+            .sequence = 0,  // Low sequence = ahead of us
+            .quantity = depth_ahead,
+            .remaining = depth_ahead,
+            .is_ours = false,
+            .our_order_id = 0
+        });
+
+        level.our_position = 1;  // Now we're at position 1
+        level.total_ahead_at_entry = depth_ahead;
+    }
+
+    /**
      * Register our order
      */
     void register_order(OrderId id, Symbol symbol, Side side,
@@ -256,40 +282,31 @@ public:
 
         // Process trade through queue (FIFO)
         Quantity remaining_trade = qty;
-        bool reached_us = false;
-        bool passed_us = false;
+        std::vector<OrderId> filled_orders;
 
         for (size_t i = 0; i < level.queue.size() && remaining_trade > 0; ++i) {
             auto& entry = level.queue[i];
-
-            if (entry.is_ours) {
-                reached_us = true;
-            }
 
             Quantity fill_this = std::min(remaining_trade, entry.remaining);
             entry.remaining -= fill_this;
             remaining_trade -= fill_this;
 
-            if (entry.is_ours && fill_this > 0) {
-                // We got some fill (FIFO based)
-                // But in pessimistic mode, we only count it when confirmed
-                level.our_remaining -= fill_this;
-            }
-
-            if (!entry.is_ours && reached_us && fill_this > 0) {
-                // Order AFTER us got filled while we still have remaining
-                // This is weird but possible with partial fills
-                passed_us = true;
+            // If this is our order and it's fully consumed, mark for confirmation
+            if (entry.is_ours && entry.remaining == 0) {
+                filled_orders.push_back(entry.our_order_id);
             }
         }
 
         // Clean up filled entries
         cleanup_filled_entries(level);
 
-        // PESSIMISTIC CONFIRMATION
-        if (passed_us || level.our_remaining == 0) {
-            confirm_fill(level, timestamp_ns);
+        // Confirm fills for each of our orders that were fully consumed
+        for (OrderId oid : filled_orders) {
+            confirm_fill_order(oid, level.price, timestamp_ns);
         }
+
+        // Update has_our_order flag
+        update_has_our_order(level);
 
         // PROBABILISTIC CHECK (for stats, not for actual fill)
         if (config_.track_probabilistic) {
@@ -386,6 +403,7 @@ private:
     void remove_from_front(PriceLevelQueue& level, Quantity qty,
                           uint64_t timestamp_ns) {
         Quantity remaining = qty;
+        std::vector<OrderId> filled_orders;
 
         while (remaining > 0 && !level.queue.empty()) {
             auto& front = level.queue.front();
@@ -394,9 +412,8 @@ private:
                 remaining -= front.remaining;
 
                 if (front.is_ours) {
-                    // Our order got removed (filled or cancelled)
-                    level.our_remaining = 0;
-                    confirm_fill(level, timestamp_ns);
+                    // Our order got filled
+                    filled_orders.push_back(front.our_order_id);
                 }
 
                 level.queue.pop_front();
@@ -410,14 +427,17 @@ private:
                 remaining = 0;
             }
         }
+
+        // Confirm fills for each of our orders
+        for (OrderId oid : filled_orders) {
+            confirm_fill_order(oid, level.price, timestamp_ns);
+        }
+
+        update_has_our_order(level);
     }
 
     void cleanup_filled_entries(PriceLevelQueue& level) {
         while (!level.queue.empty() && level.queue.front().remaining == 0) {
-            if (level.queue.front().is_ours) {
-                // Don't remove our entry, just mark as filled
-                break;
-            }
             level.queue.pop_front();
             if (level.has_our_order && level.our_position > 0) {
                 level.our_position--;
@@ -452,6 +472,44 @@ private:
 
         if (on_fill_) {
             on_fill_(order.id, result);
+        }
+    }
+
+    void confirm_fill_order(OrderId order_id, Price fill_price, uint64_t timestamp_ns) {
+        auto order_it = orders_.find(order_id);
+        if (order_it == orders_.end()) return;
+
+        auto& order = order_it->second;
+        if (!order.is_active) return;
+
+        Quantity fill_qty = order.quantity - order.filled;
+        if (fill_qty == 0) return;
+
+        order.filled = order.quantity;
+        order.is_active = false;
+
+        FillResult result{
+            .filled = true,
+            .confidence = FillConfidence::Confirmed,
+            .fill_quantity = fill_qty,
+            .fill_price = fill_price,
+            .fill_time_ns = timestamp_ns,
+            .queue_wait_ns = timestamp_ns - order.submit_time_ns,
+            .queue_ahead_at_fill = 0
+        };
+
+        if (on_fill_) {
+            on_fill_(order_id, result);
+        }
+    }
+
+    void update_has_our_order(PriceLevelQueue& level) {
+        level.has_our_order = false;
+        for (const auto& entry : level.queue) {
+            if (entry.is_ours && entry.remaining > 0) {
+                level.has_our_order = true;
+                break;
+            }
         }
     }
 

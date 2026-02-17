@@ -275,19 +275,19 @@ private:
     }
 
     void update_rsi(double change) {
-        double gain = (change > 0) ? change : 0;
-        double loss = (change < 0) ? -change : 0;
+        // Branchless gain/loss using std::max (compiles to cmov)
+        double gain = std::max(0.0, change);
+        double loss = std::max(0.0, -change);
 
         // Wilder's smoothing (similar to EMA)
         avg_gain_ = rsi_alpha_ * gain + (1 - rsi_alpha_) * avg_gain_;
         avg_loss_ = rsi_alpha_ * loss + (1 - rsi_alpha_) * avg_loss_;
 
-        if (avg_loss_ == 0) {
-            rsi_ = 100;
-        } else {
-            double rs = avg_gain_ / avg_loss_;
-            rsi_ = 100 - (100 / (1 + rs));
-        }
+        // Branchless RSI calculation: use small epsilon to avoid division by zero
+        // instead of branch. This is faster and more predictable.
+        static constexpr double EPSILON = 1e-10;
+        double rs = avg_gain_ / (avg_loss_ + EPSILON);
+        rsi_ = 100.0 - (100.0 / (1.0 + rs));
     }
 
     void update_bollinger(double price) {

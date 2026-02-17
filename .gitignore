@@ -86,3 +86,6 @@ external/*
 build-coverage/
 rag_service/venv/
 rag_service/chroma_db/
+
+# CTest output
+Testing/

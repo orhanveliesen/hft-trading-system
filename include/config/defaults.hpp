@@ -38,6 +38,16 @@ namespace costs {
 }
 
 // =============================================================================
+// Scaling Constants (for converting exchange data to internal types)
+// =============================================================================
+namespace scaling {
+    // Quantity scaling: convert double (e.g., 0.5 BTC) to uint32_t
+    // Scale factor of 10000 preserves 4 decimal places while fitting in uint32_t
+    // Range: 0.0001 to 429,496.7295 base units
+    constexpr double QUANTITY_SCALE = 10000.0;
+}
+
+// =============================================================================
 // Target & Stop Loss (derived from round-trip costs)
 // =============================================================================
 namespace targets {
@@ -188,6 +198,10 @@ namespace smart_strategy {
     constexpr double SIGNAL_CAUTIOUS = 0.7;            // Higher threshold when cautious
     constexpr int32_t SIGNAL_CAUTIOUS_X100 = 70;       // 0.7 * 100
 
+    // Order book imbalance scale factor for signal calculation
+    // With 60/40 imbalance (0.2), scale of 2.0 produces score 0.4 (near NORMAL threshold)
+    constexpr double OB_IMBALANCE_SCALE = 2.0;
+
     // Position sizing
     constexpr double MIN_POSITION_PCT = 0.01;          // 1% min position
     constexpr int32_t MIN_POSITION_X100 = 100;         // 1% * 100
@@ -195,6 +209,31 @@ namespace smart_strategy {
     // Risk/reward
     constexpr double MIN_RISK_REWARD = 0.6;            // Allow stop > target for low win rate
     constexpr int32_t MIN_RISK_REWARD_X100 = 60;       // 0.6 * 100
+
+    // Accumulation Control (tuner-controlled aggressiveness when adding to position)
+    // These define how aggressively we accumulate when already in a position
+
+    // Floor by regime (minimum factor even at max position)
+    constexpr double ACCUM_FLOOR_TRENDING = 0.50;      // 50% floor when trending
+    constexpr int8_t ACCUM_FLOOR_TRENDING_X100 = 50;
+    constexpr double ACCUM_FLOOR_RANGING = 0.30;       // 30% floor when ranging
+    constexpr int8_t ACCUM_FLOOR_RANGING_X100 = 30;
+    constexpr double ACCUM_FLOOR_HIGHVOL = 0.20;       // 20% floor when high volatility
+    constexpr int8_t ACCUM_FLOOR_HIGHVOL_X100 = 20;
+
+    // Streak adjustments
+    constexpr double ACCUM_BOOST_PER_WIN = 0.10;       // +10% per consecutive win
+    constexpr int8_t ACCUM_BOOST_PER_WIN_X100 = 10;
+    constexpr double ACCUM_PENALTY_PER_LOSS = 0.10;    // -10% per consecutive loss
+    constexpr int8_t ACCUM_PENALTY_PER_LOSS_X100 = 10;
+
+    // Signal strength boost
+    constexpr double ACCUM_SIGNAL_BOOST = 0.10;        // +10% for strong signals (>=0.7)
+    constexpr int8_t ACCUM_SIGNAL_BOOST_X100 = 10;
+
+    // Maximum accumulation factor
+    constexpr double ACCUM_MAX = 0.80;                 // Never exceed 80%
+    constexpr int8_t ACCUM_MAX_X100 = 80;
 }
 
 // =============================================================================

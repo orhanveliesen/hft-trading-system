@@ -58,6 +58,9 @@ add_test(NAME FeedHandlerTests COMMAND test_feed_handler)
 add_executable(test_network tests/test_network.cpp)
 add_test(NAME NetworkTests COMMAND test_network)
 
+add_executable(test_signal_handler tests/test_signal_handler.cpp)
+add_test(NAME SignalHandlerTests COMMAND test_signal_handler)
+
 add_executable(test_integration tests/test_integration.cpp)
 target_link_libraries(test_integration trader_core)
 add_test(NAME IntegrationTests COMMAND test_integration)
@@ -177,6 +180,9 @@ add_test(NAME ExecutionOversellingTests COMMAND test_execution_overselling)
 add_executable(test_portfolio_sell tests/test_portfolio_sell.cpp)
 add_test(NAME PortfolioSellTests COMMAND test_portfolio_sell)
 
+add_executable(test_position_limit tests/test_position_limit.cpp)
+add_test(NAME PositionLimitTests COMMAND test_position_limit)
+
 add_executable(test_position_store tests/test_position_store.cpp)
 target_link_libraries(test_position_store rt)
 add_test(NAME PositionStoreTests COMMAND test_position_store)
@@ -198,6 +204,29 @@ add_test(NAME SymbolPositionSizingTests COMMAND test_symbol_position_sizing)
 
 add_executable(test_streak_tracker tests/test_streak_tracker.cpp)
 add_test(NAME StreakTrackerTests COMMAND test_streak_tracker)
+
+add_executable(test_config_strategy tests/test_config_strategy.cpp)
+target_link_libraries(test_config_strategy pthread rt)
+add_test(NAME ConfigStrategyTests COMMAND test_config_strategy)
+
+add_executable(test_shared_tuner_state tests/test_shared_tuner_state.cpp)
+target_link_libraries(test_shared_tuner_state pthread rt)
+add_test(NAME SharedTunerStateTests COMMAND test_shared_tuner_state)
+
+add_executable(test_paper_order_sender tests/test_paper_order_sender.cpp)
+target_link_libraries(test_paper_order_sender pthread rt)
+add_test(NAME PaperOrderSenderTests COMMAND test_paper_order_sender)
+
+add_executable(test_error_events tests/test_error_events.cpp)
+target_link_libraries(test_error_events pthread rt)
+add_test(NAME ErrorEventTests COMMAND test_error_events)
+
+add_executable(test_claude_client_parser tests/test_claude_client_parser.cpp)
+target_link_libraries(test_claude_client_parser pthread curl)
+add_test(NAME ClaudeClientParserTests COMMAND test_claude_client_parser)
+
+add_executable(test_regime_detector_perf tests/test_regime_detector_perf.cpp)
+add_test(NAME RegimeDetectorPerfTests COMMAND test_regime_detector_perf)
 
 # === Tools ===
 add_executable(trader tools/trader.cpp)

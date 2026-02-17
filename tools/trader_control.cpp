@@ -117,7 +117,7 @@ void print_params(const SharedConfig* config, const char* shm_name) {
     std::cout << "  min_trade_value:   " << std::setw(8) << config->min_trade_value() << "$   Minimum trade\n";
     std::cout << "  cooldown_ms:       " << std::setw(8) << config->get_cooldown_ms() << "ms  Trade cooldown\n";
     std::cout << "  signal_strength:   " << std::setw(8) << config->get_signal_strength() << "    (1=Med, 2=Strong)\n";
-    std::cout << "  auto_tune:         " << std::setw(8) << (config->is_auto_tune_enabled() ? "ON" : "OFF") << "    Adaptive tuning\n";
+    std::cout << "  auto_tune:         " << std::setw(8) << (!config->is_tuner_off() ? "ON" : "OFF") << "    Adaptive tuning\n";
 
     std::cout << "\n[ Position Sizing ]\n";
     std::cout << "  sizing_mode:       " << std::setw(8) << (config->is_percentage_based_sizing() ? "Percent" : "Units") << "    (0=%, 1=units)\n";
@@ -171,9 +171,9 @@ void print_status(const SharedConfig* config, const SharedPaperConfig* paper_con
     std::cout << "  cooldown_ms:     " << config->get_cooldown_ms() << "ms\n";
     std::cout << "  signal_strength: " << config->get_signal_strength()
               << " (" << (config->get_signal_strength() >= 2 ? "Strong" : "Medium") << " required)\n";
-    std::cout << "  auto_tune:       " << (config->is_auto_tune_enabled() ? "ON" : "OFF") << "\n\n";
+    std::cout << "  auto_tune:       " << (!config->is_tuner_off() ? "ON" : "OFF") << "\n\n";
 
-    if (config->is_auto_tune_enabled()) {
+    if (!config->is_tuner_off()) {
         std::cout << "[ Auto-Tune Rules (configurable) ]\n";
         std::cout << "  " << config->get_losses_to_cautious() << " losses  -> cooldown +50%\n";
         std::cout << "  " << config->get_losses_to_tighten_signal() << " losses  -> signal_strength = Strong\n";
@@ -226,7 +226,7 @@ void print_status(const SharedConfig* config, const SharedPaperConfig* paper_con
 
     // AI Tuner & Order Type
     std::cout << "[ AI Tuner & Order Execution ]\n";
-    std::cout << "  tuner_mode:       " << (config->is_tuner_mode() ? "ON (AI unified)" : "OFF (traditional)") << "\n";
+    std::cout << "  tuner_mode:       " << ((config->is_tuner_on() || config->is_tuner_paused()) ? "ON (AI unified)" : "OFF (traditional)") << "\n";
     const char* order_type_names[] = {"Auto", "MarketOnly", "LimitOnly", "Adaptive"};
     uint8_t ot = config->get_order_type_default();
     std::cout << "  order_type:       " << (ot <= 3 ? order_type_names[ot] : "Unknown")
@@ -327,7 +327,7 @@ int main(int argc, char* argv[]) {
         } else if (param == "signal_strength") {
             std::cout << config->get_signal_strength() << "\n";
         } else if (param == "auto_tune") {
-            std::cout << (config->is_auto_tune_enabled() ? "on" : "off") << "\n";
+            std::cout << (!config->is_tuner_off() ? "on" : "off") << "\n";
         } else if (param == "base_position_pct") {
             std::cout << config->base_position_pct() << "\n";
         } else if (param == "max_position_pct") {
@@ -360,7 +360,7 @@ int main(int argc, char* argv[]) {
         } else if (param == "spike_cooldown") {
             std::cout << config->get_spike_cooldown() << "\n";
         } else if (param == "tuner_mode") {
-            std::cout << (config->is_tuner_mode() ? "1" : "0") << "\n";
+            std::cout << ((config->is_tuner_on() || config->is_tuner_paused()) ? "1" : "0") << "\n";
         } else if (param == "order_type") {
             std::cout << static_cast<int>(config->get_order_type_default()) << "\n";
         } else if (param == "limit_offset_bps") {
@@ -452,7 +452,7 @@ int main(int argc, char* argv[]) {
                       << " (" << (value >= 2 ? "Strong" : "Medium") << " signals required)\n";
         } else if (param == "auto_tune") {
             bool enabled = (value > 0);
-            config->set_auto_tune_enabled(enabled);
+            config->set_tuner_state(enabled ? hft::ipc::TunerState::ON : hft::ipc::TunerState::OFF);
             std::cout << "auto_tune = " << (enabled ? "ON" : "OFF") << "\n";
             if (enabled) {
                 std::cout << "  (Adaptive parameter tuning based on win/loss streaks)\n";
@@ -509,7 +509,7 @@ int main(int argc, char* argv[]) {
             std::cout << "spike_cooldown = " << static_cast<int32_t>(value) << " bars\n";
         } else if (param == "tuner_mode") {
             bool enabled = (value > 0);
-            config->set_tuner_mode(enabled);
+            config->set_tuner_state(enabled ? hft::ipc::TunerState::ON : hft::ipc::TunerState::OFF);
             std::cout << "tuner_mode = " << (enabled ? "ON (AI unified strategy)" : "OFF (traditional strategies)") << "\n";
         } else if (param == "order_type") {
             uint8_t type = static_cast<uint8_t>(value);

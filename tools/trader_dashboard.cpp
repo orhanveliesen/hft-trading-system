@@ -465,7 +465,7 @@ struct DashboardData {
             }
             case EventType::TargetHit: {
                 targets++;
-                double pnl = e.pnl_cents / 100.0;
+                double pnl = e.pnl;
                 total_profit += pnl;
 
                 // NOTE: Don't modify positions here - use shared memory for position state
@@ -479,7 +479,7 @@ struct DashboardData {
             }
             case EventType::StopLoss: {
                 stops++;
-                double pnl = e.pnl_cents / 100.0;
+                double pnl = e.pnl;
                 total_loss += std::abs(pnl);
 
                 // NOTE: Don't modify positions here - use shared memory for position state
@@ -1006,11 +1006,11 @@ void render_dashboard(DashboardData& data, const SharedPortfolioState* portfolio
 
     ImGui::Columns(6, "tune_cols", false);
 
-    // Auto-Tune Status
-    ImGui::Text("Auto-Tune");
-    bool auto_tune_on = config && config->is_auto_tune_enabled();
-    ImGui::PushStyleColor(ImGuiCol_Text, auto_tune_on ? ImVec4(0.2f, 1.0f, 0.2f, 1.0f) : ImVec4(0.6f, 0.6f, 0.6f, 1.0f));
-    ImGui::Text("%s", auto_tune_on ? "ON" : "OFF");
+    // Tuner Status
+    ImGui::Text("Tuner");
+    bool tuner_on = config && config->is_tuner_on();
+    ImGui::PushStyleColor(ImGuiCol_Text, tuner_on ? ImVec4(0.2f, 1.0f, 0.2f, 1.0f) : ImVec4(0.6f, 0.6f, 0.6f, 1.0f));
+    ImGui::Text("%s", tuner_on ? "ON" : "OFF");
     ImGui::PopStyleColor();
     ImGui::NextColumn();
 
@@ -1113,7 +1113,7 @@ void render_dashboard(DashboardData& data, const SharedPortfolioState* portfolio
 
             // Strategy (from config mapping or SMART when tuner is on)
             ImGui::TableNextColumn();
-            if (config && config->is_tuner_mode()) {
+            if (config && config->is_tuner_on()) {
                 ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.8f, 0.4f, 1.0f, 1.0f));  // Purple for AI
                 ImGui::Text("SMART");
                 ImGui::PopStyleColor();
@@ -1226,7 +1226,7 @@ void render_dashboard(DashboardData& data, const SharedPortfolioState* portfolio
             bool is_alive = config->is_trader_alive(3);  // 3 second timeout
             bool is_paper = config->is_paper_trading();
             bool is_manual = config->is_manual_override();
-            bool is_tuner_mode = config->is_tuner_mode();
+            bool is_tuner_mode = config->is_tuner_on();
 
             // Check if Trader is really alive (heartbeat check)
             if (trader_status == 2 && !is_alive) {
@@ -1402,60 +1402,6 @@ void render_dashboard(DashboardData& data, const SharedPortfolioState* portfolio
                 "EXIT_ONLY: Close positions, no new trades\n\n"
                 "Use: Manual override based on\n"
                 "market conditions");
-        }
-
-        ImGui::Spacing();
-
-        // ===== TUNER & MANUAL OVERRIDE =====
-        {
-            // Tuner Mode toggle
-            bool tuner_on = config->is_tuner_mode();
-            if (ImGui::Checkbox("AI Tuner Mode", &tuner_on)) {
-                config->set_tuner_mode(tuner_on);
-                // Disable manual override when tuner is enabled
-                if (tuner_on && config->is_manual_override()) {
-                    config->set_manual_override(false);
-                }
-            }
-            if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip(
-                    "AI TUNER MODE\n\n"
-                    "OFF: Traditional strategies\n"
-                    "     (TechIndicators, MarketMaker, etc.)\n"
-                    "ON:  AI-controlled unified strategy\n"
-                    "     Parameters tuned by Claude\n\n"
-                    "Requires: hft_tuner running");
-            }
-
-            ImGui::SameLine();
-
-            // Manual Override toggle (with visual indicator)
-            bool manual_on = config->is_manual_override();
-            if (manual_on) {
-                ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0.6f, 0.2f, 0.0f, 0.8f));
-                ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, ImVec4(0.8f, 0.3f, 0.0f, 0.8f));
-                ImGui::PushStyleColor(ImGuiCol_CheckMark, ImVec4(1.0f, 0.6f, 0.0f, 1.0f));
-            }
-            if (ImGui::Checkbox("Manual Override", &manual_on)) {
-                config->set_manual_override(manual_on);
-                // Disable tuner mode when manual override is enabled
-                if (manual_on && config->is_tuner_mode()) {
-                    config->set_tuner_mode(false);
-                }
-            }
-            if (manual_on) {
-                ImGui::PopStyleColor(3);
-            }
-            if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip(
-                    "MANUAL OVERRIDE\n\n"
-                    "OFF: Normal operation\n"
-                    "     (Tuner can adjust params)\n"
-                    "ON:  Full manual control\n"
-                    "     Tuner recommendations ignored\n\n"
-                    "Use: Testing specific configs\n"
-                    "or overriding AI decisions");
-            }
         }
 
         ImGui::Spacing();
@@ -1768,21 +1714,17 @@ void render_dashboard(DashboardData& data, const SharedPortfolioState* portfolio
             // --- Trade Filtering ---
             ImGui::TextColored(ImVec4(0.6f, 0.8f, 1.0f, 1.0f), "Trade Filtering");
 
-            // Auto-Tune toggle
-            bool auto_tune = config->is_auto_tune_enabled();
-            if (ImGui::Checkbox("Auto-Tune", &auto_tune)) {
-                config->set_auto_tune_enabled(auto_tune);
+            // Tuner Paused toggle
+            bool tuner_paused = config->is_tuner_paused();
+            if (ImGui::Checkbox("Pause Tuner", &tuner_paused)) {
+                config->set_tuner_state(tuner_paused ? TunerState::PAUSED : TunerState::ON);
             }
             if (ImGui::IsItemHovered()) {
                 ImGui::SetTooltip(
-                    "AUTO-TUNE MODE\n\n"
-                    "Automatically adjusts parameters based on\n"
-                    "win/loss streaks:\n\n"
-                    "2 losses  -> cooldown +50%%\n"
-                    "3 losses  -> signal = Strong\n"
-                    "4 losses  -> min_trade +50%%\n"
-                    "5+ losses -> TRADING PAUSED\n"
-                    "3 wins    -> gradually relax params");
+                    "TUNER PAUSE\n\n"
+                    "PAUSED: ConfigStrategy runs with frozen config\n"
+                    "        Tuner does NOT make changes\n"
+                    "ON:     AI tuning active, parameters updated");
             }
 
             // Cooldown
@@ -2006,31 +1948,51 @@ void render_dashboard(DashboardData& data, const SharedPortfolioState* portfolio
 
         ImGui::Separator();
 
-        // Tuner Paused checkbox
-        bool tuner_paused = config->is_tuner_paused();
-        if (tuner_paused) {
-            ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0.6f, 0.3f, 0.0f, 0.8f));
-            ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, ImVec4(0.8f, 0.4f, 0.0f, 0.8f));
-            ImGui::PushStyleColor(ImGuiCol_CheckMark, ImVec4(1.0f, 0.6f, 0.0f, 1.0f));
-        }
-        if (ImGui::Checkbox("Pause Tuner", &tuner_paused)) {
-            config->set_tuner_paused(tuner_paused);
-        }
-        if (tuner_paused) {
-            ImGui::PopStyleColor(3);
+        // AI Tuner Mode toggle (enable/disable)
+        bool tuner_on = config->is_tuner_on() || config->is_tuner_paused();
+        if (ImGui::Checkbox("AI Tuner Enabled", &tuner_on)) {
+            config->set_tuner_state(tuner_on ? TunerState::ON : TunerState::OFF);
         }
         if (ImGui::IsItemHovered()) {
             ImGui::SetTooltip(
-                "PAUSE/RESUME TUNER\n\n"
-                "When paused:\n"
-                "- Scheduled tuning is skipped\n"
-                "- Manual trigger still works\n"
-                "- Useful for testing manual configs\n\n"
-                "Resume to let AI optimize again");
+                "AI TUNER MODE\n\n"
+                "OFF: Traditional strategies\n"
+                "     (TechIndicators, MarketMaker, etc.)\n"
+                "ON:  AI-controlled unified strategy\n"
+                "     Parameters tuned by Claude\n\n"
+                "Requires: trader_tuner running");
         }
 
-        // Force Tune button
-        ImGui::SameLine();
+        // Pause Tuner checkbox (only visible when tuner is enabled)
+        if (tuner_on) {
+            ImGui::SameLine();
+            bool tuner_paused = config->is_tuner_paused();
+            if (tuner_paused) {
+                ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0.6f, 0.3f, 0.0f, 0.8f));
+                ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, ImVec4(0.8f, 0.4f, 0.0f, 0.8f));
+                ImGui::PushStyleColor(ImGuiCol_CheckMark, ImVec4(1.0f, 0.6f, 0.0f, 1.0f));
+            }
+            if (ImGui::Checkbox("Paused", &tuner_paused)) {
+                config->set_tuner_state(tuner_paused ? TunerState::PAUSED : TunerState::ON);
+            }
+            if (tuner_paused) {
+                ImGui::PopStyleColor(3);
+            }
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip(
+                    "PAUSE/RESUME TUNER\n\n"
+                    "When paused:\n"
+                    "- Scheduled tuning is skipped\n"
+                    "- Manual trigger still works\n"
+                    "- Useful for testing manual configs\n\n"
+                    "Resume to let AI optimize again");
+            }
+        }
+
+        // Force Tune button (only when tuner is enabled)
+        if (tuner_on) {
+            ImGui::SameLine();
+        }
         if (ImGui::Button("Force Tune")) {
             config->request_manual_tune();
         }

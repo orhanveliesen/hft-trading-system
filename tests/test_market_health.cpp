@@ -40,13 +40,18 @@ TEST(test_initial_state_healthy) {
 TEST(test_no_crash_below_threshold) {
     MarketHealthMonitor monitor(10, 0.5);  // 10 symbols, 50% crash at 5+
 
-    // 4 symbols spiking = 40% < 50% threshold
+    // 4 symbols spiking out of 10 = 40% < 50% threshold
+    // Must update ALL 10 symbols since ratio = spike/active
     monitor.update_symbol(0, true);   // spike
     monitor.update_symbol(1, true);   // spike
     monitor.update_symbol(2, true);   // spike
     monitor.update_symbol(3, true);   // spike
     monitor.update_symbol(4, false);  // normal
     monitor.update_symbol(5, false);  // normal
+    monitor.update_symbol(6, false);  // normal
+    monitor.update_symbol(7, false);  // normal
+    monitor.update_symbol(8, false);  // normal
+    monitor.update_symbol(9, false);  // normal
 
     ASSERT_EQ(monitor.spike_count(), 4);
     ASSERT_FALSE(monitor.is_crash());
@@ -85,18 +90,22 @@ TEST(test_crash_above_threshold) {
 TEST(test_symbol_recovery_clears_spike) {
     MarketHealthMonitor monitor(10, 0.5);
 
-    // 5 symbols spike → crash
+    // First, activate all 10 symbols
+    // 5 symbols spike, 5 normal = 50% = crash
     for (int i = 0; i < 5; ++i) {
-        monitor.update_symbol(i, true);
+        monitor.update_symbol(i, true);  // spiking
     }
-    ASSERT_TRUE(monitor.is_crash());
+    for (int i = 5; i < 10; ++i) {
+        monitor.update_symbol(i, false);  // normal
+    }
+    ASSERT_TRUE(monitor.is_crash());  // 5/10 = 50% >= threshold
 
-    // 2 symbols recover → no longer crash
+    // 2 symbols recover → 3/10 = 30% < 50% → no longer crash
     monitor.update_symbol(0, false);
     monitor.update_symbol(1, false);
 
     ASSERT_EQ(monitor.spike_count(), 3);
-    ASSERT_FALSE(monitor.is_crash());
+    ASSERT_FALSE(monitor.is_crash());  // 3/10 = 30% < 50%
 }
 
 TEST(test_cooldown_after_crash) {

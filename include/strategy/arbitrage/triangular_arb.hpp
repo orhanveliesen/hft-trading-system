@@ -389,15 +389,21 @@ private:
         for (size_t i = 0; i < relations_.size(); ++i) {
             const auto& rel = relations_[i];
 
-            // Map by original and normalized symbols
+            // Map by original and normalized symbols (avoid duplicates)
             symbol_to_relations_[rel.leg1.original].push_back(i);
-            symbol_to_relations_[rel.leg1.to_string()].push_back(i);
+            if (rel.leg1.original != rel.leg1.to_string()) {
+                symbol_to_relations_[rel.leg1.to_string()].push_back(i);
+            }
 
             symbol_to_relations_[rel.leg2.original].push_back(i);
-            symbol_to_relations_[rel.leg2.to_string()].push_back(i);
+            if (rel.leg2.original != rel.leg2.to_string()) {
+                symbol_to_relations_[rel.leg2.to_string()].push_back(i);
+            }
 
             symbol_to_relations_[rel.leg3.original].push_back(i);
-            symbol_to_relations_[rel.leg3.to_string()].push_back(i);
+            if (rel.leg3.original != rel.leg3.to_string()) {
+                symbol_to_relations_[rel.leg3.to_string()].push_back(i);
+            }
         }
     }
 

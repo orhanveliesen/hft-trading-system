@@ -25,6 +25,7 @@
 #include "../include/risk/enhanced_risk_manager.hpp"
 #include "../include/ipc/trade_event.hpp"
 #include "../include/ipc/shared_ring_buffer.hpp"
+#include "../include/ipc/event_publisher.hpp"
 #include "../include/ipc/shared_portfolio_state.hpp"
 #include "../include/ipc/shared_config.hpp"
 #include "../include/ipc/symbol_config.hpp"
@@ -38,6 +39,8 @@
 #include "../include/strategy/market_health_monitor.hpp"
 #include "../include/trading/trade_recorder.hpp"
 #include "../include/ipc/shared_ledger.hpp"
+#include "../include/paper/queue_fill_detector.hpp"
+#include "../include/paper/paper_order_sender.hpp"
 // Position persistence removed - paper trading restarts fresh
 
 // New unified architecture includes
@@ -47,12 +50,18 @@
 #include "../include/strategy/momentum_strategy.hpp"
 #include "../include/strategy/fair_value_strategy.hpp"
 #include "../include/strategy/strategy_selector.hpp"
+#include "../include/strategy/config_strategy.hpp"
 #include "../include/execution/execution_engine.hpp"
 #include "../include/exchange/iexchange.hpp"
 #include "../include/exchange/paper_exchange_adapter.hpp"
 #include "../include/exchange/binance_rest.hpp"
+#include "../include/exchange/production_order_sender.hpp"
 #include "../include/trading/portfolio.hpp"
 #include "../include/strategy/strategy_constants.hpp"
+#include "../include/strategy/symbol_strategy.hpp"
+#include "../include/config/defaults.hpp"
+#include "../include/util/system.hpp"
+#include "../include/util/cli.hpp"
 #include <iostream>
 #include <iomanip>
 #include <chrono>
@@ -97,510 +106,52 @@ using AutoTuneMultipliers = hft::strategy::AutoTuneMultipliers;
 std::atomic<bool> g_running{true};
 ipc::SharedConfig* g_shared_config = nullptr;  // For graceful shutdown signaling
 
-void shutdown_signal_handler(int sig) {
-    // Mark as shutting down in shared memory (dashboard can see this immediately)
+/**
+ * Pre-shutdown callback for signal handler.
+ * Updates shared config status before g_running is set to false.
+ */
+void trader_pre_shutdown() {
     if (g_shared_config) {
         g_shared_config->set_trader_status(3);  // shutting_down
         g_shared_config->update_heartbeat();
     }
-    std::cout << "\n\n[SHUTDOWN] Received signal " << sig << ", stopping gracefully...\n";
-    g_running = false;
 }
 
 // ============================================================================
-// Event Publisher (lock-free IPC to observer)
+// Using declarations
 // ============================================================================
 
 using namespace hft::ipc;
-
-/**
- * EventPublisher - Publishes trading events to shared memory
- *
- * Used by HFT engine to send events to observer process.
- * Lock-free, ~5ns per publish, no allocation.
- */
-class EventPublisher {
-public:
-    explicit EventPublisher(bool enabled = true) : enabled_(enabled) {
-        if (enabled_) {
-            try {
-                buffer_ = std::make_unique<SharedRingBuffer<TradeEvent>>("/trader_events", true);
-                std::cout << "[IPC] Event publisher initialized (buffer: "
-                          << buffer_->capacity() << " events)\n";
-            } catch (const std::exception& e) {
-                std::cerr << "[IPC] Warning: Could not create shared memory: " << e.what() << "\n";
-                enabled_ = false;
-            }
-        }
-    }
-
-    // Publish fill event
-    void fill(uint32_t sym, const char* ticker, uint8_t side, double price, double qty, uint32_t oid) {
-        if (!enabled_) return;
-        auto ts = now_ns();
-        buffer_->push(TradeEvent::fill(seq_++, ts, sym, ticker, side, price, qty, oid));
-    }
-
-    // Publish target hit event
-    void target_hit(uint32_t sym, const char* ticker, double entry, double exit, double qty) {
-        if (!enabled_) return;
-        auto ts = now_ns();
-        int64_t pnl_cents = static_cast<int64_t>((exit - entry) * qty * 100);
-        buffer_->push(TradeEvent::target_hit(seq_++, ts, sym, ticker, entry, exit, qty, pnl_cents));
-    }
-
-    // Publish stop loss event
-    void stop_loss(uint32_t sym, const char* ticker, double entry, double exit, double qty) {
-        if (!enabled_) return;
-        auto ts = now_ns();
-        int64_t pnl_cents = static_cast<int64_t>((exit - entry) * qty * 100);  // Negative for loss
-        buffer_->push(TradeEvent::stop_loss(seq_++, ts, sym, ticker, entry, exit, qty, pnl_cents));
-    }
-
-    // Publish signal event
-    void signal(uint32_t sym, const char* ticker, uint8_t side, uint8_t strength, double price) {
-        if (!enabled_) return;
-        auto ts = now_ns();
-        buffer_->push(TradeEvent::signal(seq_++, ts, sym, ticker, side, strength, price));
-    }
-
-    // Publish regime change event
-    void regime_change(uint32_t sym, const char* ticker, uint8_t new_regime) {
-        if (!enabled_) return;
-        auto ts = now_ns();
-        buffer_->push(TradeEvent::regime_change(seq_++, ts, sym, ticker, new_regime));
-    }
-
-    // Publish status event (for debugging/monitoring)
-    void status(uint32_t sym, const char* ticker, StatusCode code,
-                double price = 0, uint8_t sig_strength = 0, uint8_t regime = 0) {
-        if (!enabled_) return;
-        auto ts = now_ns();
-        buffer_->push(TradeEvent::status(seq_++, ts, sym, ticker, code, price, sig_strength, regime));
-    }
-
-    // Publish heartbeat (called periodically)
-    void heartbeat() {
-        if (!enabled_) return;
-        auto ts = now_ns();
-        buffer_->push(TradeEvent::status(seq_++, ts, 0, "SYS", StatusCode::Heartbeat));
-    }
-
-    bool enabled() const { return enabled_; }
-    uint32_t sequence() const { return seq_; }
-
-private:
-    bool enabled_ = false;
-    std::unique_ptr<SharedRingBuffer<TradeEvent>> buffer_;
-    std::atomic<uint32_t> seq_{0};
-
-    static uint64_t now_ns() {
-        return std::chrono::steady_clock::now().time_since_epoch().count();
-    }
-};
+using hft::ipc::EventPublisher;
 
 // ============================================================================
-// CLI Arguments
+// CLI Arguments (from util/cli.hpp)
 // ============================================================================
-
-struct CLIArgs {
-    bool paper_mode = false;
-    bool help = false;
-    bool verbose = false;
-    bool unified_strategy = false;  // Use unified strategy architecture
-    int cpu_affinity = -1;    // CPU core to pin to (-1 = no pinning)
-    std::vector<std::string> symbols;
-    int duration = 0;  // 0 = unlimited
-    double capital = 100000.0;
-    int max_position = 10;
-
-};
-
-void print_help() {
-    std::cout << R"(
-HFT Trading System (Lock-Free)
-==============================
-
-Usage: hft [options]
-
-Modes:
-  (default)              Production mode - REAL orders
-  --paper, -p            Paper trading mode - simulated fills
-
-Options:
-  -s, --symbols SYMS     Symbols (comma-separated, default: all USDT pairs)
-  -d, --duration SECS    Duration in seconds (0 = unlimited)
-  -c, --capital USD      Initial capital (default: 100000)
-  -m, --max-pos N        Max position per symbol (default: 10)
-  --cpu N                Pin to CPU core N (reduces latency)
-  --unified              Use unified strategy architecture (IStrategy + ExecutionEngine)
-  -v, --verbose          Verbose output (fills, targets, stops)
-  -h, --help             Show this help
-
-Examples:
-  hft --paper                      # Paper trading, all symbols
-  hft --paper -s BTCUSDT,ETHUSDT   # Paper, two symbols
-  hft --paper -d 300 --cpu 2       # Paper, 5 min, pinned to CPU 2
-  hft --paper --restore            # Resume previous session
-
-Monitoring:
-  Use trader_observer for real-time dashboard (separate process, lock-free IPC)
-
-WARNING: Without --paper flag, REAL orders will be sent!
-)";
-}
-
-std::vector<std::string> split_symbols(const std::string& s) {
-    std::vector<std::string> result;
-    std::stringstream ss(s);
-    std::string item;
-    while (std::getline(ss, item, ',')) {
-        // Trim and uppercase
-        item.erase(0, item.find_first_not_of(" \t"));
-        item.erase(item.find_last_not_of(" \t") + 1);
-        std::transform(item.begin(), item.end(), item.begin(), ::toupper);
-        if (!item.empty()) {
-            result.push_back(item);
-        }
-    }
-    return result;
-}
-
-bool parse_args(int argc, char* argv[], CLIArgs& args) {
-    for (int i = 1; i < argc; ++i) {
-        std::string arg = argv[i];
-
-        if (arg == "--paper" || arg == "-p") {
-            args.paper_mode = true;
-        }
-        else if (arg == "--help" || arg == "-h") {
-            args.help = true;
-        }
-        else if (arg == "--verbose" || arg == "-v") {
-            args.verbose = true;
-        }
-        else if ((arg == "--symbols" || arg == "-s") && i + 1 < argc) {
-            args.symbols = split_symbols(argv[++i]);
-        }
-        else if ((arg == "--duration" || arg == "-d") && i + 1 < argc) {
-            args.duration = std::stoi(argv[++i]);
-        }
-        else if ((arg == "--capital" || arg == "-c") && i + 1 < argc) {
-            args.capital = std::stod(argv[++i]);
-        }
-        else if ((arg == "--max-pos" || arg == "-m") && i + 1 < argc) {
-            args.max_position = std::stoi(argv[++i]);
-        }
-        else if (arg == "--cpu" && i + 1 < argc) {
-            args.cpu_affinity = std::stoi(argv[++i]);
-        }
-        else if (arg == "--unified") {
-            args.unified_strategy = true;
-        }
-        else {
-            std::cerr << "Unknown option: " << arg << "\n";
-            std::cerr << "Use --help for usage information.\n";
-            return false;
-        }
-    }
-    return true;
-}
+using CLIArgs = hft::util::CLIArgs;
+using hft::util::print_help;
+using hft::util::parse_args;
 
 /**
- * Get default trading symbols - tries Binance API first, falls back to hardcoded list
+ * Get default trading symbols from Binance API
  *
- * Dynamic symbol fetching:
- * 1. Tries to fetch active USDT spot trading pairs from Binance Exchange Info API
- * 2. If API fails (network error, timeout), uses fallback hardcoded list
- * 3. Logs which source was used for transparency
- *
- * The fallback list contains major trading pairs that are unlikely to be delisted.
+ * Fetches active USDT spot trading pairs from Binance Exchange Info API.
+ * Throws std::runtime_error if API is unavailable - we should not trade
+ * without current market data.
  */
-std::vector<std::string> get_default_symbols() {
-    // Fallback list - major USDT pairs that are unlikely to change
-    static const std::vector<std::string> FALLBACK_SYMBOLS = {
-        "BTCUSDT", "ETHUSDT", "BNBUSDT", "XRPUSDT", "SOLUSDT",
-        "ADAUSDT", "DOGEUSDT", "TRXUSDT", "DOTUSDT", "MATICUSDT",
-        "LINKUSDT", "UNIUSDT", "AVAXUSDT", "ATOMUSDT", "LTCUSDT",
-        "ETCUSDT", "XLMUSDT", "NEARUSDT", "APTUSDT", "FILUSDT",
-        "ARBUSDT", "OPUSDT", "INJUSDT", "SUIUSDT", "SEIUSDT",
-        "TIAUSDT", "JUPUSDT", "STXUSDT", "AAVEUSDT", "MKRUSDT"
-    };
 
-    try {
-        // Fetch all USDT spot trading pairs from Binance
-        BinanceRest rest(false);  // Use mainnet
-        auto symbols = rest.fetch_trading_symbols("USDT");
-
-        if (!symbols.empty()) {
-            std::cout << "[SYMBOLS] Fetched " << symbols.size()
-                      << " USDT trading pairs from Binance Exchange Info API\n";
-            return symbols;
-        }
-    } catch (const std::exception& e) {
-        std::cerr << "[SYMBOLS] Warning: Failed to fetch from Binance API: " << e.what() << "\n";
-    }
-
-    // Fallback to hardcoded list
-    std::cout << "[SYMBOLS] Using fallback symbol list (" << FALLBACK_SYMBOLS.size() << " pairs)\n";
-    return FALLBACK_SYMBOLS;
-}
+// Symbols: Use exchange::fetch_default_symbols() from binance_rest.hpp
+using hft::exchange::fetch_default_symbols;
 
 // ============================================================================
-// Order Senders
+// Order Senders (from paper/paper_order_sender.hpp, exchange/production_order_sender.hpp)
 // ============================================================================
-
-/**
- * PaperOrderSender - Simulates exchange for paper trading
- *
- * Generates fake exchange signals for all order events.
- * Pessimistic fills: Buy at ask + slippage, Sell at bid - slippage.
- *
- * Slippage simulation (paper trading only):
- * - Reads slippage_bps from SharedConfig (default: 5 bps = 0.05%)
- * - Applies adverse slippage to every fill
- * - Makes paper trading more realistic
- */
-class PaperOrderSender {
-public:
-    static constexpr OrderId PAPER_ID_MASK = 0x8000000000000000ULL;
-    static constexpr double DEFAULT_SLIPPAGE_BPS = 5.0;  // 5 bps = 0.05%
-
-    enum class Event { Accepted, Filled, Cancelled, Rejected };
-
-    // NOTE: qty is double (not Quantity/uint32_t) because crypto trades use
-    // fractional quantities (e.g., 0.01 BTC). Using uint32_t would truncate to 0.
-    // TODO these callbacks create overhead fix them by using template pattern
-    using FillCallback = std::function<void(Symbol, OrderId, Side, double qty, Price)>;
-    using SlippageCallback = std::function<void(double)>;  // Track slippage cost
-
-    PaperOrderSender() : next_id_(1), total_orders_(0), total_fills_(0),
-                         config_(nullptr), total_slippage_(0) {}
-
-    // Set config for reading slippage_bps
-    void set_config(const ipc::SharedConfig* config) { config_ = config; }
-
-    // 5-param version with expected_price for slippage tracking
-    // is_market: true = market order (immediate fill with slippage)
-    //            false = limit order (no slippage, only fills if price is favorable)
-    // NOTE: qty is double to support fractional crypto quantities (e.g., 0.01 BTC)
-    bool send_order(Symbol symbol, Side side, double qty, Price expected_price, bool is_market) {
-        OrderId id = PAPER_ID_MASK | next_id_++;
-        total_orders_++;
-        pending_.push_back({symbol, id, side, qty, expected_price, is_market});
-        return true;
-    }
-
-    // 4-param backward-compatible version (satisfies OrderSender concept)
-    bool send_order(Symbol symbol, Side side, double qty, bool is_market) {
-        return send_order(symbol, side, qty, 0, is_market);  // No expected_price tracking
-    }
-
-    bool cancel_order(Symbol /*symbol*/, OrderId id) {
-        auto it = std::find_if(pending_.begin(), pending_.end(),
-            [id](const Order& o) { return o.id == id; });
-        if (it != pending_.end()) {
-            pending_.erase(it);
-            return true;
-        }
-        return false;
-    }
-
-    void process_fills(Symbol symbol, Price bid, Price ask) {
-        // Get slippage in basis points from config (for market orders only)
-        double slippage_bps = DEFAULT_SLIPPAGE_BPS;
-        if (config_) {
-            double cfg_slippage = config_->slippage_bps();
-            if (cfg_slippage > 0) {
-                slippage_bps = cfg_slippage;
-            }
-        }
-        double slippage_rate = slippage_bps / 10000.0;  // Convert bps to decimal
-
-        std::vector<Order> remaining;
-        for (auto& o : pending_) {
-            if (o.symbol != symbol) {
-                remaining.push_back(o);
-                continue;
-            }
-
-            Price fill_price;
-            double slippage_cost = 0;
-
-            if (o.is_market) {
-                // MARKET ORDER: Fill immediately with slippage
-                Price base_price = o.expected_price;
-                if (base_price == 0) {
-                    base_price = (o.side == Side::Buy) ? ask : bid;
-                }
-
-                // Apply slippage (always adverse)
-                double slippage_amount = static_cast<double>(base_price) * slippage_rate;
-                if (o.side == Side::Buy) {
-                    fill_price = base_price + static_cast<Price>(slippage_amount);
-                } else {
-                    fill_price = base_price - static_cast<Price>(slippage_amount);
-                }
-
-                slippage_cost = slippage_amount * o.qty / risk::PRICE_SCALE;
-                total_slippage_ += slippage_cost;
-                if (on_slippage_) on_slippage_(slippage_cost);
-
-                if (on_fill_) on_fill_(o.symbol, o.id, o.side, o.qty, fill_price);
-                total_fills_++;
-            } else {
-                // LIMIT ORDER: Only fill if price is favorable, no slippage
-                Price limit_price = o.expected_price;
-                if (limit_price == 0) {
-                    // Fallback: use current mid as limit
-                    limit_price = (bid + ask) / 2;
-                }
-
-                bool can_fill = false;
-                if (o.side == Side::Buy) {
-                    // Buy limit: fills when ask <= limit_price
-                    if (ask <= limit_price) {
-                        fill_price = limit_price;  // Fill at limit price (no slippage)
-                        can_fill = true;
-                    }
-                } else {
-                    // Sell limit: fills when bid >= limit_price
-                    if (bid >= limit_price) {
-                        fill_price = limit_price;  // Fill at limit price (no slippage)
-                        can_fill = true;
-                    }
-                }
-
-                if (can_fill) {
-                    if (on_fill_) on_fill_(o.symbol, o.id, o.side, o.qty, fill_price);
-                    total_fills_++;
-                } else {
-                    // Limit order not yet fillable, keep pending
-                    remaining.push_back(o);
-                }
-                continue;  // Skip adding to remaining (either filled or already added)
-            }
-        }
-        pending_ = std::move(remaining);
-    }
-
-    void set_fill_callback(FillCallback cb) { on_fill_ = std::move(cb); }
-    void set_slippage_callback(SlippageCallback cb) { on_slippage_ = std::move(cb); }
-    uint64_t total_orders() const { return total_orders_; }
-    uint64_t total_fills() const { return total_fills_; }
-    double total_slippage() const { return total_slippage_; }
-
-private:
-    struct Order {
-        Symbol symbol;
-        OrderId id;
-        Side side;
-        double qty;            // double to support fractional crypto quantities (e.g., 0.01 BTC)
-        Price expected_price;  // For limit: limit price, for market: expected fill
-        bool is_market;        // true = market (slippage), false = limit (no slippage)
-    };
-    OrderId next_id_;
-    uint64_t total_orders_;
-    uint64_t total_fills_;
-    const ipc::SharedConfig* config_;
-    double total_slippage_;
-    std::vector<Order> pending_;
-    FillCallback on_fill_;
-    SlippageCallback on_slippage_;
-};
-
-/**
- * ProductionOrderSender - Real order sender for Binance
- *
- * TODO: Implement actual order submission via REST API
- */
-class ProductionOrderSender {
-public:
-    ProductionOrderSender() : total_orders_(0) {}
-
-    // 5-param version with expected_price for slippage tracking
-    // NOTE: qty is double to support fractional crypto quantities (e.g., 0.01 BTC)
-    bool send_order(Symbol /*symbol*/, Side /*side*/, double /*qty*/, Price /*expected_price*/, bool /*is_market*/) {
-        // TODO: Implement real order submission
-        // - Sign request with API key/secret
-        // - Send via REST API
-        // - Handle response
-        // - Track expected_price for slippage calculation on fill
-        total_orders_++;
-        std::cerr << "[PRODUCTION] Order would be sent here\n";
-        return false;  // Not implemented yet
-    }
-
-    // 4-param backward-compatible version (satisfies OrderSender concept)
-    bool send_order(Symbol symbol, Side side, double qty, bool is_market) {
-        return send_order(symbol, side, qty, 0, is_market);  // No expected_price tracking
-    }
-
-    bool cancel_order(Symbol /*symbol*/, OrderId /*id*/) {
-        // TODO: Implement real cancel
-        return false;
-    }
-
-    uint64_t total_orders() const { return total_orders_; }
-
-private:
-    uint64_t total_orders_;
-};
-
-// Local OrderSender concept with expected_price for slippage tracking
-// NOTE: qty is double to support fractional crypto quantities (e.g., 0.01 BTC)
-template<typename T>
-concept LocalOrderSender = requires(T& sender, Symbol s, Side side, double qty, Price p, OrderId id, bool is_market) {
-    { sender.send_order(s, side, qty, p, is_market) } -> std::convertible_to<bool>;
-    { sender.cancel_order(s, id) } -> std::convertible_to<bool>;
-};
+using PaperOrderSender = hft::paper::PaperOrderSender;
+using ProductionOrderSender = hft::exchange::ProductionOrderSender;
+using hft::exchange::LocalOrderSender;
 
 // Verify concepts
 static_assert(LocalOrderSender<PaperOrderSender>, "PaperOrderSender must satisfy LocalOrderSender");
 static_assert(LocalOrderSender<ProductionOrderSender>, "ProductionOrderSender must satisfy LocalOrderSender");
-
-// ============================================================================
-// Strategy State
-// ============================================================================
-
-struct SymbolStrategy {
-    RegimeDetector regime{RegimeConfig{}};
-    TechnicalIndicators indicators{TechnicalIndicators::Config{}};
-    MarketRegime current_regime = MarketRegime::Unknown;
-    Price last_mid = 0;
-    uint64_t last_signal_time = 0;
-    char ticker[16] = {0};  // Fixed size, no std::string allocation
-    bool active = false;    // Is this slot in use?
-
-    // Dynamic spread tracking (EMA of spread)
-    double ema_spread_pct = 0.001;  // Start with 0.1% default
-    static constexpr double SPREAD_ALPHA = 0.1;  // EMA decay
-
-    void init(const std::string& symbol) {
-        active = true;
-        std::strncpy(ticker, symbol.c_str(), sizeof(ticker) - 1);
-        ticker[sizeof(ticker) - 1] = '\0';
-    }
-
-    void update_spread(Price bid, Price ask) {
-        if (bid > 0 && ask > bid) {
-            double spread_pct = static_cast<double>(ask - bid) / static_cast<double>(bid);
-            ema_spread_pct = SPREAD_ALPHA * spread_pct + (1.0 - SPREAD_ALPHA) * ema_spread_pct;
-        }
-    }
-
-    // Threshold = 3x spread with 0.02% (2 bps) minimum floor
-    // This ensures we only trade when expected profit > spread cost
-    // Math: entry spread + exit spread = 2x spread, so need >2x to profit
-    double buy_threshold() const {
-        double threshold = ema_spread_pct * 3.0;
-        return -std::max(threshold, 0.0002);  // At least -0.02%
-    }
-    double sell_threshold() const {
-        double threshold = ema_spread_pct * 3.0;
-        return std::max(threshold, 0.0002);   // At least +0.02%
-    }
-};
 
 // ============================================================================
 // Trading Application
@@ -614,12 +165,23 @@ public:
         , sender_()
         , engine_(sender_)
         , total_ticks_(0)
-        , publisher_(args.paper_mode)  // Only publish events in paper mode
+        , publisher_(true)  // Always publish events for monitoring (dashboard, observer)
     {
         portfolio_.init(args.capital);
 
         // Initialize TradeRecorder - single source of truth for P&L
         trade_recorder_.init(args.capital);
+
+        // Initialize EnhancedRiskManager with capital and default limits
+        {
+            risk::EnhancedRiskConfig risk_cfg;
+            risk_cfg.initial_capital = static_cast<int64_t>(args.capital * risk::PRICE_SCALE);
+            risk_cfg.daily_loss_limit_pct = 0.03;   // 3% daily loss limit
+            risk_cfg.max_drawdown_pct = 0.05;       // 5% max drawdown
+            risk_cfg.max_notional_pct = 2.0;        // 200% max exposure
+            risk_cfg.max_order_size = 1000000;      // Large enough for crypto
+            risk_manager_ = risk::EnhancedRiskManager(risk_cfg);
+        }
 
         // Initialize shared portfolio state for dashboard/observer
         if (args.paper_mode) {
@@ -858,6 +420,11 @@ public:
         if (id < MAX_SYMBOLS) {
             strategies_[id].init(ticker);
 
+            // Initialize ConfigStrategy for this symbol (used when TunerState is ON/PAUSED)
+            config_strategies_[id] = std::make_unique<ConfigStrategy>(
+                shared_config_, symbol_configs_, ticker.c_str()
+            );
+
             // Initialize portfolio state slot with matching index
             // This ensures update_last_price_relaxed(id, price) writes to correct slot
             if (portfolio_state_) {
@@ -871,7 +438,8 @@ public:
         }
     }
 
-    void on_quote(const std::string& ticker, Price bid, Price ask) {
+    void on_quote(const std::string& ticker, Price bid, Price ask,
+                  Quantity bid_size, Quantity ask_size) {
         // Hot path - no locks, O(1) array access
         auto opt = engine_.lookup_symbol(ticker);
         if (!opt) return;
@@ -884,12 +452,12 @@ public:
 
         total_ticks_.fetch_add(1, std::memory_order_relaxed);
 
-        // Update L1 - order: bid_price, bid_size, ask_price, ask_size
+        // Update L1 with real order book sizes from exchange
         L1Snapshot snap;
         snap.bid_price = bid;
-        snap.bid_size = 100;
+        snap.bid_size = bid_size;
         snap.ask_price = ask;
-        snap.ask_size = 100;
+        snap.ask_size = ask_size;
         world->apply_snapshot(snap);
 
         // Process paper fills (legacy + new PaperExchange)
@@ -931,17 +499,19 @@ public:
         if (portfolio_state_ && id < ipc::MAX_PORTFOLIO_SYMBOLS) {
             auto& snap = portfolio_state_->positions[id].snapshot;
 
-            // Update high/low
+            // Update high/low - branchless using std::max/std::min
+            // max(0, pos) = pos handles first tick case for high
+            // For low, use INT64_MAX sentinel on first tick to make min() work correctly
             int64_t mid_x8 = static_cast<int64_t>(mid * 1e8);
             int64_t curr_high = snap.price_high_x8.load(std::memory_order_relaxed);
             int64_t curr_low = snap.price_low_x8.load(std::memory_order_relaxed);
 
-            if (curr_high == 0 || mid_x8 > curr_high) {
-                snap.price_high_x8.store(mid_x8, std::memory_order_relaxed);
-            }
-            if (curr_low == 0 || mid_x8 < curr_low) {
-                snap.price_low_x8.store(mid_x8, std::memory_order_relaxed);
-            }
+            // High: max(curr_high, mid_x8) - always correct since max(0, positive) = positive
+            snap.price_high_x8.store(std::max(curr_high, mid_x8), std::memory_order_relaxed);
+
+            // Low: if curr_low == 0 (first tick), treat as INT64_MAX so min() returns mid_x8
+            int64_t effective_low = (curr_low == 0) ? INT64_MAX : curr_low;
+            snap.price_low_x8.store(std::min(effective_low, mid_x8), std::memory_order_relaxed);
 
             // Set open price if first tick
             if (snap.price_open_x8.load(std::memory_order_relaxed) == 0) {
@@ -978,11 +548,16 @@ public:
         MarketSnapshot market_snap;
         market_snap.bid = bid;
         market_snap.ask = ask;
-        market_snap.bid_size = 100;  // TODO: Get from order book
-        market_snap.ask_size = 100;
+        market_snap.bid_size = bid_size;  // Real order book data from exchange
+        market_snap.ask_size = ask_size;
         market_snap.last_trade = (bid + ask) / 2;
         market_snap.timestamp_ns = std::chrono::steady_clock::now().time_since_epoch().count();
         strategy_selector_.on_tick_all(market_snap);
+
+        // Update ConfigStrategy with tick (for readiness tracking)
+        if (config_strategies_[id]) {
+            config_strategies_[id]->on_tick(market_snap);
+        }
 
         MarketRegime new_regime = strat.regime.current_regime();
         if (new_regime != strat.current_regime) {
@@ -1028,7 +603,7 @@ public:
         // Check target/stop-loss for this symbol - O(n), no allocation
         // IMPORTANT: Skip when tuner_mode is ON - unified system handles exits via exchange
         // This prevents double-counting cash updates
-        bool use_legacy_exits = !shared_config_ || !shared_config_->is_tuner_mode();
+        bool use_legacy_exits = !shared_config_ || !(shared_config_->is_tuner_on() || shared_config_->is_tuner_paused());
         if (use_legacy_exits && portfolio_.symbol_active[id]) {
             double bid_usd = static_cast<double>(bid) / risk::PRICE_SCALE;
             const char* ticker = strat.ticker;
@@ -1284,6 +859,9 @@ private:
     execution::ExecutionEngine execution_engine_;
     std::unique_ptr<PaperExchangeAdapter> paper_adapter_;  // Owned adapter for IExchange
 
+    // Per-symbol ConfigStrategy instances (used when TunerState is ON or PAUSED)
+    std::array<std::unique_ptr<ConfigStrategy>, MAX_SYMBOLS> config_strategies_;
+
     // Market health monitor for crash detection
     MarketHealthMonitor market_health_{MAX_SYMBOLS, 0.5, 60};  // 50% threshold, 60 tick cooldown
 
@@ -1291,6 +869,9 @@ private:
     int32_t consecutive_wins_ = 0;
     int32_t consecutive_losses_ = 0;
     uint8_t active_mode_ = 2;  // NORMAL by default
+
+    // Enhanced risk manager for position/notional limits and P&L tracking
+    risk::EnhancedRiskManager risk_manager_;
 
     void update_active_mode() {
         if (!shared_config_) return;
@@ -1340,7 +921,7 @@ private:
      */
     void auto_tune_params() {
         if (!shared_config_) return;
-        if (!shared_config_->is_auto_tune_enabled()) return;
+        if (!shared_config_->is_tuner_off()) return;
 
         // Save base values on first call (so we can relax back to them)
         if (!auto_tune_base_saved_) {
@@ -1715,6 +1296,10 @@ private:
             actual_commission = portfolio_.sell(symbol, price_usd, qty_d, spread_cost, commission);
         }
 
+        // Update risk manager position tracking
+        risk_manager_.on_fill(world->ticker(), side,
+            static_cast<int64_t>(qty_d * 1e8), price);
+
         // Record in TradeRecorder (ledger + IPC)
         // IMPORTANT: Use actual_commission for accurate accounting
         trading::TradeInput fill_input{};
@@ -1758,6 +1343,18 @@ private:
                 if (avg_entry_before_sell > 0 && qty_before_sell > 0) {
                     double realized_pnl = (price_usd - avg_entry_before_sell) * qty_d;
                     portfolio_state_->add_realized_pnl(realized_pnl);
+
+                    // Update risk manager P&L for daily loss limit / drawdown tracking
+                    int64_t total_pnl_scaled = static_cast<int64_t>(
+                        portfolio_state_->total_realized_pnl() * risk::PRICE_SCALE);
+                    risk_manager_.update_pnl(total_pnl_scaled);
+
+                    // Update ConfigStrategy with trade result (for mode transitions)
+                    bool was_win = (realized_pnl >= 0);
+                    double pnl_pct = (realized_pnl / (avg_entry_before_sell * qty_d)) * 100.0;
+                    if (config_strategies_[symbol]) {
+                        config_strategies_[symbol]->record_trade_result(pnl_pct, was_win);
+                    }
                 }
             }
         }
@@ -1895,6 +1492,13 @@ private:
                     // Track realized P&L (also increments winning_trades or losing_trades)
                     portfolio_state_->add_realized_pnl(realized_pnl);
 
+                    // Update ConfigStrategy with trade result (for mode transitions)
+                    bool was_win = (realized_pnl >= 0);
+                    double pnl_pct = (realized_pnl / (avg_entry_before_sell * qty)) * 100.0;
+                    if (config_strategies_[symbol]) {
+                        config_strategies_[symbol]->record_trade_result(pnl_pct, was_win);
+                    }
+
                     if (realized_pnl >= 0) {
                         portfolio_state_->record_target();
                         // Publish target_hit event to observer
@@ -1953,12 +1557,12 @@ private:
         // Skip if execution engine not configured
         if (!paper_adapter_) return false;
 
-        // 1. Build MarketSnapshot
+        // 1. Build MarketSnapshot with real order book sizes
         MarketSnapshot market;
         market.bid = bid;
         market.ask = ask;
-        market.bid_size = 100;  // TODO: Get from order book
-        market.ask_size = 100;
+        market.bid_size = world->top().best_bid_size();
+        market.ask_size = world->top().best_ask_size();
         market.last_trade = (bid + ask) / 2;
         market.timestamp_ns = std::chrono::steady_clock::now().time_since_epoch().count();
 
@@ -1986,12 +1590,40 @@ private:
         // 3. Get current regime
         MarketRegime regime = strat->current_regime;
 
-        // 4. Select strategy and generate signal
-        IStrategy* strategy = strategy_selector_.select_for_regime(regime);
-        if (!strategy || !strategy->ready()) return false;
-
-        Signal signal = strategy->generate(id, market, position, regime);
+        // 4. Select strategy and generate signal based on TunerState
+        Signal signal;
+        const char* strategy_name = "Unknown";
+        bool use_config_strategy = shared_config_ && (shared_config_->is_tuner_on() || shared_config_->is_tuner_paused());
+        if (use_config_strategy) {
+            // TunerState ON/PAUSED: Use ConfigStrategy (config-driven)
+            auto& cfg_strat = config_strategies_[id];
+            if (!cfg_strat || !cfg_strat->ready()) return false;
+            signal = cfg_strat->generate(id, market, position, regime);
+            strategy_name = "Config";
+        } else {
+            // TunerState OFF: Use traditional regime-based strategy selection
+            IStrategy* strategy = strategy_selector_.select_for_regime(regime);
+            if (!strategy || !strategy->ready()) return false;
+            signal = strategy->generate(id, market, position, regime);
+            strategy_name = strategy->name().data();
+        }
         if (!signal.is_actionable()) return false;
+
+        // 4b. Check minimum trade value
+        // IMPORTANT: Return true even on skip to trigger cooldown and prevent signal spam
+        {
+            double min_trade = shared_config_->min_trade_value();  // Default: $100
+            double price_usd = signal.is_buy()
+                ? market.ask_usd(risk::PRICE_SCALE)
+                : market.bid_usd(risk::PRICE_SCALE);
+            double order_value = signal.suggested_qty * price_usd;
+
+            if (order_value < min_trade) {
+                // Skip silently - signal was generated but order too small
+                // Return true to trigger cooldown and prevent signal spam
+                return true;
+            }
+        }
 
         // 5. Apply order type preference from config (overrides strategy default)
         if (shared_config_) {
@@ -2027,6 +1659,33 @@ private:
             }
         }
 
+        // 5b. Risk manager pre-trade check
+        {
+            Side side = signal.is_buy() ? Side::Buy : Side::Sell;
+            Quantity qty = static_cast<Quantity>(signal.suggested_qty);
+            Price price = signal.is_buy() ? ask : bid;
+
+            if (!risk_manager_.check_order(strat->ticker, side, qty, price)) {
+                if (args_.verbose) {
+                    std::cout << "[RISK] " << strat->ticker
+                              << " " << (signal.is_buy() ? "BUY" : "SELL")
+                              << " BLOCKED - ";
+                    if (risk_manager_.is_halted()) {
+                        if (risk_manager_.is_daily_limit_breached()) {
+                            std::cout << "daily loss limit breached\n";
+                        } else if (risk_manager_.is_drawdown_breached()) {
+                            std::cout << "max drawdown breached\n";
+                        } else {
+                            std::cout << "trading halted\n";
+                        }
+                    } else {
+                        std::cout << "order size/position limit\n";
+                    }
+                }
+                return false;
+            }
+        }
+
         // 6. Execute signal using ExecutionEngine
         // The engine decides limit vs market based on signal.order_pref, strength, regime, spread
         uint64_t order_id = execution_engine_.execute(id, signal, market, regime);
@@ -2042,7 +1701,7 @@ private:
                 std::cout << "[UNIFIED] " << strat->ticker
                           << " " << signal_type_str(signal.type)
                           << " qty=" << signal.suggested_qty
-                          << " (strategy=" << strategy->name()
+                          << " (strategy=" << strategy_name
                           << ", strength=" << signal_strength_str(signal.strength)
                           << ", reason=" << signal.reason << ")\n";
             }
@@ -2102,7 +1761,7 @@ private:
         // =====================================================================
         // IMPORTANT: Skip when tuner_mode is ON - unified system handles ALL exits via exchange
         // to prevent double-counting (this code directly updates portfolio, unified uses callbacks)
-        bool use_legacy_exits = !shared_config_ || !shared_config_->is_tuner_mode();
+        bool use_legacy_exits = !shared_config_ || !(shared_config_->is_tuner_on() || shared_config_->is_tuner_paused());
         if (use_legacy_exits && holding > 0) {
             bool should_exit = false;
             const char* exit_reason = "";
@@ -2194,7 +1853,7 @@ private:
         // Option 1: Use unified strategy architecture (--unified flag OR tuner_mode ON)
         // When tuner_mode is ON, we use the unified architecture with AI-tuned parameters
         bool use_unified = args_.unified_strategy ||
-                          (shared_config_ && shared_config_->is_tuner_mode());
+                          (shared_config_ && (shared_config_->is_tuner_on() || shared_config_->is_tuner_paused()));
 
         if (use_unified) {
             if (execute_unified_signal(id, world, strat, bid, ask)) {
@@ -2309,7 +1968,15 @@ private:
 
         // Check minimum trade value to avoid overtrading with tiny positions
         if (should_buy && order_value < min_trade) {
-            should_buy = false;  // Trade too small, skip silently
+            should_buy = false;
+            strat->last_signal_time = now;  // Trigger cooldown to prevent signal spam
+        }
+
+        // Check position capacity - avoid sending orders that will be rejected
+        // BUG FIX: Previously orders were sent even when position limit was reached,
+        // causing cash to get stuck (reserved but never deducted when buy() failed)
+        if (should_buy && !portfolio_.can_add_position(id)) {
+            should_buy = false;  // Position limit reached for this symbol
         }
 
         if (should_buy && qty > 1e-8 && world->can_trade(Side::Buy, qty)) {
@@ -2346,26 +2013,6 @@ private:
     }
 };
 
-// ============================================================================
-// CPU Affinity
-// ============================================================================
-
-// Pin current thread to specific CPU core
-bool set_cpu_affinity(int cpu) {
-    if (cpu < 0) return true;  // No pinning requested
-
-    cpu_set_t cpuset;
-    CPU_ZERO(&cpuset);
-    CPU_SET(cpu, &cpuset);
-
-    if (sched_setaffinity(0, sizeof(cpu_set_t), &cpuset) != 0) {
-        std::cerr << "[WARN] Could not pin to CPU " << cpu << ": " << strerror(errno) << "\n";
-        return false;
-    }
-    std::cout << "[CPU] Pinned to core " << cpu << "\n";
-    return true;
-}
-
 // Note: Dashboard removed - use trader_observer for real-time monitoring
 // This keeps HFT process lean with zero display overhead
 
@@ -2376,7 +2023,7 @@ bool set_cpu_affinity(int cpu) {
 template<typename OrderSender>
 int run(const CLIArgs& args) {
     // Pin to CPU core if requested (reduces latency variance)
-    set_cpu_affinity(args.cpu_affinity);
+    hft::util::set_cpu_affinity(args.cpu_affinity);
 
     std::cout << "\nHFT Trading System - " << (args.paper_mode ? "PAPER" : "PRODUCTION") << " MODE\n";
     std::cout << "================================================================\n\n";
@@ -2393,7 +2040,7 @@ int run(const CLIArgs& args) {
 
     TradingApp<OrderSender> app(args);
 
-    auto symbols = args.symbols.empty() ? get_default_symbols() : args.symbols;
+    auto symbols = args.symbols.empty() ? fetch_default_symbols() : args.symbols;
     std::cout << "Registering " << symbols.size() << " symbols...\n";
     for (auto& s : symbols) app.add_symbol(s);
 
@@ -2436,7 +2083,10 @@ int run(const CLIArgs& args) {
     });
 
     ws.set_book_ticker_callback([&](const BookTicker& bt) {
-        app.on_quote(bt.symbol, bt.bid_price, bt.ask_price);
+        // Convert double quantities to scaled Quantity (uint32_t)
+        Quantity bid_size = static_cast<Quantity>(bt.bid_qty * config::scaling::QUANTITY_SCALE);
+        Quantity ask_size = static_cast<Quantity>(bt.ask_qty * config::scaling::QUANTITY_SCALE);
+        app.on_quote(bt.symbol, bt.bid_price, bt.ask_price, bid_size, ask_size);
     });
 
     for (auto& s : symbols) ws.subscribe_book_ticker(s);
@@ -2535,8 +2185,7 @@ int run(const CLIArgs& args) {
 }
 
 int main(int argc, char* argv[]) {
-    signal(SIGINT, shutdown_signal_handler);
-    signal(SIGTERM, shutdown_signal_handler);
+    hft::util::install_shutdown_handler(g_running, trader_pre_shutdown);
 
     CLIArgs args;
     if (!parse_args(argc, argv, args)) return 1;

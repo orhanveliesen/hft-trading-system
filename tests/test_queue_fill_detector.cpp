@@ -83,13 +83,13 @@ TEST(test_pessimistic_fill_confirmation) {
     // Register our order at price 100, 500 shares
     detector.register_order(1, 100, Side::Buy, 1000000, 500, 1000);
 
-    // Simulate L2: 2000 shares ahead of us (added before our order)
-    // In real scenario, this would be from initial L2 snapshot
+    // Set initial L2 snapshot: 2000 shares ahead of us in queue
+    detector.set_initial_queue_depth(100, Side::Buy, 1000000, 2000);
 
-    // Trade happens - but not enough to reach us
+    // Trade happens - but not enough to reach us (only 500 out of 2000 ahead)
     detector.on_trade(100, 1000000, 500, Side::Sell, 2000, 0);
 
-    // No fill yet - trade only consumed part of queue
+    // No fill yet - trade only consumed part of queue ahead
     ASSERT_EQ(fills.size(), 0u);
 
     // More trades - now an order AFTER us (sequence > ours) gets filled

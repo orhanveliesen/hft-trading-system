@@ -98,20 +98,21 @@ void test_feed_callback_concept() {
 void test_readable_order_book_concept() {
     std::cout << "  test_readable_order_book_concept... ";
 
+    // Use prices within default range (base=90000)
     OrderBook book;
-    book.add_order(1, Side::Buy, 100, 10);
-    book.add_order(2, Side::Sell, 110, 20);
+    book.add_order(1, Side::Buy, 100000, 10);
+    book.add_order(2, Side::Sell, 100010, 20);
 
     // ReadableOrderBook methods
     Price bid = book.best_bid();
     Price ask = book.best_ask();
 
-    assert(bid == 100);
-    assert(ask == 110);
+    assert(bid == 100000);
+    assert(ask == 100010);
 
     // DetailedOrderBook methods (bid_quantity_at, ask_quantity_at)
-    Quantity bid_qty = book.bid_quantity_at(100);
-    Quantity ask_qty = book.ask_quantity_at(110);
+    Quantity bid_qty = book.bid_quantity_at(100000);
+    Quantity ask_qty = book.ask_quantity_at(100010);
 
     assert(bid_qty == 10);
     assert(ask_qty == 20);

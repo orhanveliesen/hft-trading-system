@@ -56,6 +56,7 @@ TEST(test_daily_pnl_reset_on_new_day) {
     EnhancedRiskConfig config;
     config.initial_capital = 100000;
     config.daily_loss_limit_pct = 0.10;  // 10% = 10k max loss
+    config.max_drawdown_pct = 0.20;      // 20% max drawdown (to not interfere with daily test)
 
     EnhancedRiskManager rm(config);
 
@@ -125,6 +126,7 @@ TEST(test_drawdown_updates_peak) {
 
 TEST(test_symbol_position_limit_hot_path) {
     EnhancedRiskConfig config;
+    config.initial_capital = 1000000;  // Need capital for notional checks
     EnhancedRiskManager rm(config);
 
     // Register symbol and get index for hot path
@@ -147,6 +149,7 @@ TEST(test_symbol_position_limit_hot_path) {
 
 TEST(test_symbol_position_limit_cold_path) {
     EnhancedRiskConfig config;
+    config.initial_capital = 1000000;  // Need capital for notional checks
     EnhancedRiskManager rm(config);
 
     // Use string-based API (convenience, not for hot path)
@@ -168,6 +171,7 @@ TEST(test_symbol_position_limit_cold_path) {
 
 TEST(test_symbol_position_both_sides) {
     EnhancedRiskConfig config;
+    config.initial_capital = 1000000;  // Need capital for notional checks
     EnhancedRiskManager rm(config);
 
     SymbolIndex idx = rm.register_symbol("AAPL", 1000, 0);
@@ -187,6 +191,7 @@ TEST(test_symbol_position_both_sides) {
 
 TEST(test_symbol_notional_limit) {
     EnhancedRiskConfig config;
+    config.initial_capital = 10000000;  // $10M capital for BTC tests
     EnhancedRiskManager rm(config);
 
     // Register BTC with max notional 1M
@@ -235,6 +240,7 @@ TEST(test_global_notional_limit) {
 
 TEST(test_max_order_size) {
     EnhancedRiskConfig config;
+    config.initial_capital = 1000000;  // Need capital for notional checks
     config.max_order_size = 1000;
 
     EnhancedRiskManager rm(config);

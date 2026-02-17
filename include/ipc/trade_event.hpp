@@ -46,6 +46,52 @@ enum class StatusCode : uint8_t {
 };
 
 /**
+ * Tuner concern types - why tuner made a decision
+ */
+enum class TunerConcern : uint8_t {
+    None = 0,
+    LowWinRate,         // Win rate is too low
+    HighCosts,          // Trading costs eating profits
+    Drawdown,           // Drawdown too high
+    VolatilitySpike,    // High volatility detected
+    LowActivity,        // Not enough trades
+    HighActivity,       // Too many trades (overtrading)
+    SpreadWidening,     // Spread became too wide
+    RegimeChange,       // Market regime changed
+    PerformanceDecay,   // Recent performance declining
+    RiskExposure,       // Position risk too high
+    Optimization        // General optimization
+};
+
+/**
+ * Tuner parameter types - which config was changed
+ */
+enum class TunerParam : uint8_t {
+    None = 0,
+    EmaDevTrend,        // EMA deviation for trending
+    EmaDevRange,        // EMA deviation for ranging
+    EmaDevHvol,         // EMA deviation for high volatility
+    BasePosition,       // Base position size %
+    MaxPosition,        // Max position size %
+    TargetPct,          // Take profit target %
+    StopLossPct,        // Stop loss %
+    PullbackPct,        // Pullback threshold %
+    Cooldown,           // Cooldown period ms
+    OrderType,          // Order type (Limit, Adaptive, etc)
+    OrderOffset,        // Order offset from mid
+    OrderTimeout,       // Order timeout ms
+    Enabled,            // Symbol enabled/disabled
+    // Accumulation parameters
+    AccumFloorTrend,    // Accumulation floor for trending
+    AccumFloorRange,    // Accumulation floor for ranging
+    AccumFloorHvol,     // Accumulation floor for high volatility
+    AccumBoostWin,      // Accumulation boost per win
+    AccumPenaltyLoss,   // Accumulation penalty per loss
+    AccumSignalBoost,   // Accumulation signal boost
+    AccumMax            // Maximum accumulation factor
+};
+
+/**
  * TradeEvent - POD struct for lock-free IPC
  *
  * Requirements for shared memory:
@@ -73,7 +119,7 @@ struct alignas(64) TradeEvent {
     double quantity;            // Quantity
 
     // Additional info (16 bytes)
-    int64_t pnl_cents;          // P&L in cents (to avoid floating point)
+    double pnl;                 // P&L in USD (crypto uses full precision)
     uint32_t order_id;          // Order ID if applicable
     uint8_t side;               // 0=Buy, 1=Sell
     uint8_t regime;             // Market regime
@@ -128,7 +174,7 @@ struct alignas(64) TradeEvent {
 
     static TradeEvent target_hit(uint32_t seq, uint64_t ts, uint32_t sym,
                                  const char* tick, double entry, double exit,
-                                 double qty, int64_t pnl) {
+                                 double qty, double pnl_value) {
         TradeEvent e;
         e.clear();
         e.sequence = seq;
@@ -139,13 +185,13 @@ struct alignas(64) TradeEvent {
         e.price = exit;
         e.price2 = entry;
         e.quantity = qty;
-        e.pnl_cents = pnl;
+        e.pnl = pnl_value;
         return e;
     }
 
     static TradeEvent stop_loss(uint32_t seq, uint64_t ts, uint32_t sym,
                                 const char* tick, double entry, double exit,
-                                double qty, int64_t pnl) {
+                                double qty, double pnl_value) {
         TradeEvent e;
         e.clear();
         e.sequence = seq;
@@ -156,7 +202,7 @@ struct alignas(64) TradeEvent {
         e.price = exit;
         e.price2 = entry;
         e.quantity = qty;
-        e.pnl_cents = pnl;
+        e.pnl = pnl_value;
         return e;
     }
 
@@ -209,7 +255,10 @@ struct alignas(64) TradeEvent {
 
     static TradeEvent tuner_config(uint32_t seq, uint64_t ts, uint32_t sym,
                                    const char* tick, StatusCode code,
-                                   double confidence = 0) {
+                                   uint8_t confidence = 0,
+                                   TunerConcern concern = TunerConcern::None,
+                                   TunerParam param = TunerParam::None,
+                                   double old_value = 0, double new_value = 0) {
         TradeEvent e;
         e.clear();
         e.sequence = seq;
@@ -218,8 +267,20 @@ struct alignas(64) TradeEvent {
         e.symbol_id = sym;
         e.set_ticker(tick);
         e.status_code = static_cast<uint8_t>(code);
-        e.price = confidence;  // Store confidence in price field
+        e.signal_strength = confidence;  // Confidence 0-100
+        e.side = static_cast<uint8_t>(concern);  // Why (concern type)
+        e.regime = static_cast<uint8_t>(param);  // Which config
+        e.price = old_value;   // From value
+        e.price2 = new_value;  // To value
         return e;
+    }
+
+    TunerConcern get_tuner_concern() const {
+        return static_cast<TunerConcern>(side);
+    }
+
+    TunerParam get_tuner_param() const {
+        return static_cast<TunerParam>(regime);
     }
 
     StatusCode get_status_code() const {
@@ -244,6 +305,51 @@ struct alignas(64) TradeEvent {
             case StatusCode::TunerPauseSymbol: return "TunerPauseSymbol";
             case StatusCode::TunerResumeSymbol: return "TunerResumeSymbol";
             case StatusCode::TunerEmergencyExit: return "TunerEmergencyExit";
+            default: return "Unknown";
+        }
+    }
+
+    static const char* concern_name(TunerConcern concern) {
+        switch (concern) {
+            case TunerConcern::None: return "";
+            case TunerConcern::LowWinRate: return "LowWinRate";
+            case TunerConcern::HighCosts: return "HighCosts";
+            case TunerConcern::Drawdown: return "Drawdown";
+            case TunerConcern::VolatilitySpike: return "Volatility";
+            case TunerConcern::LowActivity: return "LowActivity";
+            case TunerConcern::HighActivity: return "HighActivity";
+            case TunerConcern::SpreadWidening: return "Spread";
+            case TunerConcern::RegimeChange: return "RegimeChg";
+            case TunerConcern::PerformanceDecay: return "PerfDecay";
+            case TunerConcern::RiskExposure: return "RiskExp";
+            case TunerConcern::Optimization: return "Optimize";
+            default: return "Unknown";
+        }
+    }
+
+    static const char* param_name(TunerParam param) {
+        switch (param) {
+            case TunerParam::None: return "";
+            case TunerParam::EmaDevTrend: return "EMA_Trend";
+            case TunerParam::EmaDevRange: return "EMA_Range";
+            case TunerParam::EmaDevHvol: return "EMA_HVol";
+            case TunerParam::BasePosition: return "BasePos";
+            case TunerParam::MaxPosition: return "MaxPos";
+            case TunerParam::TargetPct: return "Target";
+            case TunerParam::StopLossPct: return "StopLoss";
+            case TunerParam::PullbackPct: return "Pullback";
+            case TunerParam::Cooldown: return "Cooldown";
+            case TunerParam::OrderType: return "OrdType";
+            case TunerParam::OrderOffset: return "OrdOffset";
+            case TunerParam::OrderTimeout: return "OrdTimeout";
+            case TunerParam::Enabled: return "Enabled";
+            case TunerParam::AccumFloorTrend: return "AccFloor_T";
+            case TunerParam::AccumFloorRange: return "AccFloor_R";
+            case TunerParam::AccumFloorHvol: return "AccFloor_H";
+            case TunerParam::AccumBoostWin: return "AccBoost";
+            case TunerParam::AccumPenaltyLoss: return "AccPenalty";
+            case TunerParam::AccumSignalBoost: return "AccSigBoost";
+            case TunerParam::AccumMax: return "AccMax";
             default: return "Unknown";
         }
     }

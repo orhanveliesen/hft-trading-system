@@ -72,6 +72,37 @@ inline const char* strategy_type_to_short(StrategyType type) {
     return idx < STRATEGY_TYPE_COUNT ? STRATEGY_NAMES[idx].second : "UNK";
 }
 
+/**
+ * TunerState - Controls AI tuner behavior
+ *
+ * OFF:    Traditional strategies based on regime→strategy mapping
+ *         ConfigStrategy NOT used, tuner process inactive
+ *
+ * ON:     AI-controlled trading via ConfigStrategy
+ *         Tuner actively updates SymbolTuningConfig per-symbol
+ *
+ * PAUSED: ConfigStrategy runs with frozen config
+ *         Tuner does NOT make changes (last config preserved)
+ */
+enum class TunerState : uint8_t {
+    OFF = 0,      // Traditional strategies (regime-based)
+    ON = 1,       // AI tuning active, ConfigStrategy runs
+    PAUSED = 2    // ConfigStrategy runs with frozen config
+};
+
+constexpr size_t TUNER_STATE_COUNT = 3;
+
+constexpr std::array<const char*, TUNER_STATE_COUNT> TUNER_STATE_NAMES = {{
+    "OFF",
+    "ON",
+    "PAUSED"
+}};
+
+inline const char* tuner_state_to_string(TunerState state) {
+    const auto idx = static_cast<size_t>(state);
+    return idx < TUNER_STATE_COUNT ? TUNER_STATE_NAMES[idx] : "UNKNOWN";
+}
+
 struct SharedConfig {
     static constexpr uint64_t MAGIC = 0x4846544346494700ULL;  // "HFTCFG\0"
 #ifdef TRADER_BUILD_HASH
@@ -142,7 +173,6 @@ struct SharedConfig {
     std::atomic<int32_t> min_trade_value_x100;    // Default: 10000 ($100 minimum trade)
     std::atomic<int32_t> cooldown_ms;             // Default: 2000 (2 second cooldown)
     std::atomic<int32_t> signal_strength;         // Default: 2 (1=Medium, 2=Strong)
-    std::atomic<uint8_t> auto_tune_enabled;       // Default: 1 (auto-tune on)
 
     // EMA deviation thresholds (max % above EMA to allow buy)
     std::atomic<int32_t> ema_dev_trending_x1000;  // Default: 10 (1% = 0.01)
@@ -161,14 +191,18 @@ struct SharedConfig {
     std::atomic<uint8_t> trading_enabled;  // 0 = paused, 1 = active
     std::atomic<uint8_t> paper_trading;    // 1 = paper trading mode (simulation)
 
-    // Tuner integration
-    std::atomic<uint8_t> tuner_mode;       // 0 = OFF (traditional strategies), 1 = ON (AI-controlled)
-    std::atomic<uint8_t> manual_override;  // 0 = normal, 1 = manual control (tuner ignored)
-    std::atomic<uint8_t> tuner_paused;     // 0 = active, 1 = paused (tuner skips scheduled runs)
-    std::atomic<uint8_t> reserved_tuner;   // Padding for alignment
+    // Tuner integration (simplified - single state enum)
+    // TunerState: OFF=traditional strategies, ON=AI-controlled, PAUSED=frozen config
+    std::atomic<uint8_t> tuner_state;      // TunerState enum value
+    std::atomic<uint8_t> manual_override;   // 1 = manual override active (dashboard controls strategy)
+    std::atomic<uint8_t> reserved_tuner2;  // Padding for alignment
+    std::atomic<uint8_t> reserved_tuner3;  // Padding for alignment
 
     // Manual tune trigger (dashboard can request immediate tuning)
     std::atomic<int64_t> manual_tune_request_ns;  // Non-zero = tune immediately, then clear
+
+    // Tuner scheduling (dashboard can adjust interval)
+    std::atomic<int32_t> tuner_interval_sec;      // Tuning interval in seconds (default: 300 = 5 min)
 
     // Order execution defaults (global, symbols can override)
     std::atomic<uint8_t> order_type_default;      // 0=Auto, 1=MarketOnly, 2=LimitOnly, 3=Adaptive
@@ -267,11 +301,22 @@ struct SharedConfig {
     double min_trade_value() const { return min_trade_value_x100.load() / 100.0; }
     int32_t get_cooldown_ms() const { return cooldown_ms.load(); }
     int32_t get_signal_strength() const { return signal_strength.load(); }
-    bool is_auto_tune_enabled() const { return auto_tune_enabled.load() != 0; }
     bool is_paper_trading() const { return paper_trading.load() != 0; }
-    bool is_tuner_mode() const { return tuner_mode.load() != 0; }
+    bool is_trading_enabled() const { return trading_enabled.load() != 0; }
+
+    // Tuner state accessors (simplified)
+    TunerState get_tuner_state() const { return static_cast<TunerState>(tuner_state.load()); }
+    bool is_tuner_off() const { return tuner_state.load() == static_cast<uint8_t>(TunerState::OFF); }
+    bool is_tuner_on() const { return tuner_state.load() == static_cast<uint8_t>(TunerState::ON); }
+    bool is_tuner_paused() const { return tuner_state.load() == static_cast<uint8_t>(TunerState::PAUSED); }
+    int32_t get_tuner_interval_sec() const { return tuner_interval_sec.load(); }
+
+    // Manual override accessors
     bool is_manual_override() const { return manual_override.load() != 0; }
-    bool is_tuner_paused() const { return tuner_paused.load() != 0; }
+    void set_manual_override(bool on) {
+        manual_override.store(on ? 1 : 0);
+        sequence.fetch_add(1);
+    }
 
     // Position sizing accessors
     bool is_percentage_based_sizing() const { return position_sizing_mode.load() == 0; }
@@ -487,10 +532,6 @@ struct SharedConfig {
         signal_strength.store(val);
         sequence.fetch_add(1);
     }
-    void set_auto_tune_enabled(bool enabled) {
-        auto_tune_enabled.store(enabled ? 1 : 0);
-        sequence.fetch_add(1);
-    }
     // EMA deviation setters (val as percentage, e.g., 1.0 for 1%)
     void set_ema_dev_trending(double val) {
         ema_dev_trending_x1000.store(static_cast<int32_t>(val * 10));  // 1.0% -> 10
@@ -535,16 +576,16 @@ struct SharedConfig {
     }
     uint8_t get_force_mode() const { return force_mode.load(); }
 
-    void set_tuner_mode(bool enabled) {
-        tuner_mode.store(enabled ? 1 : 0);
+    // Tuner state mutator (simplified - single state)
+    void set_tuner_state(TunerState state) {
+        tuner_state.store(static_cast<uint8_t>(state));
         sequence.fetch_add(1);
     }
-    void set_manual_override(bool enabled) {
-        manual_override.store(enabled ? 1 : 0);
-        sequence.fetch_add(1);
-    }
-    void set_tuner_paused(bool paused) {
-        tuner_paused.store(paused ? 1 : 0);
+
+    void set_tuner_interval_sec(int32_t sec) {
+        // Clamp to reasonable range: 30 seconds to 30 minutes
+        sec = std::max(30, std::min(1800, sec));
+        tuner_interval_sec.store(sec);
         sequence.fetch_add(1);
     }
 
@@ -721,7 +762,6 @@ struct SharedConfig {
         // Order execution
         cooldown_ms.store(config::execution::COOLDOWN_MS);
         signal_strength.store(config::execution::SIGNAL_STRENGTH);
-        auto_tune_enabled.store(config::flags::AUTO_TUNE_ENABLED ? 1 : 0);
 
         // EMA deviation thresholds
         ema_dev_trending_x1000.store(config::ema::DEV_TRENDING_X1000);
@@ -738,11 +778,14 @@ struct SharedConfig {
         force_mode.store(0);                  // auto
         trading_enabled.store(config::flags::TRADING_ENABLED ? 1 : 0);
         paper_trading.store(config::flags::PAPER_TRADING ? 1 : 0);
-        tuner_mode.store(0);                  // tuner OFF by default
-        manual_override.store(0);             // normal mode
-        tuner_paused.store(0);
-        reserved_tuner.store(0);
+
+        // Tuner state (simplified - single enum)
+        tuner_state.store(static_cast<uint8_t>(TunerState::ON));   // ON by default
+        manual_override.store(0);
+        reserved_tuner2.store(0);
+        reserved_tuner3.store(0);
         manual_tune_request_ns.store(0);
+        tuner_interval_sec.store(300);  // Default: 5 minutes
 
         // Order execution settings
         order_type_default.store(config::execution::ORDER_TYPE_AUTO);

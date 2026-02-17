@@ -231,6 +231,17 @@ struct Portfolio {
         return get_holding(s) >= qty;
     }
 
+    /**
+     * Check if we can add more positions for a symbol.
+     * Returns false when MAX_POSITIONS_PER_SYMBOL is reached.
+     * IMPORTANT: Call this BEFORE sending orders to avoid sending
+     * orders that will be rejected by the portfolio.
+     */
+    inline bool can_add_position(Symbol s) const {
+        if (s >= MAX_SYMBOLS) return false;
+        return positions[s].count < MAX_POSITIONS_PER_SYMBOL;
+    }
+
     inline double avg_entry_price(Symbol s) const {
         if (s >= MAX_SYMBOLS) return 0;
         return positions[s].avg_entry();
