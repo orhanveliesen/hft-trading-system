@@ -183,6 +183,7 @@ TEST(test_paper_sender_basic_order) {
     FillSimConfig config;
     config.min_latency_ns = 0;  // No latency for testing
     config.max_latency_ns = 0;
+    config.jitter_ns = 0;  // No jitter for deterministic timing
     config.enable_partial_fills = false;
 
     PaperOrderSender sender(config);
@@ -224,6 +225,7 @@ TEST(test_paper_sender_slippage) {
     FillSimConfig config;
     config.min_latency_ns = 0;
     config.max_latency_ns = 0;
+    config.jitter_ns = 0;  // No jitter for deterministic timing
     config.slippage_bps = 10.0;  // 10 bps = 0.1%
     config.enable_partial_fills = false;
 
@@ -281,6 +283,7 @@ TEST(test_paper_engine_order_submission) {
     config.enable_logging = false;
     config.fill_config.min_latency_ns = 0;
     config.fill_config.max_latency_ns = 0;
+    config.fill_config.jitter_ns = 0;
     config.fill_config.enable_partial_fills = false;
 
     PaperTradingEngine engine(config);
@@ -306,6 +309,9 @@ TEST(test_paper_engine_pnl_calculation) {
     config.fill_config.min_latency_ns = 0;
     config.fill_config.max_latency_ns = 0;
     config.fill_config.slippage_bps = 0;  // No slippage for exact calculation
+    config.fill_config.slippage_variance = 0;  // No random variance
+    config.fill_config.market_impact_bps = 0;  // No market impact
+    config.fill_config.jitter_ns = 0;  // No jitter for deterministic timing
     config.fill_config.enable_partial_fills = false;
 
     PaperTradingEngine engine(config);
@@ -331,6 +337,9 @@ TEST(test_paper_engine_risk_halt) {
     config.fill_config.min_latency_ns = 0;
     config.fill_config.max_latency_ns = 0;
     config.fill_config.slippage_bps = 0;
+    config.fill_config.slippage_variance = 0;
+    config.fill_config.market_impact_bps = 0;
+    config.fill_config.jitter_ns = 0;
     config.fill_config.enable_partial_fills = false;
 
     PaperTradingEngine engine(config);
@@ -357,6 +366,7 @@ TEST(test_paper_engine_position_limit) {
     config.enable_logging = false;
     config.fill_config.min_latency_ns = 0;
     config.fill_config.max_latency_ns = 0;
+    config.fill_config.jitter_ns = 0;
 
     PaperTradingEngine engine(config);
 

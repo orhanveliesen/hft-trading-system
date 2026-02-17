@@ -30,63 +30,156 @@ constexpr size_t SYMBOL_NAME_LEN = 16;
 
 /**
  * Per-symbol tuning configuration
+ *
+ * ALL trading parameters are now per-symbol (no more use_global_flags).
+ * Tuner can tune each symbol independently based on its own performance.
+ *
  * Packed struct for binary serialization (AI responses)
  */
 #pragma pack(push, 1)
 struct SymbolTuningConfig {
-    // Identity
+    // =========================================================================
+    // Identity (16 bytes)
+    // =========================================================================
     char symbol[SYMBOL_NAME_LEN];  // "BTCUSDT\0"
 
-    // Trading control
+    // =========================================================================
+    // Trading Control (2 bytes)
+    // =========================================================================
     uint8_t enabled;               // 0=skip, 1=trade this symbol
     uint8_t regime_override;       // 0=auto, 1-5=force specific regime
 
-    // EMA deviation thresholds (x100, e.g., 100 = 1%)
+    // =========================================================================
+    // EMA Deviation Thresholds (6 bytes)
+    // x100, e.g., 100 = 1%
+    // =========================================================================
     int16_t ema_dev_trending_x100; // Max % above EMA in uptrend
     int16_t ema_dev_ranging_x100;  // Max % above EMA in ranging
     int16_t ema_dev_highvol_x100;  // Max % above EMA in high vol
 
-    // Position sizing (x100, e.g., 200 = 2%)
+    // =========================================================================
+    // Position Sizing (6 bytes)
+    // x100, e.g., 200 = 2%
+    // =========================================================================
     int16_t base_position_x100;    // Base position % of capital
     int16_t max_position_x100;     // Max position % of capital
+    int16_t min_position_x100;     // Min position % of capital (NEW)
 
-    // Trade filtering
+    // =========================================================================
+    // Trade Filtering (4 bytes)
+    // =========================================================================
     int16_t cooldown_ms;           // Cooldown between trades
     int8_t signal_strength;        // 1=Medium, 2=Strong
     int8_t reserved1;              // Padding
 
-    // Profit targets (x100, e.g., 150 = 1.5%)
+    // =========================================================================
+    // Profit Targets (6 bytes)
+    // x100, e.g., 150 = 1.5%
+    // =========================================================================
     int16_t target_pct_x100;       // Profit target %
     int16_t stop_pct_x100;         // Stop loss %
     int16_t pullback_pct_x100;     // Trend exit pullback %
 
-    // Slippage/commission (for this symbol specifically)
+    // =========================================================================
+    // Trading Costs (4 bytes)
+    // =========================================================================
     int16_t slippage_bps_x100;     // Expected slippage
     int16_t commission_x10000;     // Commission rate
 
-    // Order execution preferences (AI-controlled per symbol)
+    // =========================================================================
+    // Order Execution (6 bytes)
+    // =========================================================================
     uint8_t order_type_preference; // 0=Auto, 1=MarketOnly, 2=LimitOnly, 3=Adaptive
+    uint8_t reserved2;             // Padding (was use_global_flags - REMOVED)
+    int16_t limit_offset_bps_x100; // Limit price offset (bps * 100)
+    int16_t limit_timeout_ms;      // Adaptive mode: limit→market timeout
 
-    // Use global default flags (bit flags)
-    // Bit 0: position sizing (base_position, max_position)
-    // Bit 1: target/stop (target_pct, stop_pct, pullback_pct)
-    // Bit 2: trade filtering (cooldown_ms, signal_strength)
-    // Bit 3: EMA thresholds (ema_dev_*)
-    uint8_t use_global_flags;      // Default: 0x0F (use global for all)
+    // =========================================================================
+    // Mode Thresholds - Streak Based (7 bytes)
+    // Per-symbol mode transitions based on consecutive wins/losses
+    // =========================================================================
+    int8_t losses_to_cautious;        // Consecutive losses → CAUTIOUS (default: 2)
+    int8_t reserved_mode1;            // Was: losses_to_tighten_signal (unused, use SharedConfig)
+    int8_t losses_to_defensive;       // Consecutive losses → DEFENSIVE (default: 4)
+    int8_t losses_to_pause;           // Consecutive losses → PAUSE trading (default: 5)
+    int8_t losses_to_exit_only;       // Consecutive losses → EXIT_ONLY (default: 6)
+    int8_t wins_to_aggressive;        // Consecutive wins → can be AGGRESSIVE (default: 3)
+    int8_t reserved_mode2;            // Was: wins_max_aggressive (unused, use SharedConfig)
 
-    int16_t limit_offset_bps_x100; // Limit price offset (bps * 100), e.g., 200 = 2 bps
-    int16_t limit_timeout_ms;      // Adaptive mode: limit→market timeout (ms)
+    // =========================================================================
+    // Drawdown Thresholds (4 bytes)
+    // x100, e.g., 300 = 3%
+    // =========================================================================
+    int16_t drawdown_defensive_x100;  // Drawdown % → DEFENSIVE (default: 300 = 3%)
+    int16_t drawdown_exit_x100;       // Drawdown % → EXIT_ONLY (default: 500 = 5%)
 
-    // Performance tracking (tuner updates these)
-    int32_t total_trades;          // Total trades
-    int32_t winning_trades;        // Winning trades
-    int64_t total_pnl_x100;        // Total P&L in cents
-    int64_t last_update_ns;        // Last tuner update timestamp
+    // =========================================================================
+    // Sharpe Ratio Thresholds (6 bytes)
+    // x100, e.g., 100 = 1.0
+    // =========================================================================
+    int16_t sharpe_aggressive_x100;   // Sharpe > this → AGGRESSIVE (default: 100 = 1.0)
+    int16_t sharpe_cautious_x100;     // Sharpe < this → CAUTIOUS (default: 30 = 0.3)
+    int16_t sharpe_defensive_x100;    // Sharpe < this → DEFENSIVE (default: 0 = 0.0)
 
-    // Reserved for future use (24 bytes remaining after order fields)
-    uint8_t reserved[24];
+    // =========================================================================
+    // Win Rate Thresholds (2 bytes)
+    // x100, e.g., 60 = 60%
+    // =========================================================================
+    int8_t win_rate_aggressive_x100;  // Win rate > this → AGGRESSIVE (default: 60)
+    int8_t win_rate_cautious_x100;    // Win rate < this → CAUTIOUS (default: 40)
 
-    // === Helper methods ===
+    // =========================================================================
+    // Signal Thresholds by Mode (4 bytes)
+    // x100, e.g., 50 = 0.5
+    // =========================================================================
+    int8_t signal_aggressive_x100;    // Signal threshold when AGGRESSIVE (default: 30)
+    int8_t signal_normal_x100;        // Signal threshold when NORMAL (default: 50)
+    int8_t signal_cautious_x100;      // Signal threshold when CAUTIOUS (default: 70)
+    int8_t min_confidence_x100;       // Below this, no signal (default: 30)
+
+    // =========================================================================
+    // Risk/Reward (1 byte)
+    // =========================================================================
+    int8_t min_risk_reward_x100;      // Min risk/reward ratio (default: 60 = 0.6)
+
+    // =========================================================================
+    // Current State - Trader Updates (3 bytes)
+    // These are updated by trader, NOT tuner
+    // =========================================================================
+    int8_t consecutive_losses;        // Current loss streak
+    int8_t consecutive_wins;          // Current win streak
+    int8_t current_mode;              // 0=AGGRESSIVE, 1=NORMAL, 2=CAUTIOUS, 3=DEFENSIVE, 4=EXIT_ONLY
+
+    // =========================================================================
+    // Performance Tracking (24 bytes)
+    // Trader updates these, tuner reads them
+    // =========================================================================
+    int32_t total_trades;             // Total trades
+    int32_t winning_trades;           // Winning trades
+    int64_t total_pnl_x100;           // Total P&L in cents
+    int64_t last_update_ns;           // Last tuner update timestamp
+
+    // =========================================================================
+    // Accumulation Control (8 bytes) - Tuner controls these
+    // How aggressively to add to existing positions
+    // =========================================================================
+    int8_t accum_floor_trending_x100;   // Floor when trending (default: 50)
+    int8_t accum_floor_ranging_x100;    // Floor when ranging (default: 30)
+    int8_t accum_floor_highvol_x100;    // Floor when high volatility (default: 20)
+    int8_t accum_boost_per_win_x100;    // Boost per consecutive win (default: 10)
+    int8_t accum_penalty_per_loss_x100; // Penalty per consecutive loss (default: 10)
+    int8_t accum_signal_boost_x100;     // Boost for strong signals (default: 10)
+    int8_t accum_max_x100;              // Maximum accumulation factor (default: 80)
+    int8_t accum_reserved;              // Padding
+
+    // =========================================================================
+    // Reserved for Future Use (pad to 128 bytes)
+    // =========================================================================
+    uint8_t reserved[19];
+
+    // =========================================================================
+    // Helper Methods
+    // =========================================================================
 
     void init(const char* sym) {
         using namespace config;
@@ -99,7 +192,7 @@ struct SymbolTuningConfig {
         slippage_bps_x100 = costs::SLIPPAGE_BPS_X100;
         commission_x10000 = costs::COMMISSION_X10000;
 
-        // Target/stop (derived from round-trip costs in defaults.hpp)
+        // Target/stop
         target_pct_x100 = targets::TARGET_X100;
         stop_pct_x100 = targets::STOP_X100;
         pullback_pct_x100 = targets::PULLBACK_X100;
@@ -107,13 +200,14 @@ struct SymbolTuningConfig {
         // Position sizing
         base_position_x100 = position::BASE_X100;
         max_position_x100 = position::MAX_X100;
+        min_position_x100 = smart_strategy::MIN_POSITION_X100;
 
         // EMA deviation thresholds
         ema_dev_trending_x100 = ema::DEV_TRENDING_X100;
         ema_dev_ranging_x100 = ema::DEV_RANGING_X100;
         ema_dev_highvol_x100 = ema::DEV_HIGHVOL_X100;
 
-        // Execution settings
+        // Trade filtering
         cooldown_ms = execution::COOLDOWN_MS;
         signal_strength = execution::SIGNAL_STRENGTH;
 
@@ -122,23 +216,123 @@ struct SymbolTuningConfig {
         limit_offset_bps_x100 = execution::LIMIT_OFFSET_BPS_X100;
         limit_timeout_ms = execution::LIMIT_TIMEOUT_MS;
 
+        // Mode thresholds (streak-based)
+        losses_to_cautious = smart_strategy::LOSSES_TO_CAUTIOUS;
+        reserved_mode1 = 0;  // Was: losses_to_tighten_signal (use SharedConfig)
+        losses_to_defensive = smart_strategy::LOSSES_TO_DEFENSIVE;
+        losses_to_pause = smart_strategy::LOSSES_TO_PAUSE;
+        losses_to_exit_only = smart_strategy::LOSSES_TO_EXIT_ONLY;
+        wins_to_aggressive = smart_strategy::WINS_TO_AGGRESSIVE;
+        reserved_mode2 = 0;  // Was: wins_max_aggressive (use SharedConfig)
+
+        // Drawdown thresholds
+        drawdown_defensive_x100 = smart_strategy::DRAWDOWN_DEFENSIVE_X100;
+        drawdown_exit_x100 = smart_strategy::DRAWDOWN_EXIT_X100;
+
+        // Sharpe thresholds
+        sharpe_aggressive_x100 = smart_strategy::SHARPE_AGGRESSIVE_X100;
+        sharpe_cautious_x100 = smart_strategy::SHARPE_CAUTIOUS_X100;
+        sharpe_defensive_x100 = smart_strategy::SHARPE_DEFENSIVE_X100;
+
+        // Win rate thresholds
+        win_rate_aggressive_x100 = smart_strategy::WIN_RATE_AGGRESSIVE_X100;
+        win_rate_cautious_x100 = smart_strategy::WIN_RATE_CAUTIOUS_X100;
+
+        // Signal thresholds
+        signal_aggressive_x100 = smart_strategy::SIGNAL_AGGRESSIVE_X100;
+        signal_normal_x100 = smart_strategy::SIGNAL_NORMAL_X100;
+        signal_cautious_x100 = smart_strategy::SIGNAL_CAUTIOUS_X100;
+        min_confidence_x100 = smart_strategy::MIN_CONFIDENCE_X100;
+
+        // Risk/reward
+        min_risk_reward_x100 = smart_strategy::MIN_RISK_REWARD_X100;
+
+        // Accumulation control
+        accum_floor_trending_x100 = smart_strategy::ACCUM_FLOOR_TRENDING_X100;
+        accum_floor_ranging_x100 = smart_strategy::ACCUM_FLOOR_RANGING_X100;
+        accum_floor_highvol_x100 = smart_strategy::ACCUM_FLOOR_HIGHVOL_X100;
+        accum_boost_per_win_x100 = smart_strategy::ACCUM_BOOST_PER_WIN_X100;
+        accum_penalty_per_loss_x100 = smart_strategy::ACCUM_PENALTY_PER_LOSS_X100;
+        accum_signal_boost_x100 = smart_strategy::ACCUM_SIGNAL_BOOST_X100;
+        accum_max_x100 = smart_strategy::ACCUM_MAX_X100;
+
+        // State (zeroed by memset)
+        // consecutive_losses = 0;
+        // consecutive_wins = 0;
+        // current_mode = 0;  // AGGRESSIVE
+
         // Feature flags
         enabled = 1;
-        regime_override = 0;           // auto
-        use_global_flags = flags::USE_GLOBAL_ALL;
+        regime_override = 0;  // auto
     }
 
-    // Accessors (convert from fixed-point)
-    double ema_dev_trending() const { return ema_dev_trending_x100 / 100.0 / 100.0; }  // As decimal
+    // =========================================================================
+    // Accessors (Convert from Fixed-Point)
+    // =========================================================================
+
+    // EMA deviation (returns as decimal, e.g., 0.01 for 1%)
+    double ema_dev_trending() const { return ema_dev_trending_x100 / 100.0 / 100.0; }
     double ema_dev_ranging() const { return ema_dev_ranging_x100 / 100.0 / 100.0; }
     double ema_dev_highvol() const { return ema_dev_highvol_x100 / 100.0 / 100.0; }
+
+    // Position sizing (returns as percentage, e.g., 2.0 for 2%)
     double base_position_pct() const { return base_position_x100 / 100.0; }
     double max_position_pct() const { return max_position_x100 / 100.0; }
+    double min_position_pct() const { return min_position_x100 / 100.0; }
+
+    // Target/stop (returns as percentage)
     double target_pct() const { return target_pct_x100 / 100.0; }
     double stop_pct() const { return stop_pct_x100 / 100.0; }
     double pullback_pct() const { return pullback_pct_x100 / 100.0; }
+
+    // Performance
     double win_rate() const { return total_trades > 0 ? (100.0 * winning_trades / total_trades) : 0; }
     double avg_pnl() const { return total_trades > 0 ? (total_pnl_x100 / 100.0 / total_trades) : 0; }
+
+    // Cooldown setter with bounds checking (prevents int16_t overflow)
+    // Clamps to [100, 32767] ms range
+    static constexpr int16_t COOLDOWN_MIN_MS = 100;
+    static constexpr int16_t COOLDOWN_MAX_MS = 32767;
+    void set_cooldown_ms(int32_t value) {
+        if (value <= 0) {
+            cooldown_ms = COOLDOWN_MIN_MS;
+        } else if (value > COOLDOWN_MAX_MS) {
+            cooldown_ms = COOLDOWN_MAX_MS;
+        } else {
+            cooldown_ms = static_cast<int16_t>(value);
+        }
+    }
+
+    // Drawdown thresholds (returns as decimal, e.g., 0.03 for 3%)
+    double drawdown_to_defensive() const { return drawdown_defensive_x100 / 10000.0; }
+    double drawdown_to_exit() const { return drawdown_exit_x100 / 10000.0; }
+
+    // Sharpe thresholds
+    double sharpe_aggressive() const { return sharpe_aggressive_x100 / 100.0; }
+    double sharpe_cautious() const { return sharpe_cautious_x100 / 100.0; }
+    double sharpe_defensive() const { return sharpe_defensive_x100 / 100.0; }
+
+    // Win rate thresholds (returns 0-100 scale)
+    double win_rate_aggressive_threshold() const { return static_cast<double>(win_rate_aggressive_x100); }
+    double win_rate_cautious_threshold() const { return static_cast<double>(win_rate_cautious_x100); }
+
+    // Signal thresholds (returns 0-1 scale)
+    double signal_threshold_aggressive() const { return signal_aggressive_x100 / 100.0; }
+    double signal_threshold_normal() const { return signal_normal_x100 / 100.0; }
+    double signal_threshold_cautious() const { return signal_cautious_x100 / 100.0; }
+    double min_confidence() const { return min_confidence_x100 / 100.0; }
+
+    // Risk/reward
+    double min_risk_reward() const { return min_risk_reward_x100 / 100.0; }
+
+    // Accumulation control accessors (returns 0-1 scale)
+    double accum_floor_trending() const { return accum_floor_trending_x100 / 100.0; }
+    double accum_floor_ranging() const { return accum_floor_ranging_x100 / 100.0; }
+    double accum_floor_highvol() const { return accum_floor_highvol_x100 / 100.0; }
+    double accum_boost_per_win() const { return accum_boost_per_win_x100 / 100.0; }
+    double accum_penalty_per_loss() const { return accum_penalty_per_loss_x100 / 100.0; }
+    double accum_signal_boost() const { return accum_signal_boost_x100 / 100.0; }
+    double accum_max() const { return accum_max_x100 / 100.0; }
 
     // Order execution accessors
     uint8_t get_order_type_preference() const { return order_type_preference; }
@@ -154,32 +348,56 @@ struct SymbolTuningConfig {
     bool is_enabled() const { return enabled != 0; }
     bool matches(const char* sym) const { return std::strcmp(symbol, sym) == 0; }
 
-    // Use global flags accessors
-    bool use_global_position() const { return (use_global_flags & 0x01) != 0; }
-    bool use_global_target() const { return (use_global_flags & 0x02) != 0; }
-    bool use_global_filtering() const { return (use_global_flags & 0x04) != 0; }
-    bool use_global_ema() const { return (use_global_flags & 0x08) != 0; }
+    // =========================================================================
+    // Backward Compatibility Stubs (use_global_flags REMOVED)
+    // Everything is now per-symbol, these always return false
+    // =========================================================================
+    bool use_global_ema() const { return false; }
+    bool use_global_position() const { return false; }
+    bool use_global_target() const { return false; }
+    bool use_global_filtering() const { return false; }
+    void set_use_global_ema(bool) {}
+    void set_use_global_position(bool) {}
+    void set_use_global_target(bool) {}
+    void set_use_global_filtering(bool) {}
 
-    void set_use_global_position(bool v) {
-        if (v) use_global_flags |= 0x01;
-        else use_global_flags &= ~0x01;
+    // =========================================================================
+    // State Management
+    // =========================================================================
+
+    /**
+     * Record a trade result and update streak/stats
+     * @param won True if trade was profitable
+     * @param pnl_pct P&L as percentage (e.g., 1.5 for 1.5% profit)
+     */
+    void record_trade(bool won, double pnl_pct) {
+        // Update streaks
+        if (won) {
+            consecutive_wins++;
+            consecutive_losses = 0;
+            winning_trades++;
+        } else {
+            consecutive_losses++;
+            consecutive_wins = 0;
+        }
+
+        // Update stats
+        total_trades++;
+        total_pnl_x100 += static_cast<int64_t>(pnl_pct * 100);
     }
-    void set_use_global_target(bool v) {
-        if (v) use_global_flags |= 0x02;
-        else use_global_flags &= ~0x02;
-    }
-    void set_use_global_filtering(bool v) {
-        if (v) use_global_flags |= 0x04;
-        else use_global_flags &= ~0x04;
-    }
-    void set_use_global_ema(bool v) {
-        if (v) use_global_flags |= 0x08;
-        else use_global_flags &= ~0x08;
+
+    /**
+     * Reset state (used when restarting or clearing history)
+     */
+    void reset_state() {
+        consecutive_losses = 0;
+        consecutive_wins = 0;
+        current_mode = 1;  // NORMAL
     }
 };
 #pragma pack(pop)
 
-static_assert(sizeof(SymbolTuningConfig) == 96, "SymbolTuningConfig must be 96 bytes for binary protocol");
+static_assert(sizeof(SymbolTuningConfig) == 128, "SymbolTuningConfig must be 128 bytes for binary protocol");
 
 /**
  * Tuner command from AI
@@ -253,7 +471,7 @@ struct TunerCommand {
 };
 #pragma pack(pop)
 
-static_assert(sizeof(TunerCommand) == 192, "TunerCommand must be 192 bytes");
+static_assert(sizeof(TunerCommand) == 224, "TunerCommand must be 224 bytes");
 
 /**
  * Shared memory structure for per-symbol configs

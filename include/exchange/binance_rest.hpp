@@ -8,6 +8,7 @@
 #include <unistd.h>
 #include <curl/curl.h>
 #include <nlohmann/json.hpp>
+#include <iostream>
 
 namespace hft {
 namespace exchange {
@@ -188,13 +189,21 @@ public:
                 }
 
                 // Check if SPOT trading is permitted
+                // Note: Binance API changed - "permissions" array is now empty,
+                // use "isSpotTradingAllowed" boolean instead
                 bool is_spot = false;
-                if (sym.contains("permissions")) {
-                    for (const auto& perm : sym["permissions"]) {
-                        if (perm == "SPOT") {
-                            is_spot = true;
-                            break;
+                if (sym.contains("isSpotTradingAllowed")) {
+                    is_spot = sym["isSpotTradingAllowed"].get<bool>();
+                } else if (sym.contains("permissionSets")) {
+                    // Fallback: check permissionSets nested array
+                    for (const auto& perm_set : sym["permissionSets"]) {
+                        for (const auto& perm : perm_set) {
+                            if (perm == "SPOT") {
+                                is_spot = true;
+                                break;
+                            }
                         }
+                        if (is_spot) break;
                     }
                 }
 
@@ -313,6 +322,72 @@ private:
         return klines;
     }
 };
+
+/**
+ * Default symbol limit for paper trading.
+ * MAX_SYMBOLS in portfolio.hpp is 64, but we default to 8 major pairs
+ * to avoid memory/performance issues. Use -s flag for specific symbols.
+ */
+constexpr size_t DEFAULT_SYMBOL_LIMIT = 8;
+
+/**
+ * Priority symbols - major trading pairs with high liquidity.
+ * These are checked first when selecting symbols from Binance.
+ */
+inline const std::vector<std::string>& get_priority_symbols() {
+    static const std::vector<std::string> priority = {
+        "BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT",
+        "XRPUSDT", "ADAUSDT", "DOGEUSDT", "MATICUSDT"
+    };
+    return priority;
+}
+
+/**
+ * Fetch default trading symbols from Binance.
+ *
+ * Returns a limited set of symbols to avoid memory issues.
+ * Priority is given to major trading pairs (BTC, ETH, etc.)
+ * Limited to DEFAULT_SYMBOL_LIMIT (8) symbols by default.
+ *
+ * @param limit Maximum number of symbols to return (default: 8)
+ * @return Vector of symbol strings (e.g., "BTCUSDT", "ETHUSDT")
+ * @throws std::runtime_error if API returns empty response
+ */
+inline std::vector<std::string> fetch_default_symbols(size_t limit = DEFAULT_SYMBOL_LIMIT) {
+    BinanceRest rest(false);  // Use mainnet
+    auto all_symbols = rest.fetch_trading_symbols("USDT");
+
+    if (all_symbols.empty()) {
+        throw std::runtime_error("Failed to fetch symbols from Binance API: empty response");
+    }
+
+    // Build result with priority symbols first
+    std::vector<std::string> result;
+    result.reserve(limit);
+
+    // Add priority symbols that are available
+    const auto& priority = get_priority_symbols();
+    for (const auto& sym : priority) {
+        if (result.size() >= limit) break;
+        auto it = std::find(all_symbols.begin(), all_symbols.end(), sym);
+        if (it != all_symbols.end()) {
+            result.push_back(sym);
+        }
+    }
+
+    // Fill remaining slots with other symbols
+    for (const auto& sym : all_symbols) {
+        if (result.size() >= limit) break;
+        if (std::find(result.begin(), result.end(), sym) == result.end()) {
+            result.push_back(sym);
+        }
+    }
+
+    std::cout << "[SYMBOLS] Selected " << result.size()
+              << " symbols from " << all_symbols.size()
+              << " available USDT trading pairs\n";
+    return result;
+}
 
 }  // namespace exchange
 }  // namespace hft

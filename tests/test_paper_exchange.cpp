@@ -19,10 +19,20 @@
 #include <memory>
 #include "../include/exchange/paper_exchange.hpp"
 #include "../include/ipc/shared_config.hpp"
+#include "../include/ipc/shared_paper_config.hpp"
 
 using namespace hft;
 using namespace hft::exchange;
 using namespace hft::ipc;
+
+// Zero-slippage config for predictable test results
+// Uses heap allocation with manual init to avoid shared memory overhead
+static SharedPaperConfig* create_zero_slippage_config() {
+    static SharedPaperConfig config;
+    config.init();
+    config.set_slippage_bps(0.0);  // Zero slippage for tests
+    return &config;
+}
 
 // Test state
 static ExecutionReport last_report;
@@ -86,6 +96,7 @@ static void on_execution(const ExecutionReport& report) {
 
 TEST(market_buy_fills_at_ask) {
     PaperExchange exchange;
+    exchange.set_paper_config(create_zero_slippage_config());
     exchange.set_execution_callback(on_execution);
 
     auto report = exchange.send_market_order(
@@ -105,6 +116,7 @@ TEST(market_buy_fills_at_ask) {
 
 TEST(market_sell_fills_at_bid) {
     PaperExchange exchange;
+    exchange.set_paper_config(create_zero_slippage_config());
     exchange.set_execution_callback(on_execution);
 
     auto report = exchange.send_market_order(
@@ -121,6 +133,7 @@ TEST(market_sell_fills_at_bid) {
 
 TEST(market_order_includes_commission) {
     PaperExchange exchange;
+    exchange.set_paper_config(create_zero_slippage_config());
     exchange.set_execution_callback(on_execution);
 
     auto report = exchange.send_market_order(
@@ -154,6 +167,7 @@ TEST(limit_order_goes_to_pending) {
 
 TEST(limit_buy_fills_when_ask_drops_below_limit) {
     PaperExchange exchange;
+    exchange.set_paper_config(create_zero_slippage_config());
     exchange.set_execution_callback(on_execution);
 
     // Submit buy limit at 50000
@@ -181,6 +195,7 @@ TEST(limit_buy_fills_when_ask_drops_below_limit) {
 
 TEST(limit_sell_fills_when_bid_rises_above_limit) {
     PaperExchange exchange;
+    exchange.set_paper_config(create_zero_slippage_config());
     exchange.set_execution_callback(on_execution);
 
     // Submit sell limit at 50000
@@ -231,6 +246,7 @@ TEST(cancel_nonexistent_order_returns_false) {
 
 TEST(multiple_symbols_tracked_separately) {
     PaperExchange exchange;
+    exchange.set_paper_config(create_zero_slippage_config());
     exchange.set_execution_callback(on_execution);
 
     exchange.send_limit_order("BTCUSDT", Side::Buy, 1.0, 50000.0, 1000000);
@@ -295,6 +311,7 @@ TEST(pessimistic_sell_limit_equal_to_bid_no_fill) {
 
 TEST(commission_from_config) {
     PaperExchange exchange;
+    exchange.set_paper_config(create_zero_slippage_config());
     exchange.set_execution_callback(on_execution);
 
     // Create shared config with custom commission rate

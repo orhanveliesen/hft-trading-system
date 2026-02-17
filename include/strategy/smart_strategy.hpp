@@ -112,6 +112,65 @@ struct SmartStrategyConfig {
 };
 
 // =============================================================================
+// Lookup Tables (Branchless mode/regime calculations)
+// Index: enum value, Value: multiplier or weight
+// =============================================================================
+
+namespace lookup {
+    // Mode-based signal multipliers: indexed by StrategyMode
+    // AGGRESSIVE=0, NORMAL=1, CAUTIOUS=2, DEFENSIVE=3, EXIT_ONLY=4
+    static constexpr std::array<double, 5> MODE_SIGNAL_MULT = {
+        1.2,   // AGGRESSIVE
+        1.0,   // NORMAL
+        0.7,   // CAUTIOUS
+        0.5,   // DEFENSIVE
+        0.3    // EXIT_ONLY
+    };
+
+    // Mode-based size multipliers
+    static constexpr std::array<double, 5> MODE_SIZE_MULT = {
+        1.5,   // AGGRESSIVE
+        1.0,   // NORMAL
+        0.5,   // CAUTIOUS
+        0.25,  // DEFENSIVE
+        0.25   // EXIT_ONLY
+    };
+
+    // Regime-based momentum/MR weights
+    // Unknown=0, TrendingUp=1, TrendingDown=2, Ranging=3, HighVol=4, LowVol=5, Spike=6
+    struct RegimeWeights {
+        double momentum;
+        double mean_reversion;
+    };
+
+    static constexpr std::array<RegimeWeights, 7> REGIME_WEIGHTS = {{
+        {0.5, 0.5},   // Unknown
+        {0.7, 0.3},   // TrendingUp
+        {0.7, 0.3},   // TrendingDown
+        {0.3, 0.7},   // Ranging
+        {0.4, 0.6},   // HighVolatility
+        {0.3, 0.7},   // LowVolatility
+        {0.2, 0.2}    // Spike (reduce both)
+    }};
+
+    // Regime-based target/stop multipliers
+    struct TargetStopMult {
+        double target;
+        double stop;
+    };
+
+    static constexpr std::array<TargetStopMult, 7> REGIME_TARGET_STOP = {{
+        {1.0, 1.0},   // Unknown
+        {1.5, 1.0},   // TrendingUp (let winners run)
+        {1.5, 1.0},   // TrendingDown
+        {1.0, 1.0},   // Ranging
+        {1.3, 1.3},   // HighVolatility (wider stops)
+        {0.7, 0.7},   // LowVolatility (smaller targets)
+        {0.5, 2.0}    // Spike (tight target, wide stop for safety)
+    }};
+}  // namespace lookup
+
+// =============================================================================
 // SmartStrategy
 // =============================================================================
 
@@ -425,34 +484,10 @@ private:
     }
 
     double blend_signals(double momentum, double mean_rev, MarketRegime regime) {
-        // Blend based on regime
-        double mom_weight, mr_weight;
-
-        switch (regime) {
-            case MarketRegime::TrendingUp:
-            case MarketRegime::TrendingDown:
-                mom_weight = 0.7;
-                mr_weight = 0.3;
-                break;
-
-            case MarketRegime::Ranging:
-            case MarketRegime::LowVolatility:
-                mom_weight = 0.3;
-                mr_weight = 0.7;
-                break;
-
-            case MarketRegime::HighVolatility:
-                // In high vol, reduce both, be more cautious
-                mom_weight = 0.4;
-                mr_weight = 0.4;
-                break;
-
-            default:
-                mom_weight = 0.5;
-                mr_weight = 0.5;
-        }
-
-        return momentum * mom_weight + mean_rev * mr_weight;
+        // Branchless lookup: index into table by regime enum value
+        size_t idx = static_cast<size_t>(regime);
+        const auto& weights = lookup::REGIME_WEIGHTS[idx];
+        return momentum * weights.momentum + mean_rev * weights.mean_reversion;
     }
 
     double apply_filters(double raw_score, double spread_pct) {
@@ -466,23 +501,8 @@ private:
         // Apply confidence multiplier
         filtered *= confidence_;
 
-        // Mode-based adjustment
-        switch (mode_) {
-            case StrategyMode::AGGRESSIVE:
-                filtered *= 1.2;
-                break;
-            case StrategyMode::CAUTIOUS:
-                filtered *= 0.7;
-                break;
-            case StrategyMode::DEFENSIVE:
-                filtered *= 0.5;
-                break;
-            case StrategyMode::EXIT_ONLY:
-                filtered *= 0.3;  // Only very strong signals
-                break;
-            default:
-                break;
-        }
+        // Branchless mode-based adjustment via lookup table
+        filtered *= lookup::MODE_SIGNAL_MULT[static_cast<size_t>(mode_)];
 
         return std::max(-1.0, std::min(1.0, filtered));
     }
@@ -569,21 +589,8 @@ private:
             size *= (0.002 / spread_pct);  // Inverse relationship
         }
 
-        // Mode adjustments
-        switch (mode_) {
-            case StrategyMode::AGGRESSIVE:
-                size *= 1.5;
-                break;
-            case StrategyMode::CAUTIOUS:
-                size *= 0.5;
-                break;
-            case StrategyMode::DEFENSIVE:
-            case StrategyMode::EXIT_ONLY:
-                size *= 0.25;
-                break;
-            default:
-                break;
-        }
+        // Branchless mode adjustments via lookup table
+        size *= lookup::MODE_SIZE_MULT[static_cast<size_t>(mode_)];
 
         // Clamp to limits
         return std::max(config_.min_position_pct,
@@ -594,23 +601,11 @@ private:
         double target_pct = config_.default_target_pct;
         double stop_pct = config_.default_stop_pct;
 
-        // Adjust based on regime
-        switch (regime) {
-            case MarketRegime::TrendingUp:
-            case MarketRegime::TrendingDown:
-                target_pct *= 1.5;  // Let winners run in trends
-                break;
-            case MarketRegime::HighVolatility:
-                target_pct *= 1.3;
-                stop_pct *= 1.3;    // Wider stops in high vol
-                break;
-            case MarketRegime::LowVolatility:
-                target_pct *= 0.7;  // Smaller targets in low vol
-                stop_pct *= 0.7;
-                break;
-            default:
-                break;
-        }
+        // Branchless regime adjustment via lookup table
+        size_t idx = static_cast<size_t>(regime);
+        const auto& ts = lookup::REGIME_TARGET_STOP[idx];
+        target_pct *= ts.target;
+        stop_pct *= ts.stop;
 
         // Ensure minimum risk:reward
         if (target_pct / stop_pct < config_.min_risk_reward) {

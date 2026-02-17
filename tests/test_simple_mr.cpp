@@ -34,7 +34,7 @@ TEST(test_first_tick_returns_hold) {
     // İlk tick'te referans alır, Hold döner
     auto signal = strategy(10000, 10010, 0);
 
-    EXPECT_EQ(signal, Signal::Hold);
+    EXPECT_EQ(signal, Signal::None);
 }
 
 TEST(test_price_drop_triggers_buy) {
@@ -73,7 +73,7 @@ TEST(test_no_price_change_returns_hold) {
     // Aynı mid price
     auto signal = strategy(10000, 10010, 0);
 
-    EXPECT_EQ(signal, Signal::Hold);
+    EXPECT_EQ(signal, Signal::None);
 }
 
 // ============================================
@@ -90,7 +90,7 @@ TEST(test_respects_max_long_position) {
     // Fiyat düştü ama pozisyon limitte
     auto signal = strategy(9998, 10008, config.max_position);
 
-    EXPECT_EQ(signal, Signal::Hold);  // Al diyemez, limit dolu
+    EXPECT_EQ(signal, Signal::None);  // Al diyemez, limit dolu
 }
 
 TEST(test_respects_max_short_position) {
@@ -103,7 +103,7 @@ TEST(test_respects_max_short_position) {
     // Fiyat çıktı ama short limit dolu
     auto signal = strategy(10003, 10013, -config.max_position);
 
-    EXPECT_EQ(signal, Signal::Hold);  // Sat diyemez, limit dolu
+    EXPECT_EQ(signal, Signal::None);  // Sat diyemez, limit dolu
 }
 
 // ============================================
@@ -115,13 +115,13 @@ TEST(test_invalid_prices_return_hold) {
     SimpleMeanReversion strategy(config);
 
     // Invalid bid
-    EXPECT_EQ(strategy(INVALID_PRICE, 10010, 0), Signal::Hold);
+    EXPECT_EQ(strategy(INVALID_PRICE, 10010, 0), Signal::None);
 
     // Invalid ask
-    EXPECT_EQ(strategy(10000, INVALID_PRICE, 0), Signal::Hold);
+    EXPECT_EQ(strategy(10000, INVALID_PRICE, 0), Signal::None);
 
     // Crossed market (bid >= ask)
-    EXPECT_EQ(strategy(10010, 10000, 0), Signal::Hold);
+    EXPECT_EQ(strategy(10010, 10000, 0), Signal::None);
 }
 
 TEST(test_reset_clears_state) {
@@ -137,7 +137,7 @@ TEST(test_reset_clears_state) {
 
     // Tekrar ilk tick gibi davranmalı
     auto signal = strategy(10000, 10010, 0);
-    EXPECT_EQ(signal, Signal::Hold);
+    EXPECT_EQ(signal, Signal::None);
 }
 
 // ============================================
@@ -173,7 +173,7 @@ TEST(test_integration_with_trading_engine) {
 
     // Strategy çalıştır
     auto signal = strategy(bid, ask, world->position_qty());
-    EXPECT_EQ(signal, Signal::Hold);  // İlk tick
+    EXPECT_EQ(signal, Signal::None);  // İlk tick
 
     // Simüle: Fiyat düştü
     world->book().cancel_order(1);
@@ -199,7 +199,7 @@ TEST(test_full_trading_cycle) {
     int64_t position = 0;
 
     // Tick 1: Başlangıç (Hold)
-    EXPECT_EQ(strategy(10000, 10010, position), Signal::Hold);
+    EXPECT_EQ(strategy(10000, 10010, position), Signal::None);
 
     // Tick 2: Fiyat düştü (Buy)
     auto signal = strategy(9990, 10000, position);

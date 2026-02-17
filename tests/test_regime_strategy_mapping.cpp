@@ -178,10 +178,10 @@ TEST(test_strategy_type_to_short) {
     ASSERT_STR_EQ(strategy_type_to_short(StrategyType::NONE), "OFF");
     ASSERT_STR_EQ(strategy_type_to_short(StrategyType::MOMENTUM), "MOM");
     ASSERT_STR_EQ(strategy_type_to_short(StrategyType::MEAN_REV), "MRV");
-    ASSERT_STR_EQ(strategy_type_to_short(StrategyType::MKT_MAKER), "MM");
+    ASSERT_STR_EQ(strategy_type_to_short(StrategyType::MKT_MAKER), "MMK");
     ASSERT_STR_EQ(strategy_type_to_short(StrategyType::DEFENSIVE), "DEF");
     ASSERT_STR_EQ(strategy_type_to_short(StrategyType::CAUTIOUS), "CAU");
-    ASSERT_STR_EQ(strategy_type_to_short(StrategyType::SMART), "AI");
+    ASSERT_STR_EQ(strategy_type_to_short(StrategyType::SMART), "SMT");
 }
 
 // ============================================================================

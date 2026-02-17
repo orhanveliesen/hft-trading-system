@@ -489,25 +489,23 @@ public:
             }
             case EventType::TargetHit: {
                 trade_stats_.add_target();
-                double pnl = e.pnl_cents / 100.0;
-                pnl_.add_win(pnl);
+                pnl_.add_win(e.pnl);
 
                 std::string ticker(e.ticker, 3);
                 ss << std::fixed << std::setprecision(1) << std::setw(6) << rel_sec << "s  "
                    << "TARGET " << std::setw(4) << ticker << "  +"
-                   << std::setprecision(2) << "$" << pnl;
+                   << std::setprecision(2) << "$" << e.pnl;
                 events_.add(ss.str(), term::BGREEN);
                 break;
             }
             case EventType::StopLoss: {
                 trade_stats_.add_stop();
-                double pnl = e.pnl_cents / 100.0;
-                pnl_.add_loss(pnl);
+                pnl_.add_loss(e.pnl);
 
                 std::string ticker(e.ticker, 3);
                 ss << std::fixed << std::setprecision(1) << std::setw(6) << rel_sec << "s  "
                    << "STOP   " << std::setw(4) << ticker << "  "
-                   << std::setprecision(2) << "$" << pnl;
+                   << std::setprecision(2) << "$" << e.pnl;
                 events_.add(ss.str(), term::BRED);
                 break;
             }
@@ -791,7 +789,7 @@ int main(int argc, char* argv[]) {
                            << (int)event.side << ","
                            << event.price << ","
                            << event.quantity << ","
-                           << event.pnl_cents << "\n";
+                           << event.pnl << "\n";
             }
         }
 

@@ -36,12 +36,12 @@ void test_basic_stats() {
     // Mean should be 3%
     assert(approx_equal(sharpe.mean(), 0.03));
 
-    // Variance of [1,2,3,4,5] = 2.5 (sample variance)
-    // For percentages: [0.01, 0.02, 0.03, 0.04, 0.05]
-    // Variance = 0.00025 (sample variance = sum((x-mean)^2)/(n-1))
-    double expected_var = 0.0001 + 0.0001 + 0 + 0.0001 + 0.0001;  // Sum of squared diffs
+    // Variance of [0.01, 0.02, 0.03, 0.04, 0.05] with mean=0.03
+    // Squared diffs: (0.01-0.03)^2=0.0004, (0.02-0.03)^2=0.0001, 0, 0.0001, 0.0004
+    // Sum = 0.001, sample variance = 0.001/4 = 0.00025
+    double expected_var = 0.0004 + 0.0001 + 0 + 0.0001 + 0.0004;  // Sum of squared diffs
     expected_var /= 4;  // n-1
-    assert(approx_equal(sharpe.variance(), expected_var, 0.0001));
+    assert(approx_equal(sharpe.variance(), expected_var, 0.00001));
 
     std::cout << "PASSED\n";
 }

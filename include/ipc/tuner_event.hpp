@@ -33,6 +33,7 @@ enum class TunerEventType : uint8_t {
     Cancel = 3,         // Order cancelled
     PositionOpen = 4,   // New position opened
     PositionClose = 5,  // Position closed
+    AccumulationDecision = 6,  // Trader decided on accumulation aggressiveness
 
     // Tuner events (16-31)
     ConfigChange = 16,      // AI modified symbol config
@@ -179,6 +180,17 @@ struct TunerEvent {
             char component[24];         // Which component errored
         } error;  // 32 bytes
 
+        // For AccumulationDecision
+        struct {
+            double position_pct_before; // Position % before decision
+            double signal_strength;     // Raw signal before reduction
+            int8_t factor_x100;         // Accumulation factor used (20-80)
+            int8_t regime;              // Market regime at decision
+            int8_t consecutive_wins;    // Win streak
+            int8_t consecutive_losses;  // Loss streak
+            uint8_t reserved[4];
+        } accumulation;  // 24 bytes
+
         // Raw bytes for custom usage
         uint8_t raw[92];
     } payload;
@@ -279,6 +291,22 @@ struct TunerEvent {
         return e;
     }
 
+    static TunerEvent make_accumulation(const char* sym, double pos_pct,
+                                        double signal_strength, int factor_x100,
+                                        uint8_t regime, int8_t wins, int8_t losses,
+                                        const char* r = nullptr) {
+        TunerEvent e;
+        e.init(TunerEventType::AccumulationDecision, sym);
+        e.payload.accumulation.position_pct_before = pos_pct;
+        e.payload.accumulation.signal_strength = signal_strength;
+        e.payload.accumulation.factor_x100 = static_cast<int8_t>(factor_x100);
+        e.payload.accumulation.regime = static_cast<int8_t>(regime);
+        e.payload.accumulation.consecutive_wins = wins;
+        e.payload.accumulation.consecutive_losses = losses;
+        if (r) e.set_reason(r);
+        return e;
+    }
+
     // Type checking helpers
     bool is_trade_event() const {
         return static_cast<uint8_t>(type) < 16;
@@ -307,6 +335,7 @@ struct TunerEvent {
             case TunerEventType::Cancel: return "CANCEL";
             case TunerEventType::PositionOpen: return "POS_OPEN";
             case TunerEventType::PositionClose: return "POS_CLOSE";
+            case TunerEventType::AccumulationDecision: return "ACCUMULATION";
             case TunerEventType::ConfigChange: return "CONFIG";
             case TunerEventType::PauseSymbol: return "PAUSE";
             case TunerEventType::ResumeSymbol: return "RESUME";

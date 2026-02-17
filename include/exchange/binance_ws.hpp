@@ -528,6 +528,8 @@ private:
         info.uid = -1;
         info.options = LWS_SERVER_OPTION_DO_SSL_GLOBAL_INIT;
         info.user = this;
+        // CA certificate bundle for SSL verification (WSL2 compatibility)
+        info.client_ssl_ca_filepath = "/etc/ssl/certs/ca-certificates.crt";
 
         context_ = lws_create_context(&info);
         if (!context_) {
@@ -549,11 +551,13 @@ private:
         ccinfo.path = path.c_str();
         ccinfo.host = host_.c_str();
         ccinfo.origin = host_.c_str();
-        ccinfo.protocol = "binance-ws";
+        ccinfo.protocol = protocols[0].name;  // Use same protocol name as defined
         // WSL2'de CA bundle sorunu olabilir, sertifika doğrulamayı atla
         ccinfo.ssl_connection = LCCSCF_USE_SSL |
                                 LCCSCF_ALLOW_SELFSIGNED |
-                                LCCSCF_SKIP_SERVER_CERT_HOSTNAME_CHECK;
+                                LCCSCF_SKIP_SERVER_CERT_HOSTNAME_CHECK |
+                                LCCSCF_ALLOW_EXPIRED |
+                                LCCSCF_ALLOW_INSECURE;
 
         wsi_ = lws_client_connect_via_info(&ccinfo);
         if (!wsi_) {
@@ -563,9 +567,52 @@ private:
             return;
         }
 
-        // Event loop
+        // Event loop with auto-reconnect (unlimited retries with exponential backoff)
+        uint32_t retry_count = 0;
+        static constexpr int BASE_RETRY_DELAY_SEC = 5;      // Start with 5 seconds
+        static constexpr int MAX_RETRY_DELAY_SEC = 300;     // Max 5 minutes between retries
+        auto last_connect_attempt = std::chrono::steady_clock::now();
+
         while (running_) {
             lws_service(context_, 100);  // 100ms timeout
+
+            // Handle reconnection if needed
+            auto now = std::chrono::steady_clock::now();
+
+            // Calculate backoff delay: 5s, 10s, 20s, 40s, 80s, ... up to 300s
+            int backoff_delay = std::min(
+                BASE_RETRY_DELAY_SEC * (1 << std::min(retry_count, 6u)),
+                MAX_RETRY_DELAY_SEC
+            );
+
+            auto since_last_attempt = std::chrono::duration_cast<std::chrono::seconds>(
+                now - last_connect_attempt).count();
+
+            if (reconnect_requested_.exchange(false) ||
+                (!connected_ && since_last_attempt > backoff_delay)) {
+
+                // UNLIMITED RETRIES - connection is essential for trading
+                ++retry_count;
+                if (error_callback_) {
+                    error_callback_("Reconnection attempt " + std::to_string(retry_count) +
+                                   " (next retry in " + std::to_string(backoff_delay) + "s)");
+                }
+                if (reconnect_callback_) {
+                    reconnect_callback_(retry_count, false);
+                }
+
+                // Try to reconnect
+                wsi_ = lws_client_connect_via_info(&ccinfo);
+                last_connect_attempt = now;
+            }
+
+            // Reset retry count on successful connection
+            if (connected_) {
+                if (retry_count > 0 && reconnect_callback_) {
+                    reconnect_callback_(retry_count, true);  // Notify success
+                }
+                retry_count = 0;
+            }
         }
     }
 };

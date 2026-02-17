@@ -10,6 +10,7 @@
  */
 
 #include "../ipc/symbol_config.hpp"
+#include "../ipc/tuner_event.hpp"
 #include <string>
 #include <vector>
 #include <sstream>
@@ -59,8 +60,18 @@ struct CostMetrics {
     uint32_t session_duration_sec; // How long we've been trading
     double trades_per_hour;        // Fill rate
 
+    // Expected vs Observed costs (CRITICAL for AI to understand)
+    double configured_slippage_bps;    // Expected slippage (default: 5 bps)
+    double configured_commission_bps;  // Expected commission (default: 10 bps)
+    double observed_slippage_bps;      // Actual slippage per fill
+    double observed_commission_bps;    // Actual commission per fill
+    double expected_round_trip_pct;    // Expected round-trip (default: 0.3%)
+    double actual_round_trip_pct;      // Actual observed round-trip
+
     // Cost efficiency - AI will interpret these
     bool costs_exceed_profits() const { return total_costs > (gross_pnl > 0 ? gross_pnl : 0); }
+    bool slippage_exceeds_expected() const { return observed_slippage_bps > configured_slippage_bps * 1.5; }
+    double slippage_ratio() const { return configured_slippage_bps > 0 ? observed_slippage_bps / configured_slippage_bps : 0; }
 };
 
 // Market snapshot data for AI tuner
@@ -371,13 +382,29 @@ private:
 
         ss << "You are an HFT parameter tuner. Analyze the trading performance and recommend ONE action.\n\n";
 
+        // CRITICAL: Cold-start handling - prevent hallucination
+        bool has_trades = costs && costs->total_fills > 0;
+        if (!has_trades) {
+            ss << "## 🚨 COLD START - NO TRADING DATA\n";
+            ss << "**CRITICAL: There are ZERO trades in this session.**\n";
+            ss << "- You MUST return NO_CHANGE because there is no performance data to analyze.\n";
+            ss << "- Do NOT make up trade statistics or win rates.\n";
+            ss << "- Do NOT recommend parameter changes without real trading data.\n";
+            ss << "- Wait for actual trades before making tuning decisions.\n\n";
+            ss << "**REQUIRED RESPONSE:**\n";
+            ss << "```json\n";
+            ss << "{\"action\": \"NO_CHANGE\", \"confidence\": 100, \"reason\": \"No trades to analyze\"}\n";
+            ss << "```\n\n";
+        }
+
         ss << "## Current State\n";
         ss << "- Trigger: " << trigger_name(trigger) << "\n";
         ss << "- Portfolio Cash: $" << std::fixed << std::setprecision(2) << portfolio_cash << "\n";
-        ss << "- Session P&L: $" << portfolio_pnl << "\n\n";
+        ss << "- Session P&L: $" << portfolio_pnl << "\n";
+        ss << "- **Total Trades This Session: " << (has_trades ? std::to_string(costs->total_fills) : "0") << "**\n\n";
 
         // CRITICAL: Cost Analysis Section - AI MUST consider this
-        if (costs && costs->total_fills > 0) {
+        if (has_trades) {
             ss << "## ⚠️ COST ANALYSIS (CRITICAL)\n";
             ss << "Trading costs are eating into profits. You MUST consider this.\n\n";
             ss << "**Cost Breakdown:**\n";
@@ -388,6 +415,40 @@ private:
             ss << "- Avg trade value: $" << std::setprecision(2) << costs->avg_trade_value << "\n";
             ss << "- Cost % per trade: " << std::setprecision(3) << costs->cost_pct_per_trade << "%\n";
             ss << "- Round-trip cost: ~" << (costs->round_trip_cost_pct) << "%\n\n";
+
+            // CRITICAL: Expected vs Observed cost comparison
+            ss << "**🔍 EXPECTED vs OBSERVED COSTS (CRITICAL):**\n";
+            ss << "| Metric | Expected | Observed | Status |\n";
+            ss << "|--------|----------|----------|--------|\n";
+            ss << "| Slippage/fill | " << std::setprecision(1) << costs->configured_slippage_bps << " bps | "
+               << costs->observed_slippage_bps << " bps | "
+               << (costs->slippage_exceeds_expected() ? "⚠️ HIGH" : "✅ OK") << " |\n";
+            ss << "| Commission/fill | " << costs->configured_commission_bps << " bps | "
+               << costs->observed_commission_bps << " bps | "
+               << (costs->observed_commission_bps > costs->configured_commission_bps * 1.1 ? "⚠️" : "✅") << " |\n";
+            ss << "| Round-trip | " << costs->expected_round_trip_pct << "% | "
+               << std::setprecision(2) << costs->actual_round_trip_pct << "% | "
+               << (costs->actual_round_trip_pct > costs->expected_round_trip_pct * 1.3 ? "🚨 TOO HIGH" : "✅") << " |\n\n";
+
+            if (costs->slippage_exceeds_expected()) {
+                ss << "**⚠️ SLIPPAGE WARNING:**\n";
+                ss << "- Actual slippage is " << std::setprecision(1) << costs->slippage_ratio() << "x higher than expected!\n";
+                ss << "- This means targets must be HIGHER to be profitable.\n";
+                ss << "- Consider: target_pct should be > " << std::setprecision(2)
+                   << (costs->actual_round_trip_pct * 2) << "% to cover costs.\n";
+                ss << "- Or: reduce trade frequency to only take high-confidence signals.\n\n";
+            }
+
+            if (costs->actual_round_trip_pct > costs->expected_round_trip_pct * 1.5) {
+                ss << "**🚨 ROUND-TRIP COST ALERT:**\n";
+                ss << "- System expects " << costs->expected_round_trip_pct << "% round-trip cost.\n";
+                ss << "- Actual cost is " << costs->actual_round_trip_pct << "% ("
+                   << std::setprecision(1) << (costs->actual_round_trip_pct / costs->expected_round_trip_pct)
+                   << "x higher).\n";
+                ss << "- Current target/stop may be miscalibrated for actual costs.\n";
+                ss << "- **Required minimum target: " << std::setprecision(2)
+                   << (costs->actual_round_trip_pct * 1.5) << "%** to have positive expectancy.\n\n";
+            }
 
             ss << "**Trading Statistics:**\n";
             ss << "- Total fills: " << costs->total_fills << "\n";
@@ -485,14 +546,39 @@ private:
             ss << "- P&L: $" << std::setprecision(2) << s.pnl_session << "\n";
             ss << "- Consecutive losses: " << s.consecutive_losses << ", wins: " << s.consecutive_wins << "\n";
             ss << "- Regime: " << regime_name(s.current_regime) << "\n";
-            // Order type display
+            // Full config display for AI tuning
+            const auto& cfg = s.current_config;
             const char* order_type_names[] = {"Auto", "MarketOnly", "LimitOnly", "Adaptive"};
-            uint8_t ot = s.current_config.order_type_preference;
-            const char* order_type_name = (ot < 4) ? order_type_names[ot] : "Auto";
-            ss << "- Current config: EMA_dev=" << (s.current_config.ema_dev_trending_x100 / 100.0) << "%, "
-               << "position=" << (s.current_config.base_position_x100 / 100.0) << "%, "
-               << "cooldown=" << s.current_config.cooldown_ms << "ms, "
-               << "order_type=" << order_type_name << "\n";
+            const char* order_type_name = (cfg.order_type_preference < 4) ? order_type_names[cfg.order_type_preference] : "Auto";
+
+            ss << "- Current config (FULL):\n";
+            ss << "  - EMA deviation: trending=" << (cfg.ema_dev_trending_x100 / 100.0)
+               << "%, ranging=" << (cfg.ema_dev_ranging_x100 / 100.0)
+               << "%, highvol=" << (cfg.ema_dev_highvol_x100 / 100.0) << "%\n";
+            ss << "  - Position: base=" << (cfg.base_position_x100 / 100.0)
+               << "%, max=" << (cfg.max_position_x100 / 100.0)
+               << "%, min=" << (cfg.min_position_x100 / 100.0) << "%\n";
+            ss << "  - Trade filtering: cooldown=" << cfg.cooldown_ms << "ms, signal_strength=" << (int)cfg.signal_strength << "\n";
+            ss << "  - Target/Stop: target=" << (cfg.target_pct_x100 / 100.0)
+               << "%, stop=" << (cfg.stop_pct_x100 / 100.0)
+               << "%, pullback=" << (cfg.pullback_pct_x100 / 100.0) << "%\n";
+            ss << "  - Order type: " << order_type_name
+               << ", limit_offset=" << (cfg.limit_offset_bps_x100 / 100.0) << "bps"
+               << ", limit_timeout=" << cfg.limit_timeout_ms << "ms\n";
+            ss << "  - Mode transitions: losses_to_cautious=" << (int)cfg.losses_to_cautious
+               << ", losses_to_defensive=" << (int)cfg.losses_to_defensive
+               << ", losses_to_exit_only=" << (int)cfg.losses_to_exit_only
+               << ", wins_to_aggressive=" << (int)cfg.wins_to_aggressive << "\n";
+            ss << "  - Signal thresholds: aggressive=" << (cfg.signal_aggressive_x100 / 100.0)
+               << ", normal=" << (cfg.signal_normal_x100 / 100.0)
+               << ", cautious=" << (cfg.signal_cautious_x100 / 100.0)
+               << ", min_confidence=" << (cfg.min_confidence_x100 / 100.0) << "\n";
+            ss << "  - Accumulation: floor_trend=" << (cfg.accum_floor_trending_x100 / 100.0)
+               << ", floor_range=" << (cfg.accum_floor_ranging_x100 / 100.0)
+               << ", floor_hvol=" << (cfg.accum_floor_highvol_x100 / 100.0)
+               << ", boost_win=" << (cfg.accum_boost_per_win_x100 / 100.0)
+               << ", penalty_loss=" << (cfg.accum_penalty_per_loss_x100 / 100.0)
+               << ", max=" << (cfg.accum_max_x100 / 100.0) << "\n";
 
             // Include market snapshot if available
             if (s.has_snapshot) {
@@ -524,7 +610,7 @@ private:
         ss << "5. EMERGENCY_EXIT <symbol> - Close all positions for symbol\n\n";
 
         ss << "## Response Format\n";
-        ss << "Respond with EXACTLY this JSON format:\n";
+        ss << "Respond with EXACTLY this JSON format (include ONLY fields you want to change):\n";
         ss << "```json\n";
         ss << "{\n";
         ss << "  \"action\": \"NO_CHANGE|UPDATE_CONFIG|PAUSE|RESUME|EMERGENCY_EXIT\",\n";
@@ -533,19 +619,42 @@ private:
         ss << "  \"urgency\": 0-2,\n";
         ss << "  \"reason\": \"Brief explanation\",\n";
         ss << "  \"config\": {\n";
+        ss << "    // EMA deviation thresholds\n";
         ss << "    \"ema_dev_trending_pct\": 1.0,\n";
         ss << "    \"ema_dev_ranging_pct\": 0.5,\n";
         ss << "    \"ema_dev_highvol_pct\": 0.2,\n";
+        ss << "    // Position sizing\n";
         ss << "    \"base_position_pct\": 2.0,\n";
         ss << "    \"max_position_pct\": 5.0,\n";
+        ss << "    \"min_position_pct\": 0.5,\n";
+        ss << "    // Trade filtering\n";
         ss << "    \"cooldown_ms\": 2000,\n";
         ss << "    \"signal_strength\": 2,\n";
-        ss << "    \"target_pct\": 4.0,\n";
-        ss << "    \"stop_pct\": 1.0,\n";
+        ss << "    // Target/stop\n";
+        ss << "    \"target_pct\": 3.0,\n";
+        ss << "    \"stop_pct\": 4.0,\n";
         ss << "    \"pullback_pct\": 0.5,\n";
-        ss << "    \"order_type\": \"Auto\",\n";
+        ss << "    // Order execution\n";
+        ss << "    \"order_type\": \"Auto|MarketOnly|LimitOnly|Adaptive\",\n";
         ss << "    \"limit_offset_bps\": 2.0,\n";
-        ss << "    \"limit_timeout_ms\": 500\n";
+        ss << "    \"limit_timeout_ms\": 500,\n";
+        ss << "    // Mode transitions (streak-based)\n";
+        ss << "    \"losses_to_cautious\": 2,\n";
+        ss << "    \"losses_to_defensive\": 4,\n";
+        ss << "    \"losses_to_exit_only\": 6,\n";
+        ss << "    \"wins_to_aggressive\": 3,\n";
+        ss << "    // Signal thresholds by mode (0-1 scale)\n";
+        ss << "    \"signal_aggressive\": 0.30,\n";
+        ss << "    \"signal_normal\": 0.50,\n";
+        ss << "    \"signal_cautious\": 0.70,\n";
+        ss << "    \"min_confidence\": 0.30,\n";
+        ss << "    // Accumulation control (0-1 scale)\n";
+        ss << "    \"accum_floor_trending\": 0.50,\n";
+        ss << "    \"accum_floor_ranging\": 0.30,\n";
+        ss << "    \"accum_floor_highvol\": 0.20,\n";
+        ss << "    \"accum_boost_win\": 0.10,\n";
+        ss << "    \"accum_penalty_loss\": 0.10,\n";
+        ss << "    \"accum_max\": 0.80\n";
         ss << "  }\n";
         ss << "}\n";
         ss << "```\n\n";
@@ -557,23 +666,46 @@ private:
         ss << "4. If win_rate < 30%, set stop_pct = 5% minimum\n\n";
 
         ss << "## Parameter Meanings (with REALISTIC ranges)\n";
+        ss << "**EMA Deviation:**\n";
         ss << "- ema_dev_trending_pct: Max % price can deviate from EMA in uptrend. **REALISTIC: 0.5-2.0%** (NOT 3-4%!)\n";
         ss << "- ema_dev_ranging_pct: Max % price can deviate from EMA in ranging markets. **REALISTIC: 0.3-1.0%**\n";
         ss << "- ema_dev_highvol_pct: Max % deviation in high volatility. **REALISTIC: 0.2-0.5%**\n";
-        ss << "- base_position_pct: Position size as % of portfolio for normal trades\n";
-        ss << "- max_position_pct: Max position size as % of portfolio\n";
+        ss << "\n**Position Sizing:**\n";
+        ss << "- base_position_pct: Position size as % of portfolio. **ADJUST BASED ON PERFORMANCE** (see Position Sizing Guidance)\n";
+        ss << "- max_position_pct: Max position size. **SCALE UP when profitable** (see Position Sizing Guidance)\n";
+        ss << "- min_position_pct: Minimum position size (0.5-2%)\n";
+        ss << "\n**Trade Filtering:**\n";
         ss << "- cooldown_ms: Minimum time between trades in milliseconds\n";
         ss << "- signal_strength: Required signal strength (1=Medium, 2=Strong, 3=VeryStrong) - **USE 1 for more trades**\n";
+        ss << "\n**Target/Stop:**\n";
         ss << "- target_pct: Take profit threshold as % of entry price (REALISTIC: 2-4%)\n";
         ss << "- stop_pct: Stop loss threshold as % of entry price (REALISTIC: 3-5%, NEVER below 3%)\n";
         ss << "- pullback_pct: Exit when price drops this % from peak unrealized profit\n";
+        ss << "\n**Order Execution:**\n";
         ss << "- order_type: Order execution preference for THIS symbol:\n";
         ss << "  - \"Auto\": ExecutionEngine decides based on signal strength, regime, spread\n";
         ss << "  - \"MarketOnly\": Always use market orders (faster execution, accept slippage)\n";
         ss << "  - \"LimitOnly\": Always use limit orders (no slippage, maker rebate, may miss fills)\n";
         ss << "  - \"Adaptive\": Start with limit, convert to market after timeout\n";
         ss << "- limit_offset_bps: For limit orders, how many basis points inside the spread (1-10)\n";
-        ss << "- limit_timeout_ms: For Adaptive mode, milliseconds before limit→market (100-5000)\n\n";
+        ss << "- limit_timeout_ms: For Adaptive mode, milliseconds before limit→market (100-5000)\n";
+        ss << "\n**Mode Transitions (streak-based):**\n";
+        ss << "- losses_to_cautious: Consecutive losses to enter CAUTIOUS mode (default: 2)\n";
+        ss << "- losses_to_defensive: Consecutive losses to enter DEFENSIVE mode (default: 4)\n";
+        ss << "- losses_to_exit_only: Consecutive losses to enter EXIT_ONLY mode (default: 6)\n";
+        ss << "- wins_to_aggressive: Consecutive wins to unlock AGGRESSIVE mode (default: 3)\n";
+        ss << "\n**Signal Thresholds by Mode (0-1 scale):**\n";
+        ss << "- signal_aggressive: Signal threshold when AGGRESSIVE (default: 0.30 - take more trades)\n";
+        ss << "- signal_normal: Signal threshold when NORMAL (default: 0.50)\n";
+        ss << "- signal_cautious: Signal threshold when CAUTIOUS (default: 0.70 - more selective)\n";
+        ss << "- min_confidence: Minimum signal confidence to trade (default: 0.30)\n";
+        ss << "\n**Accumulation Control (0-1 scale) - How to add to existing positions:**\n";
+        ss << "- accum_floor_trending: Base accumulation when trending (default: 0.50)\n";
+        ss << "- accum_floor_ranging: Base accumulation when ranging (default: 0.30)\n";
+        ss << "- accum_floor_highvol: Base accumulation when high volatility (default: 0.20)\n";
+        ss << "- accum_boost_win: Bonus per consecutive win (default: 0.10)\n";
+        ss << "- accum_penalty_loss: Penalty per consecutive loss (default: 0.10)\n";
+        ss << "- accum_max: Maximum accumulation factor (default: 0.80)\n\n";
 
         ss << "## Decision Guidelines\n";
         ss << "Consider the following relationships when making decisions:\n";
@@ -584,6 +716,39 @@ private:
         ss << "- Market regime: Different regimes require different parameter settings\n";
         ss << "- Use the data provided to make your own judgment about optimal parameters.\n\n";
 
+        // Position sizing guidance - CRITICAL for capital efficiency
+        ss << "## 💰 POSITION SIZING GUIDANCE (CAPITAL EFFICIENCY)\n";
+        ss << "**Goal: Maximize capital deployment when strategy is profitable.**\n\n";
+
+        double cash_pct = portfolio_cash / (portfolio_cash + std::abs(portfolio_pnl) + 0.01) * 100;
+        ss << "**Current State:**\n";
+        ss << "- Portfolio Cash: $" << std::setprecision(2) << portfolio_cash << "\n";
+        ss << "- Cash % of portfolio: ~" << std::setprecision(0) << cash_pct << "%\n";
+        ss << "- Session P&L: $" << std::setprecision(2) << portfolio_pnl << "\n\n";
+
+        ss << "**When to INCREASE position sizing (base_position_pct, max_position_pct):**\n";
+        ss << "- ✅ Win rate > 45% AND session is profitable → increase base_position_pct to 5-10%\n";
+        ss << "- ✅ Win rate > 55% AND consistent profits → increase to 10-15%\n";
+        ss << "- ✅ Cash sitting idle > 70% of portfolio → MUST deploy more capital\n";
+        ss << "- ✅ Profit factor > 1.5 → strategy is working, scale up\n";
+        ss << "- ✅ Low drawdown + positive P&L → safe to increase exposure\n\n";
+
+        ss << "**When to DECREASE position sizing:**\n";
+        ss << "- ❌ Win rate < 40% → reduce to 1-2% until strategy improves\n";
+        ss << "- ❌ Consecutive losses > 3 → halve position size\n";
+        ss << "- ❌ Session P&L deeply negative → reduce exposure\n\n";
+
+        ss << "**Position Sizing Ranges:**\n";
+        ss << "| Strategy Performance | base_position_pct | max_position_pct |\n";
+        ss << "|---------------------|-------------------|------------------|\n";
+        ss << "| Poor (WR < 40%)     | 1-2%              | 3-5%             |\n";
+        ss << "| Average (WR 40-50%) | 3-5%              | 8-10%            |\n";
+        ss << "| Good (WR 50-60%)    | 5-10%             | 15-20%           |\n";
+        ss << "| Excellent (WR > 60%)| 10-15%            | 20-25%           |\n\n";
+
+        ss << "**IMPORTANT:** Conservative 2% position sizing wastes capital!\n";
+        ss << "If you see 90%+ cash sitting idle and strategy is profitable, INCREASE position sizing.\n\n";
+
         ss << "## Order Type Selection Guidelines\n";
         ss << "Choose order_type based on symbol characteristics and trading goals:\n";
         ss << "- MarketOnly: High volatility symbols, urgent entries/exits, wide spreads that change fast\n";
@@ -591,7 +756,12 @@ private:
         ss << "- Adaptive: Best of both - try limit first, fall back to market if not filled\n";
         ss << "- Auto: When unsure, let ExecutionEngine decide based on real-time conditions\n";
         ss << "- If slippage costs are high → consider LimitOnly or Adaptive\n";
-        ss << "- If missing trades due to unfilled limits → consider MarketOnly or Adaptive\n";
+        ss << "- If missing trades due to unfilled limits → consider MarketOnly or Adaptive\n\n";
+
+        ss << "## ⚠️ CRITICAL: OUTPUT FORMAT\n";
+        ss << "**Output ONLY the JSON response. NO analysis, NO explanation, NO markdown text.**\n";
+        ss << "Start your response DIRECTLY with the opening brace `{`.\n";
+        ss << "Do NOT include any text before or after the JSON.\n";
 
         return ss.str();
     }
@@ -613,7 +783,7 @@ private:
         std::ostringstream ss;
         ss << "{"
            << "\"model\":\"" << model_ << "\","
-           << "\"max_tokens\":500,"
+           << "\"max_tokens\":2048,"
            << "\"messages\":[{\"role\":\"user\",\"content\":\"" << escaped_prompt << "\"}]"
            << "}";
 
@@ -676,6 +846,8 @@ private:
         return parse_tuner_command(unescaped, response.command);
     }
 
+protected:
+    // Protected for testing - parsing methods can be tested via inheritance
     bool parse_tuner_command(const std::string& text, ipc::TunerCommand& cmd) {
         std::memset(&cmd, 0, sizeof(cmd));
         cmd.magic = ipc::TunerCommand::MAGIC;
@@ -784,7 +956,7 @@ private:
                     // Trade filtering
                     bool filtering_changed = false;
                     if ((val = extract_number(config_json, "cooldown_ms")) > 0) {
-                        cmd.config.cooldown_ms = static_cast<int16_t>(val);
+                        cmd.config.set_cooldown_ms(val);  // Use setter with bounds checking
                         filtering_changed = true;
                     }
                     if ((val = extract_number(config_json, "signal_strength")) > 0) {
@@ -832,6 +1004,59 @@ private:
                     if ((val = extract_number(config_json, "limit_timeout_ms")) > 0) {
                         cmd.config.limit_timeout_ms = static_cast<int16_t>(val);
                     }
+
+                    // Minimum position
+                    if ((val = extract_number(config_json, "min_position_pct")) > 0) {
+                        cmd.config.min_position_x100 = static_cast<int16_t>(val * 100);
+                    }
+
+                    // Mode thresholds (streak-based)
+                    if ((val = extract_number(config_json, "losses_to_cautious")) > 0) {
+                        cmd.config.losses_to_cautious = static_cast<int8_t>(val);
+                    }
+                    if ((val = extract_number(config_json, "losses_to_defensive")) > 0) {
+                        cmd.config.losses_to_defensive = static_cast<int8_t>(val);
+                    }
+                    if ((val = extract_number(config_json, "losses_to_exit_only")) > 0) {
+                        cmd.config.losses_to_exit_only = static_cast<int8_t>(val);
+                    }
+                    if ((val = extract_number(config_json, "wins_to_aggressive")) > 0) {
+                        cmd.config.wins_to_aggressive = static_cast<int8_t>(val);
+                    }
+
+                    // Signal thresholds by mode
+                    if ((val = extract_number(config_json, "signal_aggressive")) > 0) {
+                        cmd.config.signal_aggressive_x100 = static_cast<int8_t>(val * 100);
+                    }
+                    if ((val = extract_number(config_json, "signal_normal")) > 0) {
+                        cmd.config.signal_normal_x100 = static_cast<int8_t>(val * 100);
+                    }
+                    if ((val = extract_number(config_json, "signal_cautious")) > 0) {
+                        cmd.config.signal_cautious_x100 = static_cast<int8_t>(val * 100);
+                    }
+                    if ((val = extract_number(config_json, "min_confidence")) > 0) {
+                        cmd.config.min_confidence_x100 = static_cast<int8_t>(val * 100);
+                    }
+
+                    // Accumulation control
+                    if ((val = extract_number(config_json, "accum_floor_trending")) > 0) {
+                        cmd.config.accum_floor_trending_x100 = static_cast<int8_t>(val * 100);
+                    }
+                    if ((val = extract_number(config_json, "accum_floor_ranging")) > 0) {
+                        cmd.config.accum_floor_ranging_x100 = static_cast<int8_t>(val * 100);
+                    }
+                    if ((val = extract_number(config_json, "accum_floor_highvol")) > 0) {
+                        cmd.config.accum_floor_highvol_x100 = static_cast<int8_t>(val * 100);
+                    }
+                    if ((val = extract_number(config_json, "accum_boost_win")) > 0) {
+                        cmd.config.accum_boost_per_win_x100 = static_cast<int8_t>(val * 100);
+                    }
+                    if ((val = extract_number(config_json, "accum_penalty_loss")) > 0) {
+                        cmd.config.accum_penalty_per_loss_x100 = static_cast<int8_t>(val * 100);
+                    }
+                    if ((val = extract_number(config_json, "accum_max")) > 0) {
+                        cmd.config.accum_max_x100 = static_cast<int8_t>(val * 100);
+                    }
                 }
             }
         }
@@ -877,6 +1102,8 @@ private:
         return std::atof(json.c_str() + num_start);
     }
 
+private:
+    // Internal helper methods
     const char* trigger_name(ipc::TriggerReason trigger) {
         switch (trigger) {
             case ipc::TriggerReason::Scheduled: return "Scheduled (periodic)";

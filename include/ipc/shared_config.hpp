@@ -72,6 +72,37 @@ inline const char* strategy_type_to_short(StrategyType type) {
     return idx < STRATEGY_TYPE_COUNT ? STRATEGY_NAMES[idx].second : "UNK";
 }
 
+/**
+ * TunerState - Controls AI tuner behavior
+ *
+ * OFF:    Traditional strategies based on regime→strategy mapping
+ *         ConfigStrategy NOT used, tuner process inactive
+ *
+ * ON:     AI-controlled trading via ConfigStrategy
+ *         Tuner actively updates SymbolTuningConfig per-symbol
+ *
+ * PAUSED: ConfigStrategy runs with frozen config
+ *         Tuner does NOT make changes (last config preserved)
+ */
+enum class TunerState : uint8_t {
+    OFF = 0,      // Traditional strategies (regime-based)
+    ON = 1,       // AI tuning active, ConfigStrategy runs
+    PAUSED = 2    // ConfigStrategy runs with frozen config
+};
+
+constexpr size_t TUNER_STATE_COUNT = 3;
+
+constexpr std::array<const char*, TUNER_STATE_COUNT> TUNER_STATE_NAMES = {{
+    "OFF",
+    "ON",
+    "PAUSED"
+}};
+
+inline const char* tuner_state_to_string(TunerState state) {
+    const auto idx = static_cast<size_t>(state);
+    return idx < TUNER_STATE_COUNT ? TUNER_STATE_NAMES[idx] : "UNKNOWN";
+}
+
 struct SharedConfig {
     static constexpr uint64_t MAGIC = 0x4846544346494700ULL;  // "HFTCFG\0"
 #ifdef TRADER_BUILD_HASH
@@ -90,12 +121,49 @@ struct SharedConfig {
     std::atomic<int32_t> drawdown_threshold_x100; // Default: 200 (2%)
     std::atomic<int32_t> loss_streak_threshold;   // Default: 2
 
-    // SmartStrategy config
+    // SmartStrategy config - Position sizing
     std::atomic<int32_t> base_position_pct_x100;  // Default: 200 (2%)
     std::atomic<int32_t> max_position_pct_x100;   // Default: 500 (5%)
-    std::atomic<int32_t> target_pct_x100;         // Default: 300 (3%)
-    std::atomic<int32_t> stop_pct_x100;           // Default: 500 (5%)
+    std::atomic<int32_t> min_position_pct_x100;   // Default: 100 (1%)
+    std::atomic<int32_t> target_pct_x100;         // Default: 150 (1.5%)
+    std::atomic<int32_t> stop_pct_x100;           // Default: 300 (3%)
     std::atomic<int32_t> pullback_pct_x100;       // Default: 50 (0.5%) - trend exit threshold
+
+    // SmartStrategy config - Performance tracking
+    std::atomic<int32_t> performance_window;      // Default: 20 (track last N trades)
+    std::atomic<int32_t> min_confidence_x100;     // Default: 30 (0.3 - below this, no signal)
+
+    // SmartStrategy config - Mode transitions (streak-based)
+    std::atomic<int32_t> losses_to_cautious;      // Default: 2
+    std::atomic<int32_t> losses_to_tighten_signal; // Default: 3
+    std::atomic<int32_t> losses_to_defensive;     // Default: 4
+    std::atomic<int32_t> losses_to_pause;         // Default: 5
+    std::atomic<int32_t> losses_to_exit_only;     // Default: 6
+
+    // SmartStrategy config - Win streak thresholds
+    std::atomic<int32_t> wins_to_aggressive;      // Default: 3
+    std::atomic<int32_t> wins_max_aggressive;     // Default: 5
+
+    // SmartStrategy config - Mode transitions (drawdown-based)
+    std::atomic<int32_t> drawdown_defensive_x100; // Default: 300 (3%)
+    std::atomic<int32_t> drawdown_exit_x100;      // Default: 500 (5%)
+
+    // SmartStrategy config - Win rate thresholds
+    std::atomic<int32_t> win_rate_aggressive_x100; // Default: 60 (>60% → AGGRESSIVE)
+    std::atomic<int32_t> win_rate_cautious_x100;   // Default: 40 (<40% → CAUTIOUS)
+
+    // SmartStrategy config - Sharpe ratio thresholds
+    std::atomic<int32_t> sharpe_aggressive_x100;  // Default: 100 (>1.0 → AGGRESSIVE)
+    std::atomic<int32_t> sharpe_cautious_x100;    // Default: 30 (<0.3 → CAUTIOUS)
+    std::atomic<int32_t> sharpe_defensive_x100;   // Default: 0 (<0 → DEFENSIVE)
+
+    // SmartStrategy config - Signal thresholds by mode
+    std::atomic<int32_t> signal_aggressive_x100;  // Default: 30 (0.3)
+    std::atomic<int32_t> signal_normal_x100;      // Default: 50 (0.5)
+    std::atomic<int32_t> signal_cautious_x100;    // Default: 70 (0.7)
+
+    // SmartStrategy config - Risk/reward
+    std::atomic<int32_t> min_risk_reward_x100;    // Default: 60 (0.6)
 
     // Trading costs (for paper trading simulation)
     std::atomic<int32_t> commission_rate_x10000;  // Default: 10 (0.1% = 0.001)
@@ -105,7 +173,6 @@ struct SharedConfig {
     std::atomic<int32_t> min_trade_value_x100;    // Default: 10000 ($100 minimum trade)
     std::atomic<int32_t> cooldown_ms;             // Default: 2000 (2 second cooldown)
     std::atomic<int32_t> signal_strength;         // Default: 2 (1=Medium, 2=Strong)
-    std::atomic<uint8_t> auto_tune_enabled;       // Default: 1 (auto-tune on)
 
     // EMA deviation thresholds (max % above EMA to allow buy)
     std::atomic<int32_t> ema_dev_trending_x1000;  // Default: 10 (1% = 0.01)
@@ -124,14 +191,18 @@ struct SharedConfig {
     std::atomic<uint8_t> trading_enabled;  // 0 = paused, 1 = active
     std::atomic<uint8_t> paper_trading;    // 1 = paper trading mode (simulation)
 
-    // Tuner integration
-    std::atomic<uint8_t> tuner_mode;       // 0 = OFF (traditional strategies), 1 = ON (AI-controlled)
-    std::atomic<uint8_t> manual_override;  // 0 = normal, 1 = manual control (tuner ignored)
-    std::atomic<uint8_t> tuner_paused;     // 0 = active, 1 = paused (tuner skips scheduled runs)
-    std::atomic<uint8_t> reserved_tuner;   // Padding for alignment
+    // Tuner integration (simplified - single state enum)
+    // TunerState: OFF=traditional strategies, ON=AI-controlled, PAUSED=frozen config
+    std::atomic<uint8_t> tuner_state;      // TunerState enum value
+    std::atomic<uint8_t> manual_override;   // 1 = manual override active (dashboard controls strategy)
+    std::atomic<uint8_t> reserved_tuner2;  // Padding for alignment
+    std::atomic<uint8_t> reserved_tuner3;  // Padding for alignment
 
     // Manual tune trigger (dashboard can request immediate tuning)
     std::atomic<int64_t> manual_tune_request_ns;  // Non-zero = tune immediately, then clear
+
+    // Tuner scheduling (dashboard can adjust interval)
+    std::atomic<int32_t> tuner_interval_sec;      // Tuning interval in seconds (default: 300 = 5 min)
 
     // Order execution defaults (global, symbols can override)
     std::atomic<uint8_t> order_type_default;      // 0=Auto, 1=MarketOnly, 2=LimitOnly, 3=Adaptive
@@ -185,19 +256,67 @@ struct SharedConfig {
     int loss_streak() const { return loss_streak_threshold.load(); }
     double base_position_pct() const { return base_position_pct_x100.load() / 100.0; }
     double max_position_pct() const { return max_position_pct_x100.load() / 100.0; }
+    double min_position_pct() const { return min_position_pct_x100.load() / 100.0; }
     double target_pct() const { return target_pct_x100.load() / 100.0; }
     double stop_pct() const { return stop_pct_x100.load() / 100.0; }
     double pullback_pct() const { return pullback_pct_x100.load() / 100.0; }
+
+    // SmartStrategy performance tracking
+    int32_t get_performance_window() const { return performance_window.load(); }
+    double min_confidence() const { return min_confidence_x100.load() / 100.0; }
+
+    // SmartStrategy mode transitions (streak-based)
+    int32_t get_losses_to_cautious() const { return losses_to_cautious.load(); }
+    int32_t get_losses_to_tighten_signal() const { return losses_to_tighten_signal.load(); }
+    int32_t get_losses_to_defensive() const { return losses_to_defensive.load(); }
+    int32_t get_losses_to_pause() const { return losses_to_pause.load(); }
+    int32_t get_losses_to_exit_only() const { return losses_to_exit_only.load(); }
+
+    // SmartStrategy win streak thresholds
+    int32_t get_wins_to_aggressive() const { return wins_to_aggressive.load(); }
+    int32_t get_wins_max_aggressive() const { return wins_max_aggressive.load(); }
+
+    // SmartStrategy mode transitions (drawdown-based)
+    double drawdown_to_defensive() const { return drawdown_defensive_x100.load() / 10000.0; }
+    double drawdown_to_exit() const { return drawdown_exit_x100.load() / 10000.0; }
+
+    // SmartStrategy win rate thresholds
+    double win_rate_aggressive() const { return win_rate_aggressive_x100.load() / 100.0; }
+    double win_rate_cautious() const { return win_rate_cautious_x100.load() / 100.0; }
+
+    // SmartStrategy Sharpe ratio thresholds
+    double sharpe_aggressive() const { return sharpe_aggressive_x100.load() / 100.0; }
+    double sharpe_cautious() const { return sharpe_cautious_x100.load() / 100.0; }
+    double sharpe_defensive() const { return sharpe_defensive_x100.load() / 100.0; }
+
+    // SmartStrategy signal thresholds by mode
+    double signal_threshold_aggressive() const { return signal_aggressive_x100.load() / 100.0; }
+    double signal_threshold_normal() const { return signal_normal_x100.load() / 100.0; }
+    double signal_threshold_cautious() const { return signal_cautious_x100.load() / 100.0; }
+
+    // SmartStrategy risk/reward
+    double min_risk_reward() const { return min_risk_reward_x100.load() / 100.0; }
     double commission_rate() const { return commission_rate_x10000.load() / 10000.0; }
     double slippage_bps() const { return slippage_bps_x100.load() / 100.0; }
     double min_trade_value() const { return min_trade_value_x100.load() / 100.0; }
     int32_t get_cooldown_ms() const { return cooldown_ms.load(); }
     int32_t get_signal_strength() const { return signal_strength.load(); }
-    bool is_auto_tune_enabled() const { return auto_tune_enabled.load() != 0; }
     bool is_paper_trading() const { return paper_trading.load() != 0; }
-    bool is_tuner_mode() const { return tuner_mode.load() != 0; }
+    bool is_trading_enabled() const { return trading_enabled.load() != 0; }
+
+    // Tuner state accessors (simplified)
+    TunerState get_tuner_state() const { return static_cast<TunerState>(tuner_state.load()); }
+    bool is_tuner_off() const { return tuner_state.load() == static_cast<uint8_t>(TunerState::OFF); }
+    bool is_tuner_on() const { return tuner_state.load() == static_cast<uint8_t>(TunerState::ON); }
+    bool is_tuner_paused() const { return tuner_state.load() == static_cast<uint8_t>(TunerState::PAUSED); }
+    int32_t get_tuner_interval_sec() const { return tuner_interval_sec.load(); }
+
+    // Manual override accessors
     bool is_manual_override() const { return manual_override.load() != 0; }
-    bool is_tuner_paused() const { return tuner_paused.load() != 0; }
+    void set_manual_override(bool on) {
+        manual_override.store(on ? 1 : 0);
+        sequence.fetch_add(1);
+    }
 
     // Position sizing accessors
     bool is_percentage_based_sizing() const { return position_sizing_mode.load() == 0; }
@@ -292,6 +411,107 @@ struct SharedConfig {
         pullback_pct_x100.store(static_cast<int32_t>(val * 100));
         sequence.fetch_add(1);
     }
+    void set_min_position_pct(double val) {
+        min_position_pct_x100.store(static_cast<int32_t>(val * 100));
+        sequence.fetch_add(1);
+    }
+
+    // SmartStrategy performance tracking setters
+    void set_performance_window(int32_t val) {
+        performance_window.store(val);
+        sequence.fetch_add(1);
+    }
+    void set_min_confidence(double val) {
+        min_confidence_x100.store(static_cast<int32_t>(val * 100));
+        sequence.fetch_add(1);
+    }
+
+    // SmartStrategy mode transitions (streak-based) setters
+    void set_losses_to_cautious(int32_t val) {
+        losses_to_cautious.store(val);
+        sequence.fetch_add(1);
+    }
+    void set_losses_to_tighten_signal(int32_t val) {
+        losses_to_tighten_signal.store(val);
+        sequence.fetch_add(1);
+    }
+    void set_losses_to_defensive(int32_t val) {
+        losses_to_defensive.store(val);
+        sequence.fetch_add(1);
+    }
+    void set_losses_to_pause(int32_t val) {
+        losses_to_pause.store(val);
+        sequence.fetch_add(1);
+    }
+    void set_losses_to_exit_only(int32_t val) {
+        losses_to_exit_only.store(val);
+        sequence.fetch_add(1);
+    }
+
+    // SmartStrategy win streak threshold setters
+    void set_wins_to_aggressive(int32_t val) {
+        wins_to_aggressive.store(val);
+        sequence.fetch_add(1);
+    }
+    void set_wins_max_aggressive(int32_t val) {
+        wins_max_aggressive.store(val);
+        sequence.fetch_add(1);
+    }
+
+    // SmartStrategy mode transitions (drawdown-based) setters
+    void set_drawdown_to_defensive(double val) {
+        drawdown_defensive_x100.store(static_cast<int32_t>(val * 10000));
+        sequence.fetch_add(1);
+    }
+    void set_drawdown_to_exit(double val) {
+        drawdown_exit_x100.store(static_cast<int32_t>(val * 10000));
+        sequence.fetch_add(1);
+    }
+
+    // SmartStrategy win rate thresholds setters
+    void set_win_rate_aggressive(double val) {
+        win_rate_aggressive_x100.store(static_cast<int32_t>(val * 100));
+        sequence.fetch_add(1);
+    }
+    void set_win_rate_cautious(double val) {
+        win_rate_cautious_x100.store(static_cast<int32_t>(val * 100));
+        sequence.fetch_add(1);
+    }
+
+    // SmartStrategy Sharpe ratio thresholds setters
+    void set_sharpe_aggressive(double val) {
+        sharpe_aggressive_x100.store(static_cast<int32_t>(val * 100));
+        sequence.fetch_add(1);
+    }
+    void set_sharpe_cautious(double val) {
+        sharpe_cautious_x100.store(static_cast<int32_t>(val * 100));
+        sequence.fetch_add(1);
+    }
+    void set_sharpe_defensive(double val) {
+        sharpe_defensive_x100.store(static_cast<int32_t>(val * 100));
+        sequence.fetch_add(1);
+    }
+
+    // SmartStrategy signal thresholds setters
+    void set_signal_aggressive(double val) {
+        signal_aggressive_x100.store(static_cast<int32_t>(val * 100));
+        sequence.fetch_add(1);
+    }
+    void set_signal_normal(double val) {
+        signal_normal_x100.store(static_cast<int32_t>(val * 100));
+        sequence.fetch_add(1);
+    }
+    void set_signal_cautious(double val) {
+        signal_cautious_x100.store(static_cast<int32_t>(val * 100));
+        sequence.fetch_add(1);
+    }
+
+    // SmartStrategy risk/reward setter
+    void set_min_risk_reward(double val) {
+        min_risk_reward_x100.store(static_cast<int32_t>(val * 100));
+        sequence.fetch_add(1);
+    }
+
     void set_commission_rate(double val) {
         commission_rate_x10000.store(static_cast<int32_t>(val * 10000));
         sequence.fetch_add(1);
@@ -310,10 +530,6 @@ struct SharedConfig {
     }
     void set_signal_strength(int32_t val) {
         signal_strength.store(val);
-        sequence.fetch_add(1);
-    }
-    void set_auto_tune_enabled(bool enabled) {
-        auto_tune_enabled.store(enabled ? 1 : 0);
         sequence.fetch_add(1);
     }
     // EMA deviation setters (val as percentage, e.g., 1.0 for 1%)
@@ -360,16 +576,16 @@ struct SharedConfig {
     }
     uint8_t get_force_mode() const { return force_mode.load(); }
 
-    void set_tuner_mode(bool enabled) {
-        tuner_mode.store(enabled ? 1 : 0);
+    // Tuner state mutator (simplified - single state)
+    void set_tuner_state(TunerState state) {
+        tuner_state.store(static_cast<uint8_t>(state));
         sequence.fetch_add(1);
     }
-    void set_manual_override(bool enabled) {
-        manual_override.store(enabled ? 1 : 0);
-        sequence.fetch_add(1);
-    }
-    void set_tuner_paused(bool paused) {
-        tuner_paused.store(paused ? 1 : 0);
+
+    void set_tuner_interval_sec(int32_t sec) {
+        // Clamp to reasonable range: 30 seconds to 30 minutes
+        sec = std::max(30, std::min(1800, sec));
+        tuner_interval_sec.store(sec);
         sequence.fetch_add(1);
     }
 
@@ -495,12 +711,49 @@ struct SharedConfig {
         // Position sizing
         base_position_pct_x100.store(config::position::BASE_X100);
         max_position_pct_x100.store(config::position::MAX_X100);
+        min_position_pct_x100.store(config::smart_strategy::MIN_POSITION_X100);
         min_trade_value_x100.store(config::position::MIN_TRADE_VALUE_X100);
 
         // Target/stop (derived from round-trip costs)
         target_pct_x100.store(config::targets::TARGET_X100);
         stop_pct_x100.store(config::targets::STOP_X100);
         pullback_pct_x100.store(config::targets::PULLBACK_X100);
+
+        // SmartStrategy performance tracking
+        performance_window.store(config::smart_strategy::PERFORMANCE_WINDOW);
+        min_confidence_x100.store(config::smart_strategy::MIN_CONFIDENCE_X100);
+
+        // SmartStrategy mode transitions (streak-based)
+        losses_to_cautious.store(config::smart_strategy::LOSSES_TO_CAUTIOUS);
+        losses_to_tighten_signal.store(config::smart_strategy::LOSSES_TO_TIGHTEN_SIGNAL);
+        losses_to_defensive.store(config::smart_strategy::LOSSES_TO_DEFENSIVE);
+        losses_to_pause.store(config::smart_strategy::LOSSES_TO_PAUSE);
+        losses_to_exit_only.store(config::smart_strategy::LOSSES_TO_EXIT_ONLY);
+
+        // SmartStrategy win streak thresholds
+        wins_to_aggressive.store(config::smart_strategy::WINS_TO_AGGRESSIVE);
+        wins_max_aggressive.store(config::smart_strategy::WINS_MAX_AGGRESSIVE);
+
+        // SmartStrategy mode transitions (drawdown-based)
+        drawdown_defensive_x100.store(config::smart_strategy::DRAWDOWN_DEFENSIVE_X100);
+        drawdown_exit_x100.store(config::smart_strategy::DRAWDOWN_EXIT_X100);
+
+        // SmartStrategy win rate thresholds
+        win_rate_aggressive_x100.store(config::smart_strategy::WIN_RATE_AGGRESSIVE_X100);
+        win_rate_cautious_x100.store(config::smart_strategy::WIN_RATE_CAUTIOUS_X100);
+
+        // SmartStrategy Sharpe ratio thresholds
+        sharpe_aggressive_x100.store(config::smart_strategy::SHARPE_AGGRESSIVE_X100);
+        sharpe_cautious_x100.store(config::smart_strategy::SHARPE_CAUTIOUS_X100);
+        sharpe_defensive_x100.store(config::smart_strategy::SHARPE_DEFENSIVE_X100);
+
+        // SmartStrategy signal thresholds
+        signal_aggressive_x100.store(config::smart_strategy::SIGNAL_AGGRESSIVE_X100);
+        signal_normal_x100.store(config::smart_strategy::SIGNAL_NORMAL_X100);
+        signal_cautious_x100.store(config::smart_strategy::SIGNAL_CAUTIOUS_X100);
+
+        // SmartStrategy risk/reward
+        min_risk_reward_x100.store(config::smart_strategy::MIN_RISK_REWARD_X100);
 
         // Trading costs
         commission_rate_x10000.store(config::costs::COMMISSION_X10000);
@@ -509,7 +762,6 @@ struct SharedConfig {
         // Order execution
         cooldown_ms.store(config::execution::COOLDOWN_MS);
         signal_strength.store(config::execution::SIGNAL_STRENGTH);
-        auto_tune_enabled.store(config::flags::AUTO_TUNE_ENABLED ? 1 : 0);
 
         // EMA deviation thresholds
         ema_dev_trending_x1000.store(config::ema::DEV_TRENDING_X1000);
@@ -526,11 +778,14 @@ struct SharedConfig {
         force_mode.store(0);                  // auto
         trading_enabled.store(config::flags::TRADING_ENABLED ? 1 : 0);
         paper_trading.store(config::flags::PAPER_TRADING ? 1 : 0);
-        tuner_mode.store(0);                  // tuner OFF by default
-        manual_override.store(0);             // normal mode
-        tuner_paused.store(0);
-        reserved_tuner.store(0);
+
+        // Tuner state (simplified - single enum)
+        tuner_state.store(static_cast<uint8_t>(TunerState::ON));   // ON by default
+        manual_override.store(0);
+        reserved_tuner2.store(0);
+        reserved_tuner3.store(0);
         manual_tune_request_ns.store(0);
+        tuner_interval_sec.store(300);  // Default: 5 minutes
 
         // Order execution settings
         order_type_default.store(config::execution::ORDER_TYPE_AUTO);
