@@ -228,6 +228,10 @@ add_test(NAME ClaudeClientParserTests COMMAND test_claude_client_parser)
 add_executable(test_regime_detector_perf tests/test_regime_detector_perf.cpp)
 add_test(NAME RegimeDetectorPerfTests COMMAND test_regime_detector_perf)
 
+add_executable(test_portfolio_equity tests/test_portfolio_equity.cpp)
+target_link_libraries(test_portfolio_equity pthread rt)
+add_test(NAME PortfolioEquityTests COMMAND test_portfolio_equity)
+
 # === Tools ===
 add_executable(trader tools/trader.cpp)
 target_link_libraries(trader trader_core websockets pthread rt curl)

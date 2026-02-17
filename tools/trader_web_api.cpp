@@ -475,8 +475,7 @@ private:
         json.kv("cash", portfolio_state_->cash());
         json.kv("total_realized_pnl", portfolio_state_->total_realized_pnl());
         json.kv("total_unrealized_pnl", portfolio_state_->total_unrealized_pnl());
-        json.kv("total_equity", portfolio_state_->cash() +
-                                portfolio_state_->total_unrealized_pnl());
+        json.kv("total_equity", portfolio_state_->total_equity());
 
         // Positions
         json.key("positions");
