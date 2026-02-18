@@ -550,6 +550,32 @@ The trader engine uses shared memory for process lifecycle:
 2. Add WebSocket support for remote dashboard
 3. Rust port for comparison (future)
 
+---
+
+## Session Notes (2026-02-18)
+
+### Completed
+- **PR #13 merged**: ConfigStrategy, paper trading improvements, task tracking
+- **PR #14 created**: BUG-001 fix (web API equity calculation)
+
+### Open Tasks (in `/tasks/`)
+| Task | Priority | Status |
+|------|----------|--------|
+| BUG-001 | HIGH | PR #14 pending review |
+| TUNE-001 | MEDIUM | 22% win rate needs tuning |
+| IMPROVE-001 | LOW | Claude API timeout handling |
+| NOTE-001 | INFO | WSL2 limitations documented |
+
+### Key Findings from Paper Trading (2h session)
+- Net P&L: -$239.07 (-0.25%)
+- 540 trades, 22.2% win rate (8 targets, 28 stops)
+- **BUG**: Web API used `cash + unrealized_pnl` instead of `cash + market_value`
+- WSL2: perf profiler unavailable, dashboard 700% CPU (X11 issue)
+
+### Recent PRs
+- PR #13: feature/runtime-smart-strategy-config -> main (merged)
+- PR #14: bugfix/BUG-001-web-api-equity-calculation -> main (pending)
+
 ## References
 - NASDAQ ITCH 5.0 Spec: https://www.nasdaqtrader.com/content/technicalsupport/specifications/dataproducts/NQTVITCHspecification.pdf
 - C++ Core Guidelines: https://isocpp.github.io/CppCoreGuidelines/
