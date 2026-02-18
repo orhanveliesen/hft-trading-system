@@ -20,6 +20,14 @@
 namespace hft::config {
 
 // =============================================================================
+// Common Multipliers
+// =============================================================================
+namespace multipliers {
+    // Convert decimal percentage to X100 format: 0.05 (5%) * 10000 = 500
+    constexpr int32_t PCT_TO_X100 = 10000;
+}
+
+// =============================================================================
 // Trading Costs (basis for target/stop calculation)
 // =============================================================================
 namespace costs {
@@ -53,39 +61,38 @@ namespace scaling {
 namespace targets {
     // Start conservative - let the AI tuner adjust based on observed volatility
     // Wide stops minimize stop-outs during learning period
-    // Tuner will tighten parameters after observing market conditions
-
-    // Multiplier: 0.03 (3%) * 10000 = 300 for X100 format
-    constexpr int32_t PCT_TO_X100 = 10000;
 
     // Target: 3% (conservative, tuner can tighten after warmup)
     constexpr double TARGET_PCT = 0.03;
-    constexpr int32_t TARGET_X100 = static_cast<int32_t>(TARGET_PCT * PCT_TO_X100);
+    constexpr int32_t TARGET_X100 = static_cast<int32_t>(TARGET_PCT * multipliers::PCT_TO_X100);
 
     // Stop: 5% (wide to minimize stop-outs during learning period)
     constexpr double STOP_PCT = 0.05;
-    constexpr int32_t STOP_X100 = static_cast<int32_t>(STOP_PCT * PCT_TO_X100);
+    constexpr int32_t STOP_X100 = static_cast<int32_t>(STOP_PCT * multipliers::PCT_TO_X100);
 
     // Pullback for trend exit
     constexpr double PULLBACK_PCT = 0.01;
-    constexpr int32_t PULLBACK_X100 = static_cast<int32_t>(PULLBACK_PCT * PCT_TO_X100);
+    constexpr int32_t PULLBACK_X100 = static_cast<int32_t>(PULLBACK_PCT * multipliers::PCT_TO_X100);
 }
 
 // =============================================================================
-// Position Sizing
+// Position Sizing (aggressive - tuner can reduce if needed)
 // =============================================================================
 namespace position {
-    constexpr double BASE_PCT = 0.02;                  // 2% base position
-    constexpr int32_t BASE_X100 = 200;                 // 2% * 100
+    // Base position per trade: 5% of capital
+    constexpr double BASE_PCT = 0.05;
+    constexpr int32_t BASE_X100 = static_cast<int32_t>(BASE_PCT * multipliers::PCT_TO_X100);
 
-    constexpr double MAX_PCT = 0.05;                   // 5% max position
-    constexpr int32_t MAX_X100 = 500;                  // 5% * 100
+    // Max position per symbol: 15% of capital
+    constexpr double MAX_PCT = 0.15;
+    constexpr int32_t MAX_X100 = static_cast<int32_t>(MAX_PCT * multipliers::PCT_TO_X100);
 
-    constexpr double MIN_TRADE_VALUE = 100.0;          // $100 minimum
-    constexpr int32_t MIN_TRADE_VALUE_X100 = 10000;    // $100 * 100
+    // Minimum trade value
+    constexpr double MIN_TRADE_VALUE = 100.0;
+    constexpr int32_t MIN_TRADE_VALUE_X100 = static_cast<int32_t>(MIN_TRADE_VALUE * 100);
 
     // Unit-based mode
-    constexpr int32_t MAX_UNITS = 10;                  // Max 10 units when unit-based
+    constexpr int32_t MAX_UNITS = 10;
 }
 
 // =============================================================================
