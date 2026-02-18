@@ -48,24 +48,27 @@ namespace scaling {
 }
 
 // =============================================================================
-// Target & Stop Loss (configured for CRYPTO markets)
+// Target & Stop Loss (conservative defaults for warmup period)
 // =============================================================================
 namespace targets {
-    // Crypto markets are more volatile than stocks
-    // BTC/ETH can swing 3-5% in minutes, so wider stops are needed
-    // These defaults are tuned for Binance spot trading
+    // Start conservative - let the AI tuner adjust based on observed volatility
+    // Wide stops minimize stop-outs during learning period
+    // Tuner will tighten parameters after observing market conditions
 
-    // Target: 3% (reasonable for crypto volatility)
-    constexpr double TARGET_PCT = 0.03;                // 3%
-    constexpr int32_t TARGET_X100 = 300;               // 3% * 100
+    // Multiplier: 0.03 (3%) * 10000 = 300 for X100 format
+    constexpr int32_t PCT_TO_X100 = 10000;
 
-    // Stop: 5% (gives room for crypto volatility without frequent stop-outs)
-    constexpr double STOP_PCT = 0.05;                  // 5%
-    constexpr int32_t STOP_X100 = 500;                 // 5% * 100
+    // Target: 3% (conservative, tuner can tighten after warmup)
+    constexpr double TARGET_PCT = 0.03;
+    constexpr int32_t TARGET_X100 = static_cast<int32_t>(TARGET_PCT * PCT_TO_X100);
 
-    // Pullback for trend exit (wider for crypto)
-    constexpr double PULLBACK_PCT = 0.01;              // 1%
-    constexpr int32_t PULLBACK_X100 = 100;             // 1% * 100
+    // Stop: 5% (wide to minimize stop-outs during learning period)
+    constexpr double STOP_PCT = 0.05;
+    constexpr int32_t STOP_X100 = static_cast<int32_t>(STOP_PCT * PCT_TO_X100);
+
+    // Pullback for trend exit
+    constexpr double PULLBACK_PCT = 0.01;
+    constexpr int32_t PULLBACK_X100 = static_cast<int32_t>(PULLBACK_PCT * PCT_TO_X100);
 }
 
 // =============================================================================
