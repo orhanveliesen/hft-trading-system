@@ -48,25 +48,24 @@ namespace scaling {
 }
 
 // =============================================================================
-// Target & Stop Loss (derived from round-trip costs)
+// Target & Stop Loss (configured for CRYPTO markets)
 // =============================================================================
 namespace targets {
-    // Multipliers for calculating from round-trip cost
-    constexpr int32_t TARGET_MULTIPLIER = 5;           // Target = 5x round trip
-    constexpr int32_t RISK_REWARD_RATIO = 2;           // Stop = 2x target
+    // Crypto markets are more volatile than stocks
+    // BTC/ETH can swing 3-5% in minutes, so wider stops are needed
+    // These defaults are tuned for Binance spot trading
 
-    // Calculated defaults:
-    // Target = 5 * 0.3% = 1.5%
-    // Stop = 2 * 1.5% = 3%
-    constexpr double TARGET_PCT = 0.015;               // 1.5%
-    constexpr int32_t TARGET_X100 = 150;               // 1.5% * 100
+    // Target: 3% (reasonable for crypto volatility)
+    constexpr double TARGET_PCT = 0.03;                // 3%
+    constexpr int32_t TARGET_X100 = 300;               // 3% * 100
 
-    constexpr double STOP_PCT = 0.03;                  // 3%
-    constexpr int32_t STOP_X100 = 300;                 // 3% * 100
+    // Stop: 5% (gives room for crypto volatility without frequent stop-outs)
+    constexpr double STOP_PCT = 0.05;                  // 5%
+    constexpr int32_t STOP_X100 = 500;                 // 5% * 100
 
-    // Pullback for trend exit
-    constexpr double PULLBACK_PCT = 0.005;             // 0.5%
-    constexpr int32_t PULLBACK_X100 = 50;              // 0.5% * 100
+    // Pullback for trend exit (wider for crypto)
+    constexpr double PULLBACK_PCT = 0.01;              // 1%
+    constexpr int32_t PULLBACK_X100 = 100;             // 1% * 100
 }
 
 // =============================================================================
