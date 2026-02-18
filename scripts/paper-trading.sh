@@ -1,6 +1,7 @@
 #!/bin/bash
 # Paper Trading Session
-# - Clears shared memory first
+# - Builds project and runs tests first
+# - Clears shared memory
 # - Starts trader, tuner, web API
 # - Tuner runs every 5 minutes
 # - Hourly reports generated
@@ -84,6 +85,38 @@ echo "============================================="
 echo "Duration: ${HOURS} hours (${DURATION_SECS} seconds)"
 echo "Log directory: $LOG_DIR"
 echo ""
+
+# ============================================
+# Step 0: Build and Test
+# ============================================
+log "Building project..."
+mkdir -p "$BUILD_DIR"
+
+# Only run cmake configure if not already configured
+if [ ! -f "$BUILD_DIR/CMakeCache.txt" ]; then
+    log "Configuring CMake (first time)..."
+    if ! cmake -S . -B "$BUILD_DIR" -DCMAKE_BUILD_TYPE=Release > "$LOG_DIR/cmake.log" 2>&1; then
+        log_error "CMake configuration failed!"
+        cat "$LOG_DIR/cmake.log"
+        exit 1
+    fi
+fi
+
+# Build (cmake --build handles incremental builds efficiently)
+if ! cmake --build "$BUILD_DIR" -j$(nproc) > "$LOG_DIR/build.log" 2>&1; then
+    log_error "Build failed!"
+    tail -50 "$LOG_DIR/build.log"
+    exit 1
+fi
+log_success "Build completed"
+
+log "Running tests..."
+if ! ctest --test-dir "$BUILD_DIR" --output-on-failure > "$LOG_DIR/tests.log" 2>&1; then
+    log_error "Tests failed!"
+    cat "$LOG_DIR/tests.log"
+    exit 1
+fi
+log_success "All tests passed"
 
 # PIDs for cleanup
 TRADER_PID=""

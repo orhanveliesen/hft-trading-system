@@ -48,25 +48,27 @@ namespace scaling {
 }
 
 // =============================================================================
-// Target & Stop Loss (derived from round-trip costs)
+// Target & Stop Loss (conservative defaults for warmup period)
 // =============================================================================
 namespace targets {
-    // Multipliers for calculating from round-trip cost
-    constexpr int32_t TARGET_MULTIPLIER = 5;           // Target = 5x round trip
-    constexpr int32_t RISK_REWARD_RATIO = 2;           // Stop = 2x target
+    // Start conservative - let the AI tuner adjust based on observed volatility
+    // Wide stops minimize stop-outs during learning period
+    // Tuner will tighten parameters after observing market conditions
 
-    // Calculated defaults:
-    // Target = 5 * 0.3% = 1.5%
-    // Stop = 2 * 1.5% = 3%
-    constexpr double TARGET_PCT = 0.015;               // 1.5%
-    constexpr int32_t TARGET_X100 = 150;               // 1.5% * 100
+    // Multiplier: 0.03 (3%) * 10000 = 300 for X100 format
+    constexpr int32_t PCT_TO_X100 = 10000;
 
-    constexpr double STOP_PCT = 0.03;                  // 3%
-    constexpr int32_t STOP_X100 = 300;                 // 3% * 100
+    // Target: 3% (conservative, tuner can tighten after warmup)
+    constexpr double TARGET_PCT = 0.03;
+    constexpr int32_t TARGET_X100 = static_cast<int32_t>(TARGET_PCT * PCT_TO_X100);
+
+    // Stop: 5% (wide to minimize stop-outs during learning period)
+    constexpr double STOP_PCT = 0.05;
+    constexpr int32_t STOP_X100 = static_cast<int32_t>(STOP_PCT * PCT_TO_X100);
 
     // Pullback for trend exit
-    constexpr double PULLBACK_PCT = 0.005;             // 0.5%
-    constexpr int32_t PULLBACK_X100 = 50;              // 0.5% * 100
+    constexpr double PULLBACK_PCT = 0.01;
+    constexpr int32_t PULLBACK_X100 = static_cast<int32_t>(PULLBACK_PCT * PCT_TO_X100);
 }
 
 // =============================================================================
