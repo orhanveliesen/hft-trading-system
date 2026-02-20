@@ -150,6 +150,9 @@ add_test(NAME UdpTelemetryTests COMMAND test_udp_telemetry)
 add_executable(test_rolling_sharpe tests/test_rolling_sharpe.cpp)
 add_test(NAME RollingSharpeTests COMMAND test_rolling_sharpe)
 
+add_executable(test_smart_strategy tests/test_smart_strategy.cpp)
+add_test(NAME SmartStrategyTests COMMAND test_smart_strategy)
+
 add_executable(test_concepts tests/test_concepts.cpp)
 target_link_libraries(test_concepts trader_core)
 add_test(NAME ConceptTests COMMAND test_concepts)

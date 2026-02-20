@@ -79,6 +79,12 @@ struct SmartStrategyConfig {
     int performance_window = 20;        // Track last N trades
     double min_confidence = 0.3;        // Below this, no signal
 
+    // Minimum trades thresholds for mode transitions and sizing
+    int min_trades_for_sharpe_mode = 20;    // Min trades before Sharpe-based mode transitions
+    int min_trades_for_win_rate_mode = 10;  // Min trades before win rate mode transitions
+    int min_trades_for_sharpe_sizing = 10;  // Min trades before Sharpe-based position sizing
+    double wide_spread_threshold = 0.001;   // Spread % above which position size is reduced
+
     // Mode transitions (reference strategy_constants.hpp for defaults)
     int losses_to_cautious = StreakThresholds::LOSSES_TO_CAUTIOUS;
     int losses_to_defensive = StreakThresholds::LOSSES_TO_DEFENSIVE;
@@ -360,7 +366,7 @@ private:
         }
 
         // Sharpe ratio based (after enough trades for reliable Sharpe)
-        if (sharpe_.count() >= 20) {
+        if (sharpe_.count() >= static_cast<size_t>(config_.min_trades_for_sharpe_mode)) {
             double sr = sharpe_.sharpe_ratio();
 
             // Negative Sharpe = losing money on risk-adjusted basis
@@ -385,7 +391,7 @@ private:
         }
 
         // Win rate based (only after enough trades)
-        if (total_trades_ >= 10) {
+        if (total_trades_ >= config_.min_trades_for_win_rate_mode) {
             double wr = win_rate();
             if (wr >= config_.win_rate_aggressive && consecutive_wins_ >= 2) {
                 mode_ = StrategyMode::AGGRESSIVE;
@@ -444,10 +450,10 @@ private:
         else if (rsi < 30) score += 0.3;  // Oversold (contrarian in momentum)
         else if (rsi < 40) score -= 0.2;  // Bearish momentum
 
-        // MACD component
-        double macd_hist = ind.macd_histogram();
-        if (macd_hist > 0.001) score += 0.3;
-        else if (macd_hist < -0.001) score -= 0.3;
+        // EMA crossover component (replaces MACD which is not in TechnicalIndicators)
+        double ema_spread = ind.ema_spread();
+        if (ema_spread > 0.001) score += 0.3;       // Bullish EMA crossover
+        else if (ema_spread < -0.001) score -= 0.3; // Bearish EMA crossover
 
         // Trend alignment bonus
         if (regime == MarketRegime::TrendingUp) score += 0.2;
@@ -463,7 +469,8 @@ private:
         double score = 0;
 
         // Bollinger Band position
-        double bb_pos = ind.bollinger_position();  // 0 = lower, 0.5 = middle, 1 = upper
+        // bb_position() returns -1 to +1, convert to 0 to 1 range
+        double bb_pos = (ind.bb_position() + 1.0) / 2.0;  // 0 = lower, 0.5 = middle, 1 = upper
         if (bb_pos < 0.2) score += 0.4;           // Near lower band → expect bounce
         else if (bb_pos > 0.8) score -= 0.4;      // Near upper band → expect drop
 
@@ -472,8 +479,8 @@ private:
         if (rsi < 30) score += 0.3;               // Oversold → buy
         else if (rsi > 70) score -= 0.3;          // Overbought → sell
 
-        // Distance from EMA
-        double ema = ind.ema();
+        // Distance from slow EMA
+        double ema = ind.ema_slow();
         if (ema > 0) {
             double dist_pct = (price - ema) / ema;
             if (dist_pct < -0.02) score += 0.3;   // Below EMA → expect reversion up
@@ -580,13 +587,13 @@ private:
 
         // Scale by Sharpe-based position multiplier (risk-adjusted sizing)
         // This reduces size when Sharpe is low/negative, increases when high
-        if (sharpe_.count() >= 10) {
+        if (sharpe_.count() >= static_cast<size_t>(config_.min_trades_for_sharpe_sizing)) {
             size *= sharpe_.position_multiplier();
         }
 
         // Reduce for wide spreads
-        if (spread_pct > 0.001) {
-            size *= (0.002 / spread_pct);  // Inverse relationship
+        if (spread_pct > config_.wide_spread_threshold) {
+            size *= (config_.wide_spread_threshold * 2.0 / spread_pct);  // Inverse relationship
         }
 
         // Branchless mode adjustments via lookup table
