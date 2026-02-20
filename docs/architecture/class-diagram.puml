@@ -1,0 +1,577 @@
+@startuml HFT Trading System - Class Diagram
+
+!theme plain
+skinparam classAttributeIconSize 0
+skinparam linetype ortho
+skinparam groupInheritance 2
+
+title HFT Trading System - Class Diagram
+
+' ==============================================================================
+' Core Types Package
+' ==============================================================================
+package "Core Types" <<Frame>> {
+    class Order {
+        +id: OrderId
+        +trader_id: TraderId
+        +timestamp: Timestamp
+        +symbol: Symbol
+        +price: Price
+        +quantity: Quantity
+        +side: Side
+        +prev: Order*
+        +next: Order*
+        --
+        +init(id, trader, ts, sym, price, qty, side)
+        +reset()
+        +reduce_quantity(amount)
+        +is_fully_filled(): bool
+    }
+
+    class PriceLevel {
+        +price: Price
+        +total_quantity: Quantity
+        +head: Order*
+        +tail: Order*
+        +prev: PriceLevel*
+        +next: PriceLevel*
+        --
+        +reduce_quantity(amount)
+        +add_quantity(amount)
+        +is_empty(): bool
+    }
+
+    class Trade {
+        +aggressive_order_id: OrderId
+        +passive_order_id: OrderId
+        +price: Price
+        +quantity: Quantity
+        +aggressor_side: Side
+        +timestamp: Timestamp
+    }
+
+    enum Side {
+        Buy
+        Sell
+    }
+
+    enum OrderResult {
+        Success
+        PoolExhausted
+        InvalidOrderId
+        InvalidPrice
+        InvalidQuantity
+        OrderNotFound
+        SystemHalted
+        DuplicateOrderId
+    }
+}
+
+' ==============================================================================
+' Order Book Package
+' ==============================================================================
+package "Order Book" <<Frame>> {
+    class OrderBook {
+        -order_pool_: unique_ptr<array<Order>>
+        -level_pool_: unique_ptr<array<PriceLevel>>
+        -free_orders_: Order*
+        -free_levels_: PriceLevel*
+        -order_index_: unique_ptr<array<Order*>>
+        -bids_: BidSide
+        -asks_: AskSide
+        --
+        +add_order(id, side, price, quantity): OrderResult
+        +cancel_order(id): bool
+        +execute_order(id, quantity): bool
+        +best_bid(): Price
+        +best_ask(): Price
+        +bid_quantity_at(price): Quantity
+        +ask_quantity_at(price): Quantity
+        -allocate_order(): Order*
+        -deallocate_order(order)
+        -allocate_level(): PriceLevel*
+        -deallocate_level(level)
+    }
+
+    class "BookSide<Compare>" as BookSide {
+        -base_price_: Price
+        -price_range_: size_t
+        -levels_: unique_ptr<PriceLevel*[]>
+        -best_level_: PriceLevel*
+        -compare_: Compare
+        --
+        +find_level(price): PriceLevel*
+        +quantity_at(price): Quantity
+        +best_price(): Price
+        +insert_level(level)
+        +remove_level_if_empty(level): PriceLevel*
+    }
+
+    class BidSide <<typedef>>
+    class AskSide <<typedef>>
+
+    BookSide <|-- BidSide : Compare=BidCompare
+    BookSide <|-- AskSide : Compare=AskCompare
+    OrderBook *-- BidSide
+    OrderBook *-- AskSide
+    OrderBook o-- Order : manages pool
+    OrderBook o-- PriceLevel : manages pool
+}
+
+' ==============================================================================
+' Network Package
+' ==============================================================================
+package "Network" <<Frame>> {
+    class UdpReceiver {
+        -socket_fd_: int
+        -epoll_fd_: int
+        -running_: bool
+        -config_: UdpConfig
+        -recv_buffer_: uint8_t[]
+        --
+        +init(config): bool
+        +poll<Callback>(callback, timeout_us): int
+        +stop()
+        +is_initialized(): bool
+    }
+
+    class "PacketBuffer<MaxSize, Capacity>" as PacketBuffer {
+        -head_: size_t {alignas(64)}
+        -tail_: size_t {alignas(64)}
+        -packets_: array<Packet>
+        --
+        +push(data, len): bool
+        +front(): Packet*
+        +pop()
+        +empty(): bool
+        +full(): bool
+        +size(): size_t
+    }
+
+    struct UdpConfig {
+        +interface: string
+        +multicast_group: string
+        +port: uint16_t
+        +recv_buffer_size: int
+    }
+
+    struct MoldUDP64Header {
+        +session: char[10]
+        +sequence_number: uint64_t
+        +message_count: uint16_t
+    }
+
+    UdpReceiver --> UdpConfig
+    UdpReceiver ..> MoldUDP64Header : parses
+}
+
+' ==============================================================================
+' Feed Handler Package
+' ==============================================================================
+package "Feed Handler" <<Frame>> {
+    class "FeedHandler<Callback>" as FeedHandler {
+        -callback_: Callback&
+        --
+        +process_message(data, len): bool
+        -parse_add_order(data, len): bool
+        -parse_order_executed(data, len): bool
+        -parse_order_cancel(data, len): bool
+        -parse_order_delete(data, len): bool
+    }
+
+    interface "<<concept>> FeedCallback" as FeedCallback {
+        +on_add_order(id, side, price, qty)
+        +on_order_executed(id, qty)
+        +on_order_cancelled(id, qty)
+        +on_order_deleted(id)
+    }
+
+    FeedHandler ..> FeedCallback : requires
+}
+
+' ==============================================================================
+' IPC Package
+' ==============================================================================
+package "IPC (Shared Memory)" <<Frame>> {
+    class SharedConfig {
+        +magic: uint64_t
+        +version: uint32_t
+        +kill_switch: atomic<bool>
+        +trading_enabled: atomic<bool>
+        +max_position: atomic<int64_t>
+        +order_size: atomic<Quantity>
+        +max_daily_loss: atomic<int64_t>
+        +threshold_bps: atomic<uint32_t>
+        +sequence: atomic<uint64_t>
+        --
+        +init_defaults()
+        +is_valid(): bool
+    }
+
+    class SharedConfigManager {
+        {static} +create(name): SharedConfig*
+        {static} +open(name): SharedConfig*
+        {static} +open_readonly(name): SharedConfig*
+        {static} +close(config)
+        {static} +destroy(name)
+    }
+
+    class "SharedRingBuffer<T, N>" as SharedRingBuffer {
+        -name_: const char*
+        -fd_: int
+        -mapped_: void*
+        -header_: Header*
+        -data_: T*
+        -is_producer_: bool
+        --
+        +push(item): bool
+        +pop(item&): bool
+        +peek(item&): bool
+        +size(): size_t
+        +empty(): bool
+        +full(): bool
+    }
+
+    class TradeEvent {
+        +timestamp_ns: uint64_t
+        +type: EventType
+        +symbol_id: uint32_t
+        +ticker: char[4]
+        +price: double
+        +price2: double
+        +quantity: double
+        +pnl: double
+        +order_id: uint32_t
+        +side: uint8_t
+        +regime: uint8_t
+        +sequence: uint32_t
+        --
+        {static} +quote(...): TradeEvent
+        {static} +fill(...): TradeEvent
+        {static} +target_hit(...): TradeEvent
+        {static} +stop_loss(...): TradeEvent
+        {static} +signal(...): TradeEvent
+    }
+
+    class SharedPortfolioState {
+        +magic: uint64_t
+        +version: uint32_t
+        +cash_x8: atomic<int64_t>
+        +total_realized_pnl_x8: atomic<int64_t>
+        +winning_trades: atomic<uint32_t>
+        +losing_trades: atomic<uint32_t>
+        +positions: PositionSlot[]
+        --
+        +cash(): double
+        +total_equity(): double
+        +total_pnl(): double
+        +win_rate(): double
+        +update_position(symbol, qty, avg, last)
+        {static} +create(name, cash): SharedPortfolioState*
+        {static} +open(name): SharedPortfolioState*
+    }
+
+    enum EventType {
+        Quote
+        Signal
+        OrderSent
+        Fill
+        TargetHit
+        StopLoss
+        SignalExit
+        RegimeChange
+        Status
+        Error
+    }
+
+    SharedConfigManager ..> SharedConfig : manages
+    SharedRingBuffer ..> TradeEvent : stores
+}
+
+' ==============================================================================
+' Strategy Package
+' ==============================================================================
+package "Strategy" <<Frame>> {
+    class PositionTracker {
+        -position_: int64_t
+        -avg_price_: Price
+        -realized_pnl_: int64_t
+        -total_bought_: uint64_t
+        -total_sold_: uint64_t
+        --
+        +on_fill(side, qty, price)
+        +position(): int64_t
+        +avg_price(): Price
+        +realized_pnl(): int64_t
+        +unrealized_pnl(mark_price): int64_t
+        +is_flat(): bool
+        +is_long(): bool
+        +is_short(): bool
+    }
+
+    class RiskManager {
+        -config_: RiskConfig
+        -current_pnl_: int64_t
+        -halted_: bool
+        --
+        +can_trade(side, size, position): bool
+        +update_pnl(pnl)
+        +is_halted(): bool
+        +reset_halt()
+    }
+
+    class SmartStrategy {
+        -config_: SmartStrategyConfig
+        -trade_results_: array<double, 20>
+        -total_trades_: int
+        -wins_: int
+        -losses_: int
+        -confidence_: double
+        -mode_: StrategyMode
+        -sharpe_: RollingSharpe<100>
+        --
+        +evaluate(bid, ask, regime, indicators, pos, pnl): SmartSignal
+        +record_trade_result(pnl_pct, was_win)
+        +reset_performance()
+        +mode(): StrategyMode
+        +confidence(): double
+        +sharpe_ratio(): double
+    }
+
+    class RegimeDetector {
+        -volatility_: double
+        -trend_: double
+        -current_regime_: MarketRegime
+        -prices_: deque<double>
+        --
+        +update(price)
+        +current_regime(): MarketRegime
+        +confidence(): double
+        +volatility(): double
+        +trend_strength(): double
+    }
+
+    class TechnicalIndicators {
+        -prices_: deque<double>
+        -rsi_: double
+        -ema_: double
+        -bb_upper_: double
+        -bb_lower_: double
+        --
+        +update(price)
+        +rsi(): double
+        +ema(): double
+        +bollinger_position(): double
+        +macd_histogram(): double
+    }
+
+    enum StrategyMode {
+        AGGRESSIVE
+        NORMAL
+        CAUTIOUS
+        DEFENSIVE
+        EXIT_ONLY
+    }
+
+    enum MarketRegime {
+        Unknown
+        TrendingUp
+        TrendingDown
+        Ranging
+        HighVolatility
+        LowVolatility
+        Spike
+    }
+
+    struct SmartSignal {
+        +action: Action
+        +confidence: double
+        +suggested_size: double
+        +entry_price: double
+        +target_price: double
+        +stop_price: double
+        +reason: const char*
+    }
+
+    SmartStrategy --> SmartSignal : produces
+    SmartStrategy --> StrategyMode
+    SmartStrategy --> TechnicalIndicators : uses
+    SmartStrategy --> RegimeDetector : uses
+    RegimeDetector --> MarketRegime
+}
+
+' ==============================================================================
+' Paper Trading Package
+' ==============================================================================
+package "Paper Trading" <<Frame>> {
+    class PaperTradingEngine {
+        -config_: Config
+        -order_sender_: PaperOrderSender
+        -regime_detector_: RegimeDetector
+        -risk_manager_: EnhancedRiskManager
+        -logger_: AsyncLogger
+        -capital_: double
+        -positions_: map<Symbol, PaperPosition>
+        --
+        +register_symbol(name, max_pos, max_notional): SymbolIndex
+        +on_market_data(symbol, bid, ask, timestamp)
+        +submit_order(symbol, side, qty, is_market): bool
+        +get_position(symbol): PaperPosition&
+        +total_pnl(): double
+        +equity(): double
+        +current_regime(): MarketRegime
+    }
+
+    class PaperOrderSender {
+        -config_: FillSimConfig
+        -next_order_id_: OrderId
+        -pending_orders_: map<OrderId, PaperOrder>
+        -filled_orders_: vector<PaperOrder>
+        -on_fill_: FillCallback
+        --
+        +send_order(symbol, side, qty, is_market): bool
+        +send_limit_order(symbol, side, qty, price): bool
+        +cancel_order(symbol, order_id): bool
+        +process_fills(symbol, bid, ask)
+        +set_fill_callback(cb)
+    }
+
+    struct PaperOrder {
+        +id: OrderId
+        +symbol: Symbol
+        +side: Side
+        +quantity: Quantity
+        +filled_qty: Quantity
+        +price: Price
+        +is_market: bool
+        +status: FillStatus
+        +avg_fill_price: Price
+    }
+
+    struct FillEvent {
+        +order_id: OrderId
+        +symbol: Symbol
+        +side: Side
+        +quantity: Quantity
+        +price: Price
+        +timestamp_ns: uint64_t
+        +is_maker: bool
+    }
+
+    PaperTradingEngine *-- PaperOrderSender
+    PaperTradingEngine *-- RegimeDetector
+    PaperOrderSender --> FillEvent : emits
+    PaperOrderSender --> PaperOrder : manages
+}
+
+' ==============================================================================
+' Trading Application Package
+' ==============================================================================
+package "Trading Application" <<Frame>> {
+    class "TradingApp<OrderSender>" as TradingApp {
+        -args_: CLIArgs
+        -sender_: OrderSender
+        -engine_: ExecutionEngine
+        -portfolio_: Portfolio
+        -trade_recorder_: TradeRecorder
+        -risk_manager_: EnhancedRiskManager
+        -publisher_: EventPublisher
+        -portfolio_state_: SharedPortfolioState*
+        -shared_config_: SharedConfig*
+        --
+        +run()
+        +on_quote(symbol, bid, ask)
+        +on_fill(symbol, id, side, qty, price)
+        -process_signals(symbol)
+        -check_exits(symbol)
+        -check_config_changes()
+    }
+
+    class ExecutionEngine {
+        -sender_: OrderSender&
+        -pending_orders_: map<Symbol, OrderInfo>
+        --
+        +send_market_order(symbol, side, qty): bool
+        +send_limit_order(symbol, side, qty, price): bool
+        +cancel_order(symbol, order_id): bool
+        +on_fill(symbol, id, side, qty, price)
+        +has_pending_order(symbol): bool
+    }
+
+    class Portfolio {
+        -cash_: double
+        -initial_cash_: double
+        -positions_: array<SymbolPositions, MAX_SYMBOLS>
+        -config_: SharedConfig*
+        --
+        +init(initial_cash)
+        +open_position(symbol_id, side, qty, price)
+        +close_position(symbol_id, pos_idx, exit_price)
+        +get_positions(symbol_id): SymbolPositions&
+        +total_equity(): double
+        +available_cash(): double
+    }
+
+    class EventPublisher {
+        -ring_buffer_: SharedRingBuffer<TradeEvent>*
+        -sequence_: uint32_t
+        --
+        +publish_quote(symbol, bid, ask)
+        +publish_fill(symbol, side, qty, price)
+        +publish_signal(symbol, side, strength)
+        +publish_target_hit(symbol, entry, exit, pnl)
+        +publish_stop_loss(symbol, entry, exit, pnl)
+    }
+
+    TradingApp *-- ExecutionEngine
+    TradingApp *-- Portfolio
+    TradingApp *-- EventPublisher
+    TradingApp --> SharedPortfolioState : updates
+    TradingApp --> SharedConfig : reads
+    EventPublisher --> SharedRingBuffer : writes to
+}
+
+' ==============================================================================
+' Concepts Package
+' ==============================================================================
+package "C++20 Concepts" <<Frame>> {
+    interface "<<concept>> OrderSender" as OrderSenderConcept {
+        +send_order(symbol, side, qty, is_market): bool
+        +cancel_order(symbol, order_id): bool
+    }
+
+    interface "<<concept>> TradingStrategy" as TradingStrategyConcept {
+        +operator()(bid, ask): Signal
+        +operator()(bid, ask, position): Signal
+    }
+
+    interface "<<concept>> RiskChecker" as RiskCheckerConcept {
+        +can_place_order(symbol, side, qty, price): bool
+        +can_trade(): bool
+    }
+
+    interface "<<concept>> ReadableOrderBook" as ReadableOrderBookConcept {
+        +best_bid(): Price
+        +best_ask(): Price
+    }
+}
+
+' ==============================================================================
+' Relationships
+' ==============================================================================
+
+' Core relationships
+Order --* PriceLevel : "linked list"
+
+' Strategy relationships
+SmartStrategy ..> RiskManager : uses
+
+' Paper trading relationships
+PaperOrderSender ..|> OrderSenderConcept : satisfies
+PaperTradingEngine ..> SmartStrategy : can use
+
+' Application relationships
+TradingApp ..> SmartStrategy : uses
+TradingApp ..> RiskManager : uses
+
+@enduml
