@@ -1,0 +1,418 @@
+@startuml HFT Trading System - Deployment Diagram
+
+!theme plain
+skinparam linetype ortho
+
+title HFT Trading System - Deployment Architecture
+
+' ==============================================================================
+' External Systems
+' ==============================================================================
+cloud "External" {
+    node "Binance Exchange" as Binance {
+        component "WebSocket API" as BinanceWS
+        component "REST API" as BinanceREST
+    }
+
+    node "NASDAQ (Future)" as NASDAQ {
+        component "MoldUDP64\nMulticast" as MoldUDP
+        component "OUCH Gateway" as OUCH
+    }
+}
+
+' ==============================================================================
+' Trading Server
+' ==============================================================================
+node "Trading Server" <<Linux>> {
+
+    ' Shared Memory Region
+    frame "POSIX Shared Memory" as SHM {
+        database "/hft_events\n(SharedRingBuffer<TradeEvent>)" as EventsShm {
+        }
+        database "/trader_portfolio\n(SharedPortfolioState)" as PortfolioShm {
+        }
+        database "/trader_config\n(SharedConfig)" as ConfigShm {
+        }
+        database "/trader_ledger\n(SharedLedger)" as LedgerShm {
+        }
+        database "/trader_symbol_configs\n(SharedSymbolConfigs)" as SymbolConfigShm {
+        }
+        database "/trader_event_log\n(SharedEventLog)" as EventLogShm {
+        }
+    }
+
+    ' Main Trading Process
+    frame "trader (HFT Engine)" as TraderProcess {
+        component "TradingApp<OrderSender>" as TradingApp
+        component "SmartStrategy" as Strategy
+        component "Portfolio" as Portfolio
+        component "ExecutionEngine" as Execution
+        component "EnhancedRiskManager" as RiskMgr
+        component "RegimeDetector" as Regime
+        component "TechnicalIndicators" as Indicators
+        component "EventPublisher" as Publisher
+
+        TradingApp --> Strategy
+        TradingApp --> Portfolio
+        TradingApp --> Execution
+        TradingApp --> RiskMgr
+        TradingApp --> Regime
+        TradingApp --> Indicators
+        TradingApp --> Publisher
+
+        note right of TradingApp
+            Paper mode: PaperOrderSender
+            Production: ProductionOrderSender
+        end note
+    }
+
+    ' Dashboard Process
+    frame "trader_dashboard (ImGui)" as DashboardProcess {
+        component "LiveDashboard" as Dashboard
+        component "SharedPortfolioState\n(Reader)" as DashPortReader
+        component "SharedConfig\n(Writer)" as DashConfigWriter
+        component "SharedRingBuffer\n(Consumer)" as DashEventReader
+
+        Dashboard --> DashPortReader
+        Dashboard --> DashConfigWriter
+        Dashboard --> DashEventReader
+    }
+
+    ' Observer Process
+    frame "trader_observer (CLI)" as ObserverProcess {
+        component "MVC Views" as MVCViews
+        component "SharedRingBuffer\n(Consumer)" as ObsEventReader
+
+        MVCViews --> ObsEventReader
+    }
+
+    ' Control Process
+    frame "trader_control (CLI)" as ControlProcess {
+        component "ConfigController" as ConfigCtrl
+        component "SharedConfig\n(Writer)" as CtrlConfigWriter
+
+        ConfigCtrl --> CtrlConfigWriter
+    }
+
+    ' Tuner Process (Optional)
+    frame "trader_tuner (Optional)" as TunerProcess {
+        component "AutoTuner" as Tuner
+        component "SharedSymbolConfigs\n(Writer)" as TunerSymWriter
+        component "SharedEventLog\n(Writer)" as TunerLogWriter
+
+        Tuner --> TunerSymWriter
+        Tuner --> TunerLogWriter
+    }
+
+    ' Connections to Shared Memory
+    Publisher --> EventsShm : "push(TradeEvent)"
+    TradingApp --> PortfolioShm : "update position/cash"
+    TradingApp --> ConfigShm : "read config (hot reload)"
+    TradingApp --> LedgerShm : "record trades"
+    TradingApp --> SymbolConfigShm : "read symbol configs"
+    TradingApp --> EventLogShm : "log events"
+
+    DashPortReader --> PortfolioShm : "read (mmap PROT_READ)"
+    DashConfigWriter --> ConfigShm : "write (atomic)"
+    DashEventReader --> EventsShm : "pop(TradeEvent)"
+
+    ObsEventReader --> EventsShm : "pop(TradeEvent)"
+
+    CtrlConfigWriter --> ConfigShm : "write (atomic)"
+
+    TunerSymWriter --> SymbolConfigShm : "write configs"
+    TunerLogWriter --> EventLogShm : "log tuner events"
+}
+
+' ==============================================================================
+' Network Connections
+' ==============================================================================
+
+BinanceWS --> TradingApp : "WebSocket\n(price ticks)"
+TradingApp --> BinanceREST : "HTTP/REST\n(order placement)"
+
+MoldUDP ..> TradingApp : "UDP Multicast\n(future)"
+TradingApp ..> OUCH : "TCP\n(order routing, future)"
+
+' ==============================================================================
+' Notes
+' ==============================================================================
+
+note bottom of SHM
+    **Shared Memory Layout**
+    - All POD structs (no pointers)
+    - Cache-line aligned (64 bytes)
+    - Lock-free atomic operations
+    - acquire/release memory ordering
+end note
+
+note right of TraderProcess
+    **Hot Path Optimization**
+    - No heap allocation
+    - No virtual functions
+    - Pre-allocated pools
+    - ~160MB for OrderBook
+end note
+
+note left of DashboardProcess
+    **Real-time Monitoring**
+    - 60 FPS rendering
+    - ImGui immediate mode
+    - Reads portfolio state
+    - Can modify config
+end note
+
+note left of ObserverProcess
+    **Event Stream**
+    - CLI-based monitoring
+    - Color-coded events
+    - MVC architecture
+    - Non-blocking reads
+end note
+
+@enduml
+
+@startuml HFT Trading System - Component Interaction
+
+!theme plain
+
+title HFT Trading System - Component Interaction Diagram
+
+package "Market Data Layer" {
+    [BinanceWS] as WS
+    [UdpReceiver] as UDP
+    [FeedHandler<T>] as Feed
+    [PacketBuffer] as Buffer
+}
+
+package "Order Book Layer" {
+    [OrderBook] as Book
+    [BidSide] as Bids
+    [AskSide] as Asks
+    [Order Pool] as OPool
+    [Level Pool] as LPool
+}
+
+package "Strategy Layer" {
+    [SmartStrategy] as Smart
+    [RegimeDetector] as Regime
+    [TechnicalIndicators] as Tech
+    [RollingSharpe] as Sharpe
+    [PositionTracker] as PosTrack
+}
+
+package "Risk Layer" {
+    [EnhancedRiskManager] as ERisk
+    [RiskConfig] as RConfig
+}
+
+package "Execution Layer" {
+    [ExecutionEngine] as Exec
+    [PaperOrderSender] as Paper
+    [ProductionOrderSender] as Prod
+    [Portfolio] as Port
+}
+
+package "IPC Layer" {
+    [SharedRingBuffer] as Ring
+    [SharedPortfolioState] as State
+    [SharedConfig] as Config
+    [EventPublisher] as Pub
+}
+
+package "Observability" {
+    [TradeRecorder] as Recorder
+    [SharedLedger] as Ledger
+    [SharedEventLog] as EventLog
+}
+
+' Data Flow
+WS --> Feed : price ticks
+UDP --> Buffer : raw packets
+Buffer --> Feed : parsed packets
+Feed --> Book : order events
+
+Book --> Bids
+Book --> Asks
+Book --> OPool
+Book --> LPool
+
+Book --> Smart : best_bid/ask
+Tech --> Smart : indicators
+Regime --> Smart : market regime
+Sharpe --> Smart : risk metrics
+
+Smart --> Exec : signals
+ERisk --> Exec : risk checks
+RConfig --> ERisk
+
+Exec --> Paper : paper mode
+Exec --> Prod : production mode
+Exec --> Port : position updates
+
+Port --> State : portfolio state
+Exec --> Pub : trade events
+Pub --> Ring : event stream
+
+Exec --> Recorder : trade records
+Recorder --> Ledger : persistent log
+
+' Notes
+note right of Ring
+    Lock-free SPSC
+    64KB buffer
+    ~5ns push/pop
+end note
+
+note right of Book
+    ~160MB pre-allocated
+    O(1) operations
+    < 500ns latency
+end note
+
+@enduml
+
+@startuml HFT Trading System - Data Flow
+
+!theme plain
+
+title HFT Trading System - Data Flow Diagram
+
+' Level 0: Context
+rectangle "External World" {
+    actor "Exchange" as Exch
+    actor "User/Operator" as User
+}
+
+rectangle "HFT System" {
+    ' Level 1: Main Processes
+    rectangle "Data Ingestion" as Ingest {
+        usecase "Receive\nMarket Data" as UC1
+        usecase "Parse\nProtocol" as UC2
+        usecase "Update\nOrder Book" as UC3
+    }
+
+    rectangle "Signal Generation" as Signal {
+        usecase "Detect\nRegime" as UC4
+        usecase "Calculate\nIndicators" as UC5
+        usecase "Generate\nSignals" as UC6
+    }
+
+    rectangle "Risk Management" as Risk {
+        usecase "Check\nLimits" as UC7
+        usecase "Track\nPositions" as UC8
+        usecase "Monitor\nDrawdown" as UC9
+    }
+
+    rectangle "Order Execution" as Order {
+        usecase "Submit\nOrders" as UC10
+        usecase "Manage\nFills" as UC11
+        usecase "Update\nPortfolio" as UC12
+    }
+
+    rectangle "Observability" as Observe {
+        usecase "Publish\nEvents" as UC13
+        usecase "Record\nTrades" as UC14
+        usecase "Display\nDashboard" as UC15
+    }
+}
+
+' Flows
+Exch --> UC1 : price ticks
+UC1 --> UC2 : raw data
+UC2 --> UC3 : parsed events
+
+UC3 --> UC4 : BBO
+UC3 --> UC5 : price history
+UC4 --> UC6 : regime
+UC5 --> UC6 : indicators
+
+UC6 --> UC7 : trade intent
+UC7 --> UC8 : approved trades
+UC8 --> UC9 : position updates
+
+UC7 --> UC10 : orders
+UC10 --> Exch : order messages
+Exch --> UC11 : fill reports
+UC11 --> UC12 : executed trades
+
+UC12 --> UC13 : trade events
+UC12 --> UC14 : trade records
+UC13 --> UC15 : event stream
+
+User --> UC15 : monitor
+User --> UC7 : config changes
+
+@enduml
+
+@startuml HFT Memory Layout
+
+!theme plain
+skinparam rectangleFontSize 10
+
+title Memory Layout - Pre-allocated Pools
+
+rectangle "Order Pool (~160MB)" as OrderPool {
+    rectangle "Order[0]" as O0 #LightBlue
+    rectangle "Order[1]" as O1 #LightBlue
+    rectangle "Order[2]" as O2 #LightGreen
+    rectangle "..." as ODots
+    rectangle "Order[999,999]" as ON #LightBlue
+
+    note right of O2
+        In use
+        (linked in book)
+    end note
+}
+
+rectangle "Level Pool (~8MB)" as LevelPool {
+    rectangle "PriceLevel[0]" as L0 #LightBlue
+    rectangle "PriceLevel[1]" as L1 #LightGreen
+    rectangle "..." as LDots
+    rectangle "PriceLevel[99,999]" as LN #LightBlue
+
+    note right of L1
+        In use
+        (has orders)
+    end note
+}
+
+rectangle "Order Index (8MB)" as Index {
+    rectangle "Order*[0] = null" as I0
+    rectangle "Order*[1] = null" as I1
+    rectangle "Order*[2] = &Order[2]" as I2 #LightGreen
+    rectangle "..." as IDots
+}
+
+rectangle "Free Lists" as Free {
+    rectangle "free_orders_" as FO
+    rectangle "free_levels_" as FL
+}
+
+' Connections
+FO --> O0 : head
+O0 --> O1 : next
+O1 --> ODots : next
+
+FL --> L0 : head
+L0 --> LDots : next
+
+I2 --> O2 : points to
+
+note bottom of OrderPool
+    **Order struct: 88 bytes**
+    - id (8), trader_id (4), timestamp (8)
+    - symbol (4), price (4), quantity (4)
+    - side (1), padding (7)
+    - prev/next pointers (16)
+end note
+
+note bottom of LevelPool
+    **PriceLevel struct: 48 bytes**
+    - price (4), total_quantity (4)
+    - head/tail (16)
+    - prev/next (16)
+    - padding (8)
+end note
+
+@enduml

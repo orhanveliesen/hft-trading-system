@@ -1,0 +1,604 @@
+@startuml HFT Trading System - Sequence Diagrams
+
+!theme plain
+
+' ==============================================================================
+' Sequence Diagram 1: Market Data Flow (ITCH Protocol)
+' ==============================================================================
+newpage Market Data Flow (ITCH Protocol)
+
+title Market Data Processing - ITCH Protocol via MoldUDP64
+
+participant "UDP\nMulticast" as UDP
+participant "UdpReceiver" as Receiver
+participant "PacketBuffer" as Buffer
+participant "FeedHandler" as Feed
+participant "MarketDataHandler" as MDH
+participant "OrderBook" as Book
+participant "TradingApp" as App
+
+UDP -> Receiver: UDP packet (MoldUDP64)
+activate Receiver
+Receiver -> Receiver: parse_moldudp_header()
+Receiver -> Buffer: push(data, len)
+deactivate Receiver
+
+loop for each message in packet
+    Buffer -> Feed: process_message(data, len)
+    activate Feed
+
+    alt MSG_ADD_ORDER ('A')
+        Feed -> Feed: parse_add_order()
+        Feed -> MDH: on_add_order(id, side, price, qty)
+        activate MDH
+        MDH -> Book: add_order(id, side, price, qty)
+        activate Book
+        Book -> Book: allocate_order()
+        Book -> Book: find_or_create_level()
+        Book -> Book: add_order_to_level()
+        Book --> MDH: OrderResult::Success
+        deactivate Book
+        MDH --> Feed
+        deactivate MDH
+
+    else MSG_ORDER_EXECUTED ('E')
+        Feed -> Feed: parse_order_executed()
+        Feed -> MDH: on_order_executed(id, qty)
+        activate MDH
+        MDH -> Book: execute_order(id, qty)
+        activate Book
+        Book -> Book: reduce_quantity()
+        alt fully filled
+            Book -> Book: remove_order_from_level()
+            Book -> Book: deallocate_order()
+        end
+        Book --> MDH: true
+        deactivate Book
+        MDH --> Feed
+        deactivate MDH
+
+    else MSG_ORDER_DELETE ('D')
+        Feed -> Feed: parse_order_delete()
+        Feed -> MDH: on_order_deleted(id)
+        activate MDH
+        MDH -> Book: cancel_order(id)
+        activate Book
+        Book -> Book: remove_order_from_level()
+        Book -> Book: deallocate_order()
+        Book --> MDH: true
+        deactivate Book
+        MDH --> Feed
+        deactivate MDH
+    end
+
+    deactivate Feed
+end
+
+App -> Book: best_bid()
+Book --> App: bid_price
+App -> Book: best_ask()
+Book --> App: ask_price
+
+@enduml
+
+@startuml
+
+' ==============================================================================
+' Sequence Diagram 2: Paper Trading Signal to Fill
+' ==============================================================================
+newpage Paper Trading - Signal to Fill
+
+title Paper Trading - Signal Generation to Order Fill
+
+participant "BinanceWS" as WS
+participant "TradingApp" as App
+participant "SmartStrategy" as Strategy
+participant "RiskManager" as Risk
+participant "Portfolio" as Port
+participant "PaperOrderSender" as Sender
+participant "SharedPortfolioState" as State
+participant "EventPublisher" as Pub
+
+WS -> App: on_quote(symbol, bid, ask)
+activate App
+
+App -> App: update_price(symbol, mid)
+App -> State: update_last_price(symbol, mid)
+
+App -> Strategy: evaluate(bid, ask, regime,\n  indicators, position, unrealized_pnl)
+activate Strategy
+
+Strategy -> Strategy: update_mode()
+Strategy -> Strategy: calc_momentum_score()
+Strategy -> Strategy: calc_mean_reversion_score()
+Strategy -> Strategy: blend_signals()
+Strategy -> Strategy: apply_filters()
+Strategy -> Strategy: generate_signal()
+Strategy -> Strategy: calculate_position_size()
+Strategy -> Strategy: calculate_targets()
+
+Strategy --> App: SmartSignal{BUY, confidence=0.7}
+deactivate Strategy
+
+App -> Pub: publish_signal(symbol, BUY, strength)
+Pub -> Pub: ring_buffer.push(event)
+
+App -> Risk: can_trade(BUY, qty, position)
+activate Risk
+Risk -> Risk: check_position_limit()
+Risk -> Risk: check_order_size()
+Risk -> Risk: check_pnl_limit()
+Risk --> App: true
+deactivate Risk
+
+App -> Port: calculate_order_size(symbol, signal)
+Port --> App: quantity
+
+App -> Sender: send_order(symbol, BUY, qty, is_market=true)
+activate Sender
+Sender -> Sender: create_paper_order()
+Sender -> Sender: schedule_fill_check()
+Sender --> App: true
+deactivate Sender
+
+note over Sender: Fill simulated on next tick
+
+WS -> App: on_quote(symbol, new_bid, new_ask)
+App -> Sender: process_fills(symbol, bid, ask)
+activate Sender
+
+Sender -> Sender: simulate_latency()
+Sender -> Sender: simulate_fill_price()
+Sender -> Sender: apply_slippage()
+Sender -> Sender: simulate_fill_quantity()
+
+Sender -> App: on_fill(symbol, id, BUY, qty, fill_price)
+activate App
+
+App -> Port: record_fill(symbol, BUY, qty, price)
+App -> State: update_position(symbol, qty, avg_price, last_price)
+App -> State: record_fill()
+App -> Pub: publish_fill(symbol, BUY, qty, price)
+
+deactivate App
+deactivate Sender
+deactivate App
+
+@enduml
+
+@startuml
+
+' ==============================================================================
+' Sequence Diagram 3: Position Exit Flow
+' ==============================================================================
+newpage Position Exit Flow
+
+title Position Exit - Target Hit / Stop Loss
+
+participant "TradingApp" as App
+participant "Portfolio" as Port
+participant "SmartStrategy" as Strategy
+participant "PaperOrderSender" as Sender
+participant "SharedPortfolioState" as State
+participant "EventPublisher" as Pub
+participant "TradeRecorder" as Recorder
+
+App -> App: on_quote(symbol, bid, ask)
+activate App
+
+App -> Port: get_positions(symbol_id)
+activate Port
+Port --> App: SymbolPositions (has open positions)
+deactivate Port
+
+loop for each open position
+    App -> App: calculate_pnl_pct(entry_price, current_price)
+
+    alt pnl >= target_pct (Target Hit)
+        App -> App: exit_type = TARGET_HIT
+
+        App -> Sender: send_order(symbol, SELL, qty, is_market=true)
+        Sender --> App: true
+
+        note right: On fill callback...
+
+        App -> Port: close_position(symbol_id, pos_idx, exit_price)
+        activate Port
+        Port -> Port: calculate_realized_pnl()
+        Port -> Port: update_cash()
+        Port --> App: realized_pnl
+        deactivate Port
+
+        App -> State: add_realized_pnl(pnl)
+        App -> State: record_target()
+        App -> State: update_position()
+
+        App -> Strategy: record_trade_result(pnl_pct, was_win=true)
+        activate Strategy
+        Strategy -> Strategy: update_win_streak()
+        Strategy -> Strategy: sharpe_.add_return(pnl_pct)
+        Strategy -> Strategy: update_confidence()
+        Strategy -> Strategy: update_mode()
+        Strategy --> App
+        deactivate Strategy
+
+        App -> Recorder: record_trade(symbol, entry, exit, pnl, TARGET)
+        App -> Pub: publish_target_hit(symbol, entry, exit, qty, pnl)
+
+    else pnl <= -stop_pct (Stop Loss)
+        App -> App: exit_type = STOP_LOSS
+
+        App -> Sender: send_order(symbol, SELL, qty, is_market=true)
+        Sender --> App: true
+
+        note right: On fill callback...
+
+        App -> Port: close_position(symbol_id, pos_idx, exit_price)
+        Port --> App: realized_pnl (negative)
+
+        App -> State: add_realized_pnl(pnl)
+        App -> State: record_stop()
+
+        App -> Strategy: record_trade_result(pnl_pct, was_win=false)
+        activate Strategy
+        Strategy -> Strategy: update_loss_streak()
+        Strategy -> Strategy: sharpe_.add_return(pnl_pct)
+        Strategy -> Strategy: update_confidence()
+        alt consecutive_losses >= 3
+            Strategy -> Strategy: mode_ = CAUTIOUS
+        else consecutive_losses >= 5
+            Strategy -> Strategy: mode_ = DEFENSIVE
+        end
+        Strategy --> App
+        deactivate Strategy
+
+        App -> Recorder: record_trade(symbol, entry, exit, pnl, STOP)
+        App -> Pub: publish_stop_loss(symbol, entry, exit, qty, pnl)
+
+    else signal indicates exit
+        App -> App: exit_type = SIGNAL_EXIT
+        ' ... similar flow
+    end
+end
+
+deactivate App
+
+@enduml
+
+@startuml
+
+' ==============================================================================
+' Sequence Diagram 4: IPC Communication
+' ==============================================================================
+newpage IPC Communication
+
+title Inter-Process Communication via Shared Memory
+
+box "HFT Engine Process" #LightBlue
+participant "TradingApp" as App
+participant "EventPublisher" as Pub
+participant "SharedRingBuffer\n(Producer)" as Ring
+participant "SharedPortfolioState\n(Writer)" as State
+participant "SharedConfig\n(Reader)" as Config
+end box
+
+box "Shared Memory" #LightGreen
+database "/hft_events" as EventsShm
+database "/trader_portfolio" as PortfolioShm
+database "/trader_config" as ConfigShm
+end box
+
+box "Observer Process" #LightYellow
+participant "SharedRingBuffer\n(Consumer)" as RingRead
+participant "TraderObserver" as Observer
+end box
+
+box "Dashboard Process" #LightCoral
+participant "SharedPortfolioState\n(Reader)" as StateRead
+participant "SharedConfig\n(Writer)" as ConfigWrite
+participant "Dashboard" as Dash
+end box
+
+== Initialization ==
+
+App -> Ring: SharedRingBuffer("/hft_events", create=true)
+Ring -> EventsShm: shm_open(O_CREAT | O_RDWR)
+Ring -> EventsShm: ftruncate()
+Ring -> EventsShm: mmap(PROT_READ | PROT_WRITE)
+
+App -> State: SharedPortfolioState::create("/trader_portfolio")
+State -> PortfolioShm: shm_open(O_CREAT | O_RDWR)
+State -> PortfolioShm: mmap()
+
+Observer -> RingRead: SharedRingBuffer("/hft_events", create=false)
+RingRead -> EventsShm: shm_open(O_RDWR)
+RingRead -> EventsShm: mmap()
+
+Dash -> StateRead: SharedPortfolioState::open("/trader_portfolio")
+StateRead -> PortfolioShm: shm_open(O_RDONLY)
+StateRead -> PortfolioShm: mmap(PROT_READ)
+
+Dash -> ConfigWrite: SharedConfig::open("/trader_config")
+ConfigWrite -> ConfigShm: shm_open(O_RDWR)
+ConfigWrite -> ConfigShm: mmap()
+
+== Runtime Event Flow ==
+
+App -> Pub: publish_fill(symbol, side, qty, price)
+activate Pub
+Pub -> Pub: TradeEvent::fill(...)
+Pub -> Ring: push(event)
+activate Ring
+Ring -> Ring: head_.store(head+1, release)
+Ring --> Pub: true
+deactivate Ring
+deactivate Pub
+
+loop polling (Observer)
+    Observer -> RingRead: pop(event)
+    activate RingRead
+    RingRead -> RingRead: tail_.load(acquire)
+    RingRead -> RingRead: head_.load(acquire)
+    alt head > tail
+        RingRead -> RingRead: event = data_[tail]
+        RingRead -> RingRead: tail_.store(tail+1, release)
+        RingRead --> Observer: true
+        Observer -> Observer: display_event(event)
+    else buffer empty
+        RingRead --> Observer: false
+    end
+    deactivate RingRead
+end
+
+== Portfolio State Updates ==
+
+App -> State: set_cash(new_cash)
+State -> State: cash_x8.store(value * SCALE, relaxed)
+State -> State: sequence.fetch_add(1)
+
+Dash -> StateRead: total_equity()
+StateRead -> StateRead: cash() + total_market_value()
+StateRead --> Dash: equity_value
+
+Dash -> StateRead: win_rate()
+StateRead --> Dash: win_rate_percent
+
+== Config Hot Reload ==
+
+Dash -> ConfigWrite: spread_multiplier_.store(1.5)
+ConfigWrite -> ConfigWrite: sequence.fetch_add(1)
+
+App -> Config: check_config_changes()
+Config -> Config: seq = sequence.load()
+alt seq != last_seq
+    Config -> Config: read_all_params()
+    App -> App: apply_config_changes()
+end
+
+@enduml
+
+@startuml
+
+' ==============================================================================
+' Sequence Diagram 5: Strategy Mode Transitions
+' ==============================================================================
+newpage Strategy Mode Transitions
+
+title SmartStrategy Mode Transitions Based on Performance
+
+participant "TradingApp" as App
+participant "SmartStrategy" as Strategy
+participant "RollingSharpe" as Sharpe
+
+note over Strategy: Initial mode: NORMAL\nconfidence: 0.5
+
+== Winning Streak ==
+
+App -> Strategy: record_trade_result(+2.5%, win=true)
+Strategy -> Sharpe: add_return(+2.5%)
+Strategy -> Strategy: consecutive_wins_ = 1
+Strategy -> Strategy: update_confidence()
+note right: confidence = 0.55
+
+App -> Strategy: record_trade_result(+1.8%, win=true)
+Strategy -> Sharpe: add_return(+1.8%)
+Strategy -> Strategy: consecutive_wins_ = 2
+Strategy -> Strategy: update_confidence()
+note right: confidence = 0.60
+
+App -> Strategy: record_trade_result(+3.2%, win=true)
+Strategy -> Strategy: consecutive_wins_ = 3
+Strategy -> Strategy: win_rate() > 60%
+Strategy -> Strategy: sharpe_.sharpe_ratio() > 1.0
+Strategy -> Strategy: mode_ = AGGRESSIVE
+note right: Mode: AGGRESSIVE\nconfidence: 0.70
+
+== Losing Streak ==
+
+App -> Strategy: record_trade_result(-1.5%, win=false)
+Strategy -> Sharpe: add_return(-1.5%)
+Strategy -> Strategy: consecutive_losses_ = 1
+Strategy -> Strategy: consecutive_wins_ = 0
+Strategy -> Strategy: update_confidence()
+Strategy -> Strategy: mode_ = NORMAL
+note right: Mode: NORMAL\nconfidence: 0.55
+
+App -> Strategy: record_trade_result(-2.0%, win=false)
+Strategy -> Strategy: consecutive_losses_ = 2
+Strategy -> Strategy: update_confidence()
+note right: confidence: 0.45
+
+App -> Strategy: record_trade_result(-1.8%, win=false)
+Strategy -> Strategy: consecutive_losses_ = 3
+Strategy -> Strategy: consecutive_losses_ >= losses_to_cautious
+Strategy -> Strategy: mode_ = CAUTIOUS
+note right: Mode: CAUTIOUS\nconfidence: 0.35
+
+App -> Strategy: record_trade_result(-2.5%, win=false)
+App -> Strategy: record_trade_result(-1.2%, win=false)
+Strategy -> Strategy: consecutive_losses_ = 5
+Strategy -> Strategy: consecutive_losses_ >= losses_to_defensive
+Strategy -> Strategy: mode_ = DEFENSIVE
+note right: Mode: DEFENSIVE\nconfidence: 0.20
+
+App -> Strategy: record_trade_result(-3.0%, win=false)
+Strategy -> Strategy: consecutive_losses_ = 6
+Strategy -> Strategy: drawdown >= 10%
+Strategy -> Strategy: mode_ = EXIT_ONLY
+note right: Mode: EXIT_ONLY\nconfidence: 0.10
+
+== Recovery ==
+
+note over Strategy: Only exits allowed\nNo new positions
+
+App -> Strategy: record_trade_result(+1.0%, win=true)
+Strategy -> Strategy: consecutive_wins_ = 1
+Strategy -> Strategy: consecutive_losses_ = 0
+Strategy -> Strategy: update_confidence()
+Strategy -> Strategy: mode_ = DEFENSIVE
+note right: Mode: DEFENSIVE\nRecovering...
+
+loop gradual recovery
+    App -> Strategy: record_trade_result(+%, win=true)
+    Strategy -> Strategy: update_confidence()
+    Strategy -> Strategy: update_mode()
+end
+
+note over Strategy: Eventually returns to NORMAL\nif performance stabilizes
+
+@enduml
+
+@startuml
+
+' ==============================================================================
+' Sequence Diagram 6: Order Book Operations
+' ==============================================================================
+newpage Order Book Operations
+
+title Order Book - Add, Execute, Cancel Operations
+
+participant "Client" as Client
+participant "OrderBook" as Book
+participant "BidSide/AskSide" as Side
+participant "Order Pool" as OrderPool
+participant "Level Pool" as LevelPool
+
+== Add Order ==
+
+Client -> Book: add_order(id=100, BUY, price=100.50, qty=1000)
+activate Book
+
+Book -> Book: validate_inputs()
+Book -> Book: check_duplicate_order_id()
+
+Book -> OrderPool: allocate_order()
+activate OrderPool
+OrderPool -> OrderPool: order = free_orders_
+OrderPool -> OrderPool: free_orders_ = free_orders_->next
+OrderPool --> Book: order*
+deactivate OrderPool
+
+Book -> Book: order->init(100, BUY, 100.50, 1000)
+Book -> Book: order_index_[100] = order
+
+Book -> Side: find_level(100.50)
+activate Side
+Side -> Side: levels_[price - base_price_]
+Side --> Book: nullptr (level doesn't exist)
+deactivate Side
+
+Book -> LevelPool: allocate_level()
+activate LevelPool
+LevelPool -> LevelPool: level = free_levels_
+LevelPool -> LevelPool: free_levels_ = free_levels_->next
+LevelPool --> Book: level*
+deactivate LevelPool
+
+Book -> Book: level->price = 100.50
+Book -> Side: insert_level(level)
+activate Side
+Side -> Side: levels_[price - base_price_] = level
+Side -> Side: insert into sorted linked list
+Side -> Side: update best_level_ if needed
+deactivate Side
+
+Book -> Book: add_order_to_level(order, level)
+note right: order->prev = level->tail\nlevel->tail = order\nlevel->add_quantity(1000)
+
+Book --> Client: OrderResult::Success
+deactivate Book
+
+== Execute Order (Partial) ==
+
+Client -> Book: execute_order(id=100, qty=400)
+activate Book
+
+Book -> Book: order = order_index_[100]
+Book -> Side: find_level(order->price)
+Side --> Book: level*
+
+Book -> Book: order->reduce_quantity(400)
+note right: order->quantity: 1000 -> 600
+
+Book -> Book: level->reduce_quantity(400)
+note right: level->total_quantity: 1000 -> 600
+
+Book --> Client: true
+deactivate Book
+
+== Execute Order (Full Fill) ==
+
+Client -> Book: execute_order(id=100, qty=600)
+activate Book
+
+Book -> Book: order = order_index_[100]
+Book -> Side: find_level(order->price)
+Side --> Book: level*
+
+Book -> Book: remove_order_from_level(order, level)
+note right: Unlink from doubly-linked list\nlevel->reduce_quantity(600)
+
+Book -> Side: remove_level_if_empty(level)
+activate Side
+Side -> Side: level->is_empty() == true
+Side -> Side: remove from linked list
+Side -> Side: levels_[price] = nullptr
+Side -> Side: update best_level_
+Side --> Book: level* (for deallocation)
+deactivate Side
+
+Book -> LevelPool: deallocate_level(level)
+LevelPool -> LevelPool: level->next = free_levels_
+LevelPool -> LevelPool: free_levels_ = level
+
+Book -> Book: order_index_[100] = nullptr
+Book -> OrderPool: deallocate_order(order)
+OrderPool -> OrderPool: order->next = free_orders_
+OrderPool -> OrderPool: free_orders_ = order
+
+Book --> Client: true
+deactivate Book
+
+== Cancel Order ==
+
+Client -> Book: cancel_order(id=101)
+activate Book
+
+Book -> Book: order = order_index_[101]
+alt order == nullptr
+    Book --> Client: false
+else order exists
+    Book -> Side: find_level(order->price)
+    Side --> Book: level*
+
+    Book -> Book: remove_order_from_level(order, level)
+    Book -> Side: remove_level_if_empty(level)
+
+    Book -> Book: order_index_[101] = nullptr
+    Book -> OrderPool: deallocate_order(order)
+
+    Book --> Client: true
+end
+deactivate Book
+
+@enduml
