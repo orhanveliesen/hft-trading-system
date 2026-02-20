@@ -75,6 +75,16 @@ inline const char* mode_to_string(StrategyMode mode) {
 // =============================================================================
 
 struct SmartStrategyConfig {
+    // Technical indicators config (DRY: single source of truth for RSI/BB thresholds)
+    TechnicalIndicatorsConfig ti_config{};
+
+    // Score weights for signal calculation
+    double score_weight_strong = 0.4;   // Weight for strong signals (extreme RSI, outside BB)
+    double score_weight_medium = 0.3;   // Weight for medium signals (oversold/overbought)
+    double score_weight_weak = 0.2;     // Weight for weak signals (mild conditions)
+    double ema_spread_threshold = 0.001; // EMA spread threshold for momentum signals
+    double ema_distance_threshold = 0.02; // EMA distance % for mean reversion signals
+
     // Performance tracking
     int performance_window = 20;        // Track last N trades
     double min_confidence = 0.3;        // Below this, no signal
@@ -442,22 +452,23 @@ private:
         // Returns -1 (strong sell) to +1 (strong buy)
 
         double score = 0;
+        const auto& ti = config_.ti_config;
 
-        // RSI component
+        // RSI component (using TechnicalIndicatorsConfig thresholds - DRY)
         double rsi = ind.rsi();
-        if (rsi > 70) score -= 0.3;       // Overbought
-        else if (rsi > 60) score += 0.2;  // Bullish momentum
-        else if (rsi < 30) score += 0.3;  // Oversold (contrarian in momentum)
-        else if (rsi < 40) score -= 0.2;  // Bearish momentum
+        if (rsi > ti.rsi_overbought) score -= config_.score_weight_medium;        // Overbought
+        else if (rsi > ti.rsi_mild_overbought) score += config_.score_weight_weak; // Bullish momentum
+        else if (rsi < ti.rsi_oversold) score += config_.score_weight_medium;      // Oversold (contrarian)
+        else if (rsi < ti.rsi_mild_oversold) score -= config_.score_weight_weak;   // Bearish momentum
 
-        // EMA crossover component (replaces MACD which is not in TechnicalIndicators)
+        // EMA crossover component
         double ema_spread = ind.ema_spread();
-        if (ema_spread > 0.001) score += 0.3;       // Bullish EMA crossover
-        else if (ema_spread < -0.001) score -= 0.3; // Bearish EMA crossover
+        if (ema_spread > config_.ema_spread_threshold) score += config_.score_weight_medium;
+        else if (ema_spread < -config_.ema_spread_threshold) score -= config_.score_weight_medium;
 
         // Trend alignment bonus
-        if (regime == MarketRegime::TrendingUp) score += 0.2;
-        else if (regime == MarketRegime::TrendingDown) score -= 0.2;
+        if (regime == MarketRegime::TrendingUp) score += config_.score_weight_weak;
+        else if (regime == MarketRegime::TrendingDown) score -= config_.score_weight_weak;
 
         return std::max(-1.0, std::min(1.0, score));
     }
@@ -467,24 +478,26 @@ private:
         // Returns -1 (expect down) to +1 (expect up)
 
         double score = 0;
+        const auto& ti = config_.ti_config;
 
         // Bollinger Band position
         // bb_position() returns -1 to +1, convert to 0 to 1 range
         double bb_pos = (ind.bb_position() + 1.0) / 2.0;  // 0 = lower, 0.5 = middle, 1 = upper
-        if (bb_pos < 0.2) score += 0.4;           // Near lower band → expect bounce
-        else if (bb_pos > 0.8) score -= 0.4;      // Near upper band → expect drop
+        double near_band = ti.bb_near_band_margin;        // Use config threshold
+        if (bb_pos < near_band) score += config_.score_weight_strong;        // Near lower band
+        else if (bb_pos > (1.0 - near_band)) score -= config_.score_weight_strong;  // Near upper band
 
-        // RSI extremes (mean reversion interpretation)
+        // RSI extremes (mean reversion interpretation - using TechnicalIndicatorsConfig)
         double rsi = ind.rsi();
-        if (rsi < 30) score += 0.3;               // Oversold → buy
-        else if (rsi > 70) score -= 0.3;          // Overbought → sell
+        if (rsi < ti.rsi_oversold) score += config_.score_weight_medium;      // Oversold → buy
+        else if (rsi > ti.rsi_overbought) score -= config_.score_weight_medium; // Overbought → sell
 
         // Distance from slow EMA
         double ema = ind.ema_slow();
         if (ema > 0) {
             double dist_pct = (price - ema) / ema;
-            if (dist_pct < -0.02) score += 0.3;   // Below EMA → expect reversion up
-            else if (dist_pct > 0.02) score -= 0.3; // Above EMA → expect reversion down
+            if (dist_pct < -config_.ema_distance_threshold) score += config_.score_weight_medium;
+            else if (dist_pct > config_.ema_distance_threshold) score -= config_.score_weight_medium;
         }
 
         return std::max(-1.0, std::min(1.0, score));

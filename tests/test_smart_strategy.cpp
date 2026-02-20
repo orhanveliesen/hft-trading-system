@@ -143,6 +143,35 @@ void test_spread_threshold_config_exists() {
 }
 
 // ============================================================================
+// Test: DRY - TechnicalIndicatorsConfig is embedded (no duplication)
+// ============================================================================
+void test_dry_technical_indicators_config() {
+    std::cout << "  test_dry_technical_indicators_config... ";
+
+    SmartStrategyConfig config;
+
+    // TechnicalIndicatorsConfig should be accessible via ti_config
+    // This ensures RSI thresholds come from single source of truth
+    assert(approx_equal(config.ti_config.rsi_oversold, 30.0));
+    assert(approx_equal(config.ti_config.rsi_overbought, 70.0));
+    assert(approx_equal(config.ti_config.rsi_mild_oversold, 40.0));
+    assert(approx_equal(config.ti_config.rsi_mild_overbought, 60.0));
+
+    // Score weights should be configurable
+    assert(approx_equal(config.score_weight_strong, 0.4));
+    assert(approx_equal(config.score_weight_medium, 0.3));
+    assert(approx_equal(config.score_weight_weak, 0.2));
+
+    // Can customize RSI thresholds without duplicating values
+    config.ti_config.rsi_oversold = 25.0;
+    config.ti_config.rsi_overbought = 75.0;
+    assert(approx_equal(config.ti_config.rsi_oversold, 25.0));
+    assert(approx_equal(config.ti_config.rsi_overbought, 75.0));
+
+    std::cout << "PASSED\n";
+}
+
+// ============================================================================
 // Test: Default values match original hardcoded behavior
 // ============================================================================
 void test_default_behavior_unchanged() {
@@ -183,6 +212,7 @@ int main() {
     test_win_rate_mode_uses_config_threshold();
     test_sharpe_sizing_uses_config_threshold();
     test_spread_threshold_config_exists();
+    test_dry_technical_indicators_config();
     test_default_behavior_unchanged();
 
     std::cout << "\n=== All SmartStrategy tests passed! ===\n\n";

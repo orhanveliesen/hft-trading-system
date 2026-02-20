@@ -272,6 +272,39 @@ if (spread_pct > config_.wide_spread_threshold) { ... }
 - ❌ Hardcoded thresholds without justification
 - ❌ "Temporary" magic numbers ("will fix later" = never)
 
+### DRY (Don't Repeat Yourself) - ABSOLUTE
+```
+SINGLE SOURCE OF TRUTH FOR EVERY PIECE OF KNOWLEDGE.
+DUPLICATION IS A BUG WAITING TO HAPPEN.
+```
+
+**Rules:**
+- If a value/threshold exists in one config, reference it - don't duplicate
+- If logic exists in one place, call it - don't copy it
+- If a constant is defined, use it - don't redefine it
+
+```cpp
+// ❌ FORBIDDEN - Duplicating thresholds
+// TechnicalIndicatorsConfig already has rsi_oversold = 30.0
+if (rsi < 30) { ... }  // Duplicated magic number!
+
+// ✅ REQUIRED - Reference existing config
+if (rsi < indicators_config.rsi_oversold) { ... }
+
+// ❌ FORBIDDEN - Copy-pasting logic
+double calc_spread() { return (ask - bid) / mid; }  // In file A
+double get_spread() { return (ask - bid) / mid; }   // Same logic in file B!
+
+// ✅ REQUIRED - Single implementation, multiple callers
+// Define once in a shared header, call from everywhere
+```
+
+**I WILL REFUSE:**
+- ❌ Duplicating thresholds that exist in another config
+- ❌ Copy-pasting logic instead of extracting shared function
+- ❌ Redefining constants that already exist elsewhere
+- ❌ "It's easier to just copy" - NO, it creates maintenance burden
+
 ### Hot Path Rules - ABSOLUTE
 ```cpp
 // ❌ FORBIDDEN on hot path - I WILL REFUSE
