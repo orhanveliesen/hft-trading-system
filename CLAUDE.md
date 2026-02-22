@@ -122,34 +122,7 @@ Changing memory layout breaks backward compatibility - requires explicit approva
 - **Graceful shutdown**: Signal handlers (SIGTERM/SIGINT) set status before exit
 
 ### Hot Path Constraints
-```cpp
-// ❌ FORBIDDEN on hot path
-new, delete, malloc, free
-std::string, std::map, std::unordered_map
-virtual functions, exceptions
-std::cout, printf (syscalls kill latency)
-
-// ✅ ALLOWED
-Pre-allocated arrays, intrusive containers
-constexpr, inline, direct array indexing
-Fixed-size buffers, placement new (pre-allocated only)
-Shared memory writes (IPC events)
-```
-
-Logging in `trader.cpp`: Use shared memory events (TunerEvent, TradeEvent), not stdout. Dashboard/observer read and display them.
-
-### C++20 Concepts (not CRTP)
-No virtual functions on hot path. Define contracts with C++20 concepts:
-```cpp
-// ✅ Concept-constrained template
-template<typename T>
-concept Strategy = requires(T t, double price) {
-    { t.calculate(price) } -> std::same_as<double>;
-};
-
-template<Strategy S>
-void run(S& strategy, double price) { ... }
-```
+No allocations, no virtual calls, no syscalls on hot path. Use C++20 concepts for polymorphism (not virtual functions). Logging: use shared memory events (TunerEvent, TradeEvent), not stdout.
 
 ### Memory Order (IPC)
 - Single-writer: `std::memory_order_relaxed`
