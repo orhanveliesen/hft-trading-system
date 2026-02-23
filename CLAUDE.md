@@ -49,6 +49,12 @@ make -j$(nproc)
 # Test
 ctest --output-on-failure
 
+# Format code (before commit)
+find include tools tests benchmarks -type f \( -name "*.cpp" -o -name "*.hpp" \) -exec clang-format -i {} +
+
+# Setup pre-commit hook (auto-format on commit)
+git config core.hooksPath .githooks
+
 # Benchmark (mandatory for hot path changes)
 ./bench_orderbook
 
