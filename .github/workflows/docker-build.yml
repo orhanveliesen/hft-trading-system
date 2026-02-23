@@ -6,6 +6,11 @@ on:
     paths:
       - 'docker/Dockerfile'
       - '.github/workflows/docker-build.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'docker/Dockerfile'
+      - '.github/workflows/docker-build.yml'
   workflow_dispatch:
 
 jobs:
