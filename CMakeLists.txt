@@ -278,7 +278,17 @@ add_executable(bench_lockfree benchmarks/bench_lockfree.cpp)
 target_link_libraries(bench_lockfree pthread)
 
 # === ImGui Dashboard ===
-set(IMGUI_DIR ${CMAKE_SOURCE_DIR}/external/imgui)
+# Fetch Dear ImGui from GitHub
+include(FetchContent)
+FetchContent_Declare(
+    imgui
+    GIT_REPOSITORY https://github.com/ocornut/imgui.git
+    GIT_TAG v1.91.8  # Latest stable version as of 2024
+    GIT_SHALLOW TRUE
+)
+FetchContent_MakeAvailable(imgui)
+
+set(IMGUI_DIR ${imgui_SOURCE_DIR})
 add_executable(trader_dashboard
     tools/trader_dashboard.cpp
     ${IMGUI_DIR}/imgui.cpp
