@@ -2,6 +2,7 @@
 #include <iostream>
 #include <thread>
 #include <chrono>
+#include <vector>
 #include "../include/ipc/shared_tuner_state.hpp"
 
 using namespace hft::ipc;
