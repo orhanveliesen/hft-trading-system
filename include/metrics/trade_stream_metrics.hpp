@@ -3,8 +3,8 @@
 #include "../types.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
-#include <deque>
 #include <limits>
 
 namespace hft {
@@ -21,7 +21,7 @@ public:
 
         // Delta
         double delta = 0.0;
-        double cumulative_delta = 0.0;
+        double cumulative_delta = 0.0; // Note: currently same as delta (per-window, not across calls)
         double buy_ratio = 0.0;
 
         // Trade count
@@ -58,38 +58,48 @@ public:
     explicit TradeStreamMetrics(Quantity large_trade_threshold = 500) : large_trade_threshold_(large_trade_threshold) {}
 
     void on_trade(Price price, Quantity quantity, bool is_buy, uint64_t timestamp_us) {
-        Trade trade{price, quantity, is_buy, timestamp_us};
-        trades_.push_back(trade);
-
-        // Keep only trades within 1 minute window (max window size)
+        // Remove trades older than 1 minute
         constexpr uint64_t ONE_MINUTE_US = 60'000'000;
-        while (!trades_.empty() && (timestamp_us - trades_.front().timestamp_us > ONE_MINUTE_US)) {
-            trades_.pop_front();
+        while (count_ > 0 && (timestamp_us - trades_[head_].timestamp_us > ONE_MINUTE_US)) {
+            head_ = (head_ + 1) & MASK;
+            count_--;
         }
+
+        // Add new trade (overwrite if full)
+        if (count_ == MAX_TRADES) {
+            head_ = (head_ + 1) & MASK;
+            count_--;
+        }
+
+        trades_[tail_] = Trade{price, quantity, is_buy, timestamp_us};
+        tail_ = (tail_ + 1) & MASK;
+        count_++;
     }
 
     Metrics get_metrics(TradeWindow window) const {
+        if (count_ == 0) {
+            return Metrics{};
+        }
+
         uint64_t window_us = get_window_duration_us(window);
-        if (trades_.empty()) {
+        uint64_t current_time = trades_[(tail_ - 1) & MASK].timestamp_us;
+        int64_t window_start = static_cast<int64_t>(current_time) - static_cast<int64_t>(window_us);
+
+        // Binary search for window boundary (trades are time-ordered)
+        size_t start_idx = find_window_start(window_start);
+
+        if (start_idx == count_) {
             return Metrics{};
         }
 
-        int64_t current_time = static_cast<int64_t>(trades_.back().timestamp_us);
-        int64_t window_start = current_time - static_cast<int64_t>(window_us);
-
-        // Find trades within window (strictly within: age < window duration)
-        auto window_begin = std::find_if(trades_.begin(), trades_.end(), [window_start](const Trade& t) {
-            return static_cast<int64_t>(t.timestamp_us) > window_start;
-        });
-
-        if (window_begin == trades_.end()) {
-            return Metrics{};
-        }
-
-        return calculate_metrics(window_begin, trades_.end());
+        return calculate_metrics(start_idx, count_);
     }
 
-    void reset() { trades_.clear(); }
+    void reset() {
+        head_ = 0;
+        tail_ = 0;
+        count_ = 0;
+    }
 
 private:
     struct Trade {
@@ -99,8 +109,16 @@ private:
         uint64_t timestamp_us;
     };
 
+    // Ring buffer (power of 2 for fast modulo via bitwise AND)
+    static constexpr size_t MAX_TRADES = 65536;
+    static constexpr size_t MASK = MAX_TRADES - 1;
+
+    std::array<Trade, MAX_TRADES> trades_;
+    size_t head_ = 0; // oldest trade
+    size_t tail_ = 0; // next insert position
+    size_t count_ = 0;
+
     Quantity large_trade_threshold_;
-    std::deque<Trade> trades_;
 
     static constexpr uint64_t get_window_duration_us(TradeWindow window) {
         switch (window) {
@@ -118,10 +136,32 @@ private:
         return 1'000'000;
     }
 
-    Metrics calculate_metrics(std::deque<Trade>::const_iterator begin, std::deque<Trade>::const_iterator end) const {
+    // Binary search for first trade within window (O(log n) instead of O(n))
+    size_t find_window_start(int64_t window_start) const {
+        size_t left = 0;
+        size_t right = count_;
+
+        while (left < right) {
+            size_t mid = left + (right - left) / 2;
+            size_t actual_idx = (head_ + mid) & MASK;
+
+            if (static_cast<int64_t>(trades_[actual_idx].timestamp_us) <= window_start) {
+                left = mid + 1;
+            } else {
+                right = mid;
+            }
+        }
+
+        return left;
+    }
+
+    // Get trade at logical index (handles ring buffer wrap-around)
+    const Trade& get_trade(size_t logical_idx) const { return trades_[(head_ + logical_idx) & MASK]; }
+
+    Metrics calculate_metrics(size_t start_idx, size_t end_idx) const {
         Metrics m;
 
-        if (begin == end) {
+        if (start_idx >= end_idx) {
             return m;
         }
 
@@ -162,10 +202,10 @@ private:
         size_t price_change_count = 0;
 
         // Handle first trade (removes branch from loop)
-        auto it = begin;
-        const Trade& first = *it;
+        const Trade& first = get_trade(start_idx);
         double first_qty = static_cast<double>(first.quantity);
         Price first_price = first.price;
+        double first_price_d = static_cast<double>(first_price); // Cache cast
         uint64_t first_time = first.timestamp_us;
 
         // Process first trade
@@ -184,7 +224,7 @@ private:
         if (first.quantity >= large_trade_threshold_) {
             large_count++;
         }
-        vwap_sum += static_cast<double>(first_price) * first_qty;
+        vwap_sum += first_price_d * first_qty;
         min_price = first_price;
         max_price = first_price;
 
@@ -192,11 +232,11 @@ private:
         uint64_t prev_time = first_time;
 
         // Process remaining trades (no branch in loop)
-        ++it;
-        for (; it != end; ++it) {
-            const Trade& t = *it;
+        for (size_t i = start_idx + 1; i < end_idx; ++i) {
+            const Trade& t = get_trade(i);
             double qty = static_cast<double>(t.quantity);
             Price price = t.price;
+            double price_d = static_cast<double>(price); // Cache cast once
 
             // Volume
             if (t.is_buy) {
@@ -220,8 +260,8 @@ private:
                 large_count++;
             }
 
-            // VWAP
-            vwap_sum += static_cast<double>(price) * qty;
+            // VWAP (use cached price_d)
+            vwap_sum += price_d * qty;
 
             // Price high/low (integer comparison)
             min_price = std::min(min_price, price);
@@ -236,8 +276,8 @@ private:
                 zeroticks++;
             }
 
-            // Welford's online variance for price changes
-            double price_change = static_cast<double>(price) - static_cast<double>(prev_price);
+            // Welford's online variance for price changes (use cached price_d)
+            double price_change = price_d - static_cast<double>(prev_price);
             price_change_count++;
             double delta = price_change - price_change_mean;
             price_change_mean += delta / static_cast<double>(price_change_count);
@@ -263,7 +303,7 @@ private:
         m.sell_volume = sell_vol;
         m.total_volume = total_vol;
         m.delta = buy_vol - sell_vol;
-        m.cumulative_delta = m.delta;
+        m.cumulative_delta = m.delta; // Note: per-window delta (not cumulative across calls)
         m.buy_ratio = (total_vol > 0.0) ? (buy_vol / total_vol) : 0.0;
 
         m.total_trades = buy_count + sell_count;
@@ -279,7 +319,7 @@ private:
         if (inter_trade_count > 0) {
             uint64_t total_time_us = prev_time - first_time;
             if (total_time_us > 0) {
-                double total_price_change = static_cast<double>(prev_price) - static_cast<double>(first_price);
+                double total_price_change = static_cast<double>(prev_price) - first_price_d;
                 double total_time_s = static_cast<double>(total_time_us) / 1'000'000.0;
                 m.price_velocity = total_price_change / total_time_s;
             }
