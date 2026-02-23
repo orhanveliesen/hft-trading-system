@@ -28,3 +28,5 @@ tasks/
 
 # Docker
 docker/
+
+# Note: .git is NOT ignored - required for CMake commit hash embedding
