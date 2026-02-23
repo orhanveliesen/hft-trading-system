@@ -137,6 +137,14 @@ docker push ghcr.io/orhanveliesen/hft-builder:latest
 
 **Note**: Docker build workflow (`.github/workflows/docker-build.yml`) automatically rebuilds and pushes the image when `docker/Dockerfile` changes.
 
+### CI/CD Integration
+All GitHub Actions workflows use the builder image:
+- **build-test.yml**: Compiles and runs 53 test suites
+- **lint.yml**: Enforces clang-format-16 (C++23 support)
+- **codecov.yml**: Generates coverage reports with lcov
+
+Dependencies are pre-installed in the image, reducing workflow runtime from ~60s to ~5s for dependency setup.
+
 ## Project-Specific Constraints
 
 ### Hot Path Parameter Exception
