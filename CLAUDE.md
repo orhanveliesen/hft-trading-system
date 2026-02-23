@@ -98,6 +98,45 @@ find include tools tests benchmarks -type f \( -name "*.cpp" -o -name "*.hpp" \)
 - **Local check**: `clang-format --dry-run --Werror <file>`
 - **Auto-fix**: See format command above
 
+## Docker Build Image
+
+### Builder Image
+- **Image**: `ghcr.io/orhanveliesen/hft-builder:latest`
+- **Base**: Ubuntu 22.04
+- **Pre-installed**: libwebsockets, glfw, curl, cmake, build-essential, clang-format, lcov
+- **Source**: `docker/Dockerfile`
+- **Purpose**: Speed up CI/CD by pre-installing dependencies (20-30x faster than apt install)
+
+### Local Usage
+```bash
+# Pull latest image
+docker pull ghcr.io/orhanveliesen/hft-builder:latest
+
+# Build project in container
+docker run --rm -v $(pwd):/workspace ghcr.io/orhanveliesen/hft-builder:latest \
+  bash -c "mkdir -p build && cd build && cmake -DCMAKE_BUILD_TYPE=Release .. && make -j$(nproc)"
+
+# Run tests
+docker run --rm -v $(pwd):/workspace ghcr.io/orhanveliesen/hft-builder:latest \
+  bash -c "cd build && ctest --output-on-failure"
+
+# Format code
+docker run --rm -v $(pwd):/workspace ghcr.io/orhanveliesen/hft-builder:latest \
+  bash -c "find include tools tests benchmarks -type f \( -name '*.cpp' -o -name '*.hpp' \) -exec clang-format -i {} +"
+```
+
+### Rebuilding Image
+```bash
+# Manually trigger rebuild via GitHub Actions
+gh workflow run docker-build.yml
+
+# Or build locally and push
+docker build -t ghcr.io/orhanveliesen/hft-builder:latest -f docker/Dockerfile .
+docker push ghcr.io/orhanveliesen/hft-builder:latest
+```
+
+**Note**: Docker build workflow (`.github/workflows/docker-build.yml`) automatically rebuilds and pushes the image when `docker/Dockerfile` changes.
+
 ## Project-Specific Constraints
 
 ### Hot Path Parameter Exception

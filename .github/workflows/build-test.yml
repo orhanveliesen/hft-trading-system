@@ -9,21 +9,11 @@ on:
 jobs:
   build-and-test:
     runs-on: ubuntu-22.04
+    container: ghcr.io/orhanveliesen/hft-builder:latest
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libwebsockets-dev \
-            libglfw3-dev \
-            libgl1-mesa-dev \
-            libcurl4-openssl-dev \
-            cmake \
-            build-essential
 
       - name: Configure CMake
         run: |

@@ -478,6 +478,105 @@ flowchart LR
 
 ---
 
+## CI/CD Pipeline
+
+### GitHub Actions Workflows
+
+```mermaid
+flowchart TD
+    subgraph Docker Image Build
+        DockerChange[Dockerfile changed] --> DockerBuild[docker-build.yml]
+        DockerBuild --> GHCR[Push to GHCR]
+        GHCR --> LatestTag[ghcr.io/.../hft-builder:latest]
+        GHCR --> SHATag[ghcr.io/.../hft-builder:sha-xxx]
+    end
+
+    subgraph CI Workflows
+        PushPR[Push/PR to main] --> BuildTest[build-test.yml]
+        PushPR --> Lint[lint.yml]
+        PushPR --> Coverage[codecov.yml]
+
+        BuildTest --> Container1[Container: hft-builder:latest]
+        Lint --> Container2[Container: hft-builder:latest]
+        Coverage --> Container3[Container: hft-builder:latest]
+
+        Container1 --> Build[CMake + Make]
+        Container1 --> Test[CTest: 56 tests]
+        Container1 --> MagicCheck[check_hardcoded.sh]
+
+        Container2 --> FormatCheck[clang-format --dry-run]
+
+        Container3 --> BuildCov[CMake with coverage flags]
+        Container3 --> TestCov[CTest with gcov]
+        Container3 --> Report[lcov: 100% threshold]
+        Container3 --> Upload[Upload to Codecov]
+    end
+
+    LatestTag -.-> Container1
+    LatestTag -.-> Container2
+    LatestTag -.-> Container3
+```
+
+### Docker Builder Image
+
+**Image:** `ghcr.io/orhanveliesen/hft-builder:latest`
+**Base:** Ubuntu 22.04
+**Pre-installed:**
+- Build tools: cmake, build-essential (GCC 11)
+- Dependencies: libwebsockets-dev, libglfw3-dev, libgl1-mesa-dev, libcurl4-openssl-dev
+- Linting: clang-format
+- Coverage: lcov, gcov
+- Version control: git (for CMake commit hash)
+
+**Performance Impact:**
+- Before (apt install): 30-60s per workflow
+- After (container pull): 2-5s per workflow
+- **20-30x faster** dependency setup
+
+### Workflow Dependencies
+
+| Workflow | Container | Key Steps | Output |
+|----------|-----------|-----------|--------|
+| build-test.yml | hft-builder:latest | CMake Release build, 56 tests, magic number check | Build artifacts |
+| lint.yml | hft-builder:latest | clang-format check | Pass/fail |
+| codecov.yml | hft-builder:latest | Debug build with coverage, lcov report, 100% check | Coverage report |
+| docker-build.yml | N/A | Build and push builder image | GHCR package |
+
+### Coverage Enforcement
+
+**100% line coverage required** (strict):
+- Tool: lcov + gcov
+- Exclusions: `/usr/*`, `*/external/*`, `*/tests/*`
+- Unreachable error paths: Mark with `LCOV_EXCL_LINE`
+
+Example:
+```cpp
+if (unlikely_error_condition) { // LCOV_EXCL_LINE
+    handle_unreachable_error(); // LCOV_EXCL_LINE
+} // LCOV_EXCL_LINE
+```
+
+### Local Development with Docker
+
+```bash
+# Pull latest builder image
+docker pull ghcr.io/orhanveliesen/hft-builder:latest
+
+# Build project
+docker run --rm -v $(pwd):/workspace ghcr.io/orhanveliesen/hft-builder:latest \
+  bash -c "mkdir -p build && cd build && cmake -DCMAKE_BUILD_TYPE=Release .. && make -j$(nproc)"
+
+# Run tests
+docker run --rm -v $(pwd):/workspace ghcr.io/orhanveliesen/hft-builder:latest \
+  bash -c "cd build && ctest --output-on-failure"
+
+# Format code
+docker run --rm -v $(pwd):/workspace ghcr.io/orhanveliesen/hft-builder:latest \
+  bash -c "find include tools tests benchmarks -type f \( -name '*.cpp' -o -name '*.hpp' \) -exec clang-format -i {} +"
+```
+
+---
+
 ## Hot Path Files
 
 These files are on the critical latency path. Benchmark before/after changes.
