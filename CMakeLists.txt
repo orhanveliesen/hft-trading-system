@@ -39,6 +39,16 @@ if(LWS_VERSION VERSION_GREATER_EQUAL "4.3")
     message(STATUS "Using lws 4.3+ callback enum compatibility")
 endif()
 
+# Fetch cpp-httplib (header-only HTTP library)
+include(FetchContent)
+FetchContent_Declare(
+    httplib
+    GIT_REPOSITORY https://github.com/yhirose/cpp-httplib.git
+    GIT_TAG v0.15.3  # Latest stable version
+    GIT_SHALLOW TRUE
+)
+FetchContent_MakeAvailable(httplib)
+
 # === Library (Header-only) ===
 # All core classes are header-only for maximum inlining on hot path.
 # This eliminates function call overhead (~15-25 cycles per call).
@@ -255,7 +265,7 @@ add_executable(trader_tuner tools/trader_tuner.cpp)
 target_link_libraries(trader_tuner pthread rt curl)
 
 add_executable(trader_web_api tools/trader_web_api.cpp)
-target_include_directories(trader_web_api PRIVATE ${CMAKE_SOURCE_DIR}/external)
+target_include_directories(trader_web_api PRIVATE ${httplib_SOURCE_DIR})
 target_link_libraries(trader_web_api pthread rt)
 
 add_executable(dump_portfolio tools/dump_portfolio.cpp)

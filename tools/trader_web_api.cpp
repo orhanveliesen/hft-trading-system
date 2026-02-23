@@ -29,7 +29,7 @@
 
 #define CPPHTTPLIB_NO_OPENSSL 1
 
-#include "../external/httplib.h"
+#include "httplib.h"
 #include "../include/ipc/symbol_config.hpp"
 #include "../include/ipc/shared_event_log.hpp"
 #include "../include/ipc/shared_config.hpp"
