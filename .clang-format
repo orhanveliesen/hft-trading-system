@@ -5,7 +5,7 @@ BasedOnStyle: LLVM
 
 # Language settings
 Language: Cpp
-Standard: c++23
+Standard: Latest
 
 # Line length
 ColumnLimit: 120
