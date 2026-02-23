@@ -14,6 +14,7 @@ RUN apt-get update && apt-get install -y \
     clang-format \
     lcov \
     git \
+    pkg-config \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /workspace
