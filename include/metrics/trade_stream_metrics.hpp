@@ -110,7 +110,7 @@ private:
     };
 
     // Ring buffer (power of 2 for fast modulo via bitwise AND)
-    static constexpr size_t MAX_TRADES = 65536;
+    static constexpr size_t MAX_TRADES = 1 << 16; // 2^16 = 65536 trades
     static constexpr size_t MASK = MAX_TRADES - 1;
 
     std::array<Trade, MAX_TRADES> trades_;
