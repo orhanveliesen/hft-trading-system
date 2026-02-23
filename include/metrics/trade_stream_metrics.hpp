@@ -6,7 +6,6 @@
 #include <cmath>
 #include <deque>
 #include <limits>
-#include <vector>
 
 namespace hft {
 
@@ -135,9 +134,9 @@ private:
         double vwap_sum = 0.0;
         double total_vol = 0.0;
 
-        // Price tracking
-        double min_price = std::numeric_limits<double>::max();
-        double max_price = std::numeric_limits<double>::lowest();
+        // Price tracking (use integer types, convert at end)
+        Price min_price = std::numeric_limits<Price>::max();
+        Price max_price = std::numeric_limits<Price>::lowest();
 
         // Streak tracking
         int current_buy_streak = 0;
@@ -145,26 +144,59 @@ private:
         int max_buy_s = 0;
         int max_sell_s = 0;
 
-        // Previous price for tick calculation
-        Price prev_price = 0;
+        // Tick tracking
         int upticks = 0;
         int downticks = 0;
         int zeroticks = 0;
-        bool first_trade = true;
 
-        // Timing
-        std::vector<uint64_t> inter_trade_times;
-        uint64_t prev_time = 0;
+        // Timing (running accumulators - NO vector)
+        double sum_inter_time = 0.0;
+        size_t inter_trade_count = 0;
         uint64_t min_inter_time = std::numeric_limits<uint64_t>::max();
         int burst_cnt = 0;
         constexpr uint64_t BURST_THRESHOLD_US = 10'000; // 10ms
 
-        // Price changes for volatility
-        std::vector<double> price_changes;
+        // Welford's online algorithm for variance (NO vector)
+        double price_change_mean = 0.0;
+        double price_change_m2 = 0.0; // sum of squared deviations
+        size_t price_change_count = 0;
 
-        for (auto it = begin; it != end; ++it) {
+        // Handle first trade (removes branch from loop)
+        auto it = begin;
+        const Trade& first = *it;
+        double first_qty = static_cast<double>(first.quantity);
+        Price first_price = first.price;
+        uint64_t first_time = first.timestamp_us;
+
+        // Process first trade
+        if (first.is_buy) {
+            buy_vol += first_qty;
+            buy_count++;
+            current_buy_streak = 1;
+            max_buy_s = 1;
+        } else {
+            sell_vol += first_qty;
+            sell_count++;
+            current_sell_streak = 1;
+            max_sell_s = 1;
+        }
+        total_vol += first_qty;
+        if (first.quantity >= large_trade_threshold_) {
+            large_count++;
+        }
+        vwap_sum += static_cast<double>(first_price) * first_qty;
+        min_price = first_price;
+        max_price = first_price;
+
+        Price prev_price = first_price;
+        uint64_t prev_time = first_time;
+
+        // Process remaining trades (no branch in loop)
+        ++it;
+        for (; it != end; ++it) {
             const Trade& t = *it;
             double qty = static_cast<double>(t.quantity);
+            Price price = t.price;
 
             // Volume
             if (t.is_buy) {
@@ -189,39 +221,41 @@ private:
             }
 
             // VWAP
-            vwap_sum += static_cast<double>(t.price) * qty;
+            vwap_sum += static_cast<double>(price) * qty;
 
-            // Price high/low
-            double price_d = static_cast<double>(t.price);
-            min_price = std::min(min_price, price_d);
-            max_price = std::max(max_price, price_d);
+            // Price high/low (integer comparison)
+            min_price = std::min(min_price, price);
+            max_price = std::max(max_price, price);
 
-            // Ticks
-            if (!first_trade) {
-                if (t.price > prev_price) {
-                    upticks++;
-                } else if (t.price < prev_price) {
-                    downticks++;
-                } else {
-                    zeroticks++;
-                }
-
-                // Price changes for volatility
-                price_changes.push_back(static_cast<double>(t.price) - static_cast<double>(prev_price));
-
-                // Inter-trade time
-                uint64_t inter_time = t.timestamp_us - prev_time;
-                inter_trade_times.push_back(inter_time);
-                min_inter_time = std::min(min_inter_time, inter_time);
-
-                if (inter_time <= BURST_THRESHOLD_US) {
-                    burst_cnt++;
-                }
+            // Ticks (integer comparison)
+            if (price > prev_price) {
+                upticks++;
+            } else if (price < prev_price) {
+                downticks++;
+            } else {
+                zeroticks++;
             }
 
-            prev_price = t.price;
+            // Welford's online variance for price changes
+            double price_change = static_cast<double>(price) - static_cast<double>(prev_price);
+            price_change_count++;
+            double delta = price_change - price_change_mean;
+            price_change_mean += delta / static_cast<double>(price_change_count);
+            double delta2 = price_change - price_change_mean;
+            price_change_m2 += delta * delta2;
+
+            // Inter-trade time (running accumulator)
+            uint64_t inter_time = t.timestamp_us - prev_time;
+            sum_inter_time += static_cast<double>(inter_time);
+            inter_trade_count++;
+            min_inter_time = std::min(min_inter_time, inter_time);
+
+            if (inter_time <= BURST_THRESHOLD_US) {
+                burst_cnt++;
+            }
+
+            prev_price = price;
             prev_time = t.timestamp_us;
-            first_trade = false;
         }
 
         // Fill metrics
@@ -238,34 +272,22 @@ private:
         m.large_trades = large_count;
 
         m.vwap = (total_vol > 0.0) ? (vwap_sum / total_vol) : 0.0;
-        m.high = (max_price != std::numeric_limits<double>::lowest()) ? max_price : 0.0;
-        m.low = (min_price != std::numeric_limits<double>::max()) ? min_price : 0.0;
+        m.high = static_cast<double>(max_price);
+        m.low = static_cast<double>(min_price);
 
         // Price velocity (price change per second)
-        if (inter_trade_times.size() > 0 && !price_changes.empty()) {
-            uint64_t total_time_us = (end - 1)->timestamp_us - begin->timestamp_us;
+        if (inter_trade_count > 0) {
+            uint64_t total_time_us = prev_time - first_time;
             if (total_time_us > 0) {
-                double total_price_change = static_cast<double>((end - 1)->price) - static_cast<double>(begin->price);
+                double total_price_change = static_cast<double>(prev_price) - static_cast<double>(first_price);
                 double total_time_s = static_cast<double>(total_time_us) / 1'000'000.0;
                 m.price_velocity = total_price_change / total_time_s;
             }
         }
 
-        // Realized volatility (std dev of price changes)
-        if (price_changes.size() > 1) {
-            double mean = 0.0;
-            for (double pc : price_changes) {
-                mean += pc;
-            }
-            mean /= price_changes.size();
-
-            double variance = 0.0;
-            for (double pc : price_changes) {
-                double diff = pc - mean;
-                variance += diff * diff;
-            }
-            variance /= price_changes.size();
-            m.realized_volatility = std::sqrt(variance);
+        // Realized volatility (Welford's algorithm)
+        if (price_change_count > 1) {
+            m.realized_volatility = std::sqrt(price_change_m2 / static_cast<double>(price_change_count));
         }
 
         // Streaks (current streaks at end of window)
@@ -275,12 +297,8 @@ private:
         m.max_sell_streak = max_sell_s;
 
         // Timing
-        if (inter_trade_times.size() > 0) {
-            double sum_inter_time = 0.0;
-            for (uint64_t t : inter_trade_times) {
-                sum_inter_time += static_cast<double>(t);
-            }
-            m.avg_inter_trade_time_us = sum_inter_time / inter_trade_times.size();
+        if (inter_trade_count > 0) {
+            m.avg_inter_trade_time_us = sum_inter_time / static_cast<double>(inter_trade_count);
             m.min_inter_trade_time_us = static_cast<double>(min_inter_time);
         }
         m.burst_count = burst_cnt;
