@@ -65,8 +65,10 @@ jobs:
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4
+        continue-on-error: true  # Don't fail if token is missing
         with:
           file: build/coverage.info
-          fail_ci_if_error: true
+          token: ${{ secrets.CODECOV_TOKEN }}  # Optional: add token to repository secrets
+          fail_ci_if_error: false
           flags: unittests
           name: codecov-hft
