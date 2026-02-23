@@ -69,7 +69,34 @@ ctest --output-on-failure
 
 # Optimize strategy params
 ./optimize_strategies --symbol BTCUSDT --metric sharpe
+
+# Format code (before commit)
+find include tools tests benchmarks -type f \( -name "*.cpp" -o -name "*.hpp" \) -exec clang-format -i {} +
 ```
+
+## CI/CD & Code Coverage
+
+### GitHub Actions Workflows
+- **build-test.yml**: Build (Release) + run all 56 tests on every push/PR
+- **lint.yml**: Enforce clang-format on all .cpp/.hpp files
+- **codecov.yml**: Generate coverage report with 100% threshold
+
+### Code Coverage Requirements
+- **Target**: 100% line coverage (strict)
+- **Tool**: lcov + gcov
+- **Exclusions**: `/usr/*`, `*/external/*`, `*/tests/*`
+- **Unreachable error paths**: Mark with `LCOV_EXCL_LINE` comment
+  ```cpp
+  if (unlikely_error_condition) { // LCOV_EXCL_LINE
+      handle_unreachable_error(); // LCOV_EXCL_LINE
+  } // LCOV_EXCL_LINE
+  ```
+
+### Formatting (clang-format)
+- **Style**: LLVM-based, HFT-aware (120 col limit, compact hot path)
+- **Enforcement**: CI fails on formatting violations
+- **Local check**: `clang-format --dry-run --Werror <file>`
+- **Auto-fix**: See format command above
 
 ## Project-Specific Constraints
 

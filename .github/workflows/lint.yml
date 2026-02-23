@@ -1,0 +1,32 @@
+name: Lint
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  clang-format:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install clang-format
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-format
+
+      - name: Check formatting
+        run: |
+          find include tools tests benchmarks -type f \( -name "*.cpp" -o -name "*.hpp" \) \
+            -exec clang-format --dry-run --Werror {} +
+
+      - name: Format check failed
+        if: failure()
+        run: |
+          echo "Formatting issues detected. Run the following to fix:"
+          echo "  find include tools tests benchmarks -type f \( -name \"*.cpp\" -o -name \"*.hpp\" \) -exec clang-format -i {} +"
+          exit 1
