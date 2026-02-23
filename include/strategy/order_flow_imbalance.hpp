@@ -1,7 +1,8 @@
 #pragma once
 
-#include <algorithm>
 #include "../types.hpp"
+
+#include <algorithm>
 
 namespace hft {
 namespace strategy {
