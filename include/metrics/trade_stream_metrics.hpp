@@ -65,11 +65,10 @@ public:
             count_--;
         }
 
-        // Add new trade (overwrite if full)
-        if (count_ == MAX_TRADES) {
-            head_ = (head_ + 1) & MASK;
-            count_--;
-        }
+        // Branchless: if (count_ == MAX_TRADES) { head_++; count_--; }
+        size_t is_full = (count_ == MAX_TRADES);
+        head_ = (head_ + is_full) & MASK;
+        count_ -= is_full;
 
         trades_[tail_] = Trade{price, quantity, is_buy, timestamp_us};
         tail_ = (tail_ + 1) & MASK;
@@ -204,30 +203,28 @@ private:
         uint64_t first_time = 0;
     };
 
-    // Process first trade (removes branch from main loop)
+    // Process first trade (branchless)
     void accumulate_first_trade(TradeAccumulators& acc, const Trade& t) const {
         double qty = static_cast<double>(t.quantity);
         acc.first_price = t.price;
         acc.first_price_d = static_cast<double>(t.price);
         acc.first_time = t.timestamp_us;
 
-        // Volume and counts
-        if (t.is_buy) {
-            acc.buy_vol += qty;
-            acc.buy_count++;
-            acc.current_buy_streak = 1;
-            acc.max_buy_s = 1;
-        } else {
-            acc.sell_vol += qty;
-            acc.sell_count++;
-            acc.current_sell_streak = 1;
-            acc.max_sell_s = 1;
-        }
+        // Branchless: if (is_buy) { buy_vol += qty; buy_count++; ... } else { sell_vol += qty; ... }
+        int is_buy = t.is_buy;
+        int is_sell = !t.is_buy;
+        acc.buy_vol += is_buy * qty;
+        acc.sell_vol += is_sell * qty;
+        acc.buy_count += is_buy;
+        acc.sell_count += is_sell;
+        acc.current_buy_streak = is_buy;
+        acc.current_sell_streak = is_sell;
+        acc.max_buy_s = is_buy;
+        acc.max_sell_s = is_sell;
         acc.total_vol += qty;
 
-        if (t.quantity >= large_trade_threshold_) {
-            acc.large_count++;
-        }
+        // Branchless: if (quantity >= large_trade_threshold_) { large_count++; }
+        acc.large_count += (t.quantity >= large_trade_threshold_);
 
         // VWAP
         acc.vwap_sum += acc.first_price_d * qty;
@@ -241,48 +238,41 @@ private:
         acc.prev_time = t.timestamp_us;
     }
 
-    // Process a single trade (accumulate metrics)
+    // Process a single trade (branchless hot path)
     void accumulate_trade(TradeAccumulators& acc, const Trade& t) const {
         double qty = static_cast<double>(t.quantity);
         Price price = t.price;
         double price_d = static_cast<double>(price);
 
-        // Volume and streaks
-        if (t.is_buy) {
-            acc.buy_vol += qty;
-            acc.buy_count++;
-            acc.current_buy_streak++;
-            acc.current_sell_streak = 0;
-            acc.max_buy_s = std::max(acc.max_buy_s, acc.current_buy_streak);
-        } else {
-            acc.sell_vol += qty;
-            acc.sell_count++;
-            acc.current_sell_streak++;
-            acc.current_buy_streak = 0;
-            acc.max_sell_s = std::max(acc.max_sell_s, acc.current_sell_streak);
-        }
+        // Branchless: if (is_buy) { buy_vol += qty; current_buy_streak++; ... }
+        //             else { sell_vol += qty; current_sell_streak++; ... }
+        int is_buy = t.is_buy;
+        int is_sell = !t.is_buy;
+        acc.buy_vol += is_buy * qty;
+        acc.sell_vol += is_sell * qty;
+        acc.buy_count += is_buy;
+        acc.sell_count += is_sell;
+        acc.current_buy_streak = is_buy * (acc.current_buy_streak + 1);
+        acc.current_sell_streak = is_sell * (acc.current_sell_streak + 1);
+        acc.max_buy_s = std::max(acc.max_buy_s, acc.current_buy_streak);
+        acc.max_sell_s = std::max(acc.max_sell_s, acc.current_sell_streak);
         acc.total_vol += qty;
 
-        // Large trades
-        if (t.quantity >= large_trade_threshold_) {
-            acc.large_count++;
-        }
+        // Branchless: if (quantity >= large_trade_threshold_) { large_count++; }
+        acc.large_count += (t.quantity >= large_trade_threshold_);
 
         // VWAP
         acc.vwap_sum += price_d * qty;
 
-        // Price high/low (integer comparison)
+        // Price high/low (already branchless with std::min/max)
         acc.min_price = std::min(acc.min_price, price);
         acc.max_price = std::max(acc.max_price, price);
 
-        // Ticks (integer comparison)
-        if (price > acc.prev_price) {
-            acc.upticks++;
-        } else if (price < acc.prev_price) {
-            acc.downticks++;
-        } else {
-            acc.zeroticks++;
-        }
+        // Branchless: if (price > prev) upticks++; else if (price < prev) downticks++; else zeroticks++;
+        int price_cmp = (price > acc.prev_price) - (price < acc.prev_price);
+        acc.upticks += (price_cmp == 1);
+        acc.downticks += (price_cmp == -1);
+        acc.zeroticks += (price_cmp == 0);
 
         // Welford's online variance for price changes
         double price_change = price_d - static_cast<double>(acc.prev_price);
@@ -298,9 +288,8 @@ private:
         acc.inter_trade_count++;
         acc.min_inter_time = std::min(acc.min_inter_time, inter_time);
 
-        if (inter_time <= TradeAccumulators::BURST_THRESHOLD_US) {
-            acc.burst_cnt++;
-        }
+        // Branchless: if (inter_time <= BURST_THRESHOLD_US) { burst_cnt++; }
+        acc.burst_cnt += (inter_time <= TradeAccumulators::BURST_THRESHOLD_US);
 
         // Update state
         acc.prev_price = price;
