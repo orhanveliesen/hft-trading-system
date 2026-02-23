@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstddef>
 #include <limits>
 
 namespace hft {
@@ -55,7 +56,10 @@ public:
         double tick_ratio = 0.0;
     };
 
-    explicit TradeStreamMetrics(Quantity large_trade_threshold = 500) : large_trade_threshold_(large_trade_threshold) {}
+    explicit TradeStreamMetrics(Quantity large_trade_threshold = 500) : large_trade_threshold_(large_trade_threshold) {
+        // Initialize cache as invalid
+        cache_tail_position_.fill(SIZE_MAX);
+    }
 
     void on_trade(Price price, Quantity quantity, bool is_buy, uint64_t timestamp_us) {
         // Remove trades older than 1 minute
@@ -80,6 +84,14 @@ public:
             return Metrics{};
         }
 
+        size_t window_idx = static_cast<size_t>(window);
+
+        // Check cache validity: cache is valid if tail_ hasn't changed
+        if (cache_tail_position_[window_idx] == tail_) {
+            return cached_metrics_[window_idx];
+        }
+
+        // Cache miss: recalculate
         uint64_t window_us = get_window_duration_us(window);
         uint64_t current_time = trades_[(tail_ - 1) & MASK].timestamp_us;
         int64_t window_start = static_cast<int64_t>(current_time) - static_cast<int64_t>(window_us);
@@ -91,13 +103,19 @@ public:
             return Metrics{};
         }
 
-        return calculate_metrics(start_idx, count_);
+        // Calculate and cache
+        cached_metrics_[window_idx] = calculate_metrics(start_idx, count_);
+        cache_tail_position_[window_idx] = tail_;
+
+        return cached_metrics_[window_idx];
     }
 
     void reset() {
         head_ = 0;
         tail_ = 0;
         count_ = 0;
+        // Invalidate cache
+        cache_tail_position_.fill(SIZE_MAX);
     }
 
 private:
@@ -118,6 +136,10 @@ private:
     size_t count_ = 0;
 
     Quantity large_trade_threshold_;
+
+    // Cache for metrics (invalidated when tail_ changes)
+    mutable std::array<Metrics, 5> cached_metrics_;
+    mutable std::array<size_t, 5> cache_tail_position_; // tail_ when cache was built
 
     static constexpr uint64_t get_window_duration_us(TradeWindow window) {
         switch (window) {
