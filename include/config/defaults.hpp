@@ -76,15 +76,15 @@ constexpr int32_t PULLBACK_X100 = static_cast<int32_t>(PULLBACK_PCT * multiplier
 } // namespace targets
 
 // =============================================================================
-// Position Sizing (aggressive - tuner can reduce if needed)
+// Position Sizing (conservative defaults - tuner can increase if needed)
 // =============================================================================
 namespace position {
-// Base position per trade: 5% of capital
-constexpr double BASE_PCT = 0.05;
+// Base position per trade: 2% of capital
+constexpr double BASE_PCT = 0.02;
 constexpr int32_t BASE_X100 = static_cast<int32_t>(BASE_PCT * multipliers::PCT_TO_X100);
 
-// Max position per symbol: 15% of capital
-constexpr double MAX_PCT = 0.15;
+// Max position per symbol: 5% of capital
+constexpr double MAX_PCT = 0.05;
 constexpr int32_t MAX_X100 = static_cast<int32_t>(MAX_PCT * multipliers::PCT_TO_X100);
 
 // Minimum trade value
