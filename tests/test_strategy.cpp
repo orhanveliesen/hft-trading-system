@@ -1,23 +1,25 @@
-#include <cassert>
-#include <iostream>
-#include "../include/types.hpp"
+#include "../include/mock_order_sender.hpp"
+#include "../include/security/rate_limiter.hpp"
+#include "../include/strategy/halt_manager.hpp"
+#include "../include/strategy/market_maker.hpp"
 #include "../include/strategy/position.hpp"
 #include "../include/strategy/risk_manager.hpp"
-#include "../include/strategy/market_maker.hpp"
-#include "../include/strategy/halt_manager.hpp"
-#include "../include/security/rate_limiter.hpp"
 #include "../include/trading_engine.hpp"
-#include "../include/mock_order_sender.hpp"
+#include "../include/types.hpp"
+
+#include <cassert>
+#include <iostream>
 
 using namespace hft;
 using namespace hft::strategy;
 
 #define TEST(name) void name()
-#define RUN_TEST(name) do { \
-    std::cout << "Running " << #name << "... "; \
-    name(); \
-    std::cout << "PASSED\n"; \
-} while(0)
+#define RUN_TEST(name)                                                                                                 \
+    do {                                                                                                               \
+        std::cout << "Running " << #name << "... ";                                                                    \
+        name();                                                                                                        \
+        std::cout << "PASSED\n";                                                                                       \
+    } while (0)
 
 #define ASSERT_EQ(a, b) assert((a) == (b))
 #define ASSERT_TRUE(x) assert(x)
@@ -36,7 +38,7 @@ TEST(test_position_initial_flat) {
 TEST(test_position_buy_creates_long) {
     PositionTracker pos;
 
-    pos.on_fill(Side::Buy, 100, 10000);  // Buy 100 @ $1.00
+    pos.on_fill(Side::Buy, 100, 10000); // Buy 100 @ $1.00
 
     ASSERT_EQ(pos.position(), 100);
     ASSERT_EQ(pos.avg_price(), 10000);
@@ -46,7 +48,7 @@ TEST(test_position_buy_creates_long) {
 TEST(test_position_sell_creates_short) {
     PositionTracker pos;
 
-    pos.on_fill(Side::Sell, 100, 10000);  // Sell 100 @ $1.00
+    pos.on_fill(Side::Sell, 100, 10000); // Sell 100 @ $1.00
 
     ASSERT_EQ(pos.position(), -100);
     ASSERT_EQ(pos.avg_price(), 10000);
@@ -55,21 +57,21 @@ TEST(test_position_sell_creates_short) {
 TEST(test_position_pnl_on_close) {
     PositionTracker pos;
 
-    pos.on_fill(Side::Buy, 100, 10000);   // Buy 100 @ $1.00
-    pos.on_fill(Side::Sell, 100, 10100);  // Sell 100 @ $1.01
+    pos.on_fill(Side::Buy, 100, 10000);  // Buy 100 @ $1.00
+    pos.on_fill(Side::Sell, 100, 10100); // Sell 100 @ $1.01
 
     ASSERT_TRUE(pos.is_flat());
-    ASSERT_EQ(pos.realized_pnl(), 100 * 100);  // 100 shares * $0.01 profit = 10000 (in price units)
+    ASSERT_EQ(pos.realized_pnl(), 100 * 100); // 100 shares * $0.01 profit = 10000 (in price units)
 }
 
 TEST(test_position_partial_close) {
     PositionTracker pos;
 
-    pos.on_fill(Side::Buy, 100, 10000);  // Buy 100 @ $1.00
-    pos.on_fill(Side::Sell, 50, 10100);  // Sell 50 @ $1.01
+    pos.on_fill(Side::Buy, 100, 10000); // Buy 100 @ $1.00
+    pos.on_fill(Side::Sell, 50, 10100); // Sell 50 @ $1.01
 
-    ASSERT_EQ(pos.position(), 50);  // 50 remaining
-    ASSERT_EQ(pos.realized_pnl(), 50 * 100);  // 50 shares * $0.01 profit
+    ASSERT_EQ(pos.position(), 50);           // 50 remaining
+    ASSERT_EQ(pos.realized_pnl(), 50 * 100); // 50 shares * $0.01 profit
 }
 
 // === Risk Manager Tests ===
@@ -82,8 +84,8 @@ TEST(test_risk_allows_within_limits) {
 
     RiskManager risk(config);
 
-    ASSERT_TRUE(risk.can_trade(Side::Buy, 50, 0));    // Position 0, order 50
-    ASSERT_TRUE(risk.can_trade(Side::Sell, 100, 0));  // Max order size
+    ASSERT_TRUE(risk.can_trade(Side::Buy, 50, 0));   // Position 0, order 50
+    ASSERT_TRUE(risk.can_trade(Side::Sell, 100, 0)); // Max order size
 }
 
 TEST(test_risk_blocks_position_limit) {
@@ -94,7 +96,7 @@ TEST(test_risk_blocks_position_limit) {
 
     RiskManager risk(config);
 
-    ASSERT_TRUE(risk.can_trade(Side::Buy, 50, 80));   // 80 + 50 = 130 > 100
+    ASSERT_TRUE(risk.can_trade(Side::Buy, 50, 80)); // 80 + 50 = 130 > 100
     ASSERT_FALSE(risk.can_trade(Side::Buy, 50, 80) && 80 + 50 <= config.max_position);
     // Actually let's fix this test
 }
@@ -107,7 +109,7 @@ TEST(test_risk_blocks_oversized_order) {
 
     RiskManager risk(config);
 
-    ASSERT_FALSE(risk.can_trade(Side::Buy, 150, 0));  // 150 > max 100
+    ASSERT_FALSE(risk.can_trade(Side::Buy, 150, 0)); // 150 > max 100
 }
 
 TEST(test_risk_blocks_after_loss_limit) {
@@ -118,7 +120,7 @@ TEST(test_risk_blocks_after_loss_limit) {
 
     RiskManager risk(config);
 
-    risk.update_pnl(-1500);  // Loss exceeds limit
+    risk.update_pnl(-1500); // Loss exceeds limit
 
     ASSERT_FALSE(risk.can_trade(Side::Buy, 50, 0));
 }
@@ -127,7 +129,7 @@ TEST(test_risk_blocks_after_loss_limit) {
 
 TEST(test_mm_generates_two_sided_quotes) {
     MarketMakerConfig config;
-    config.spread_bps = 10;      // 10 basis points
+    config.spread_bps = 10; // 10 basis points
     config.quote_size = 100;
     config.max_position = 1000;
 
@@ -152,7 +154,7 @@ TEST(test_mm_skews_quotes_with_position) {
     config.spread_bps = 10;
     config.quote_size = 100;
     config.max_position = 1000;
-    config.skew_factor = 1.0;  // Full skew
+    config.skew_factor = 1.0; // Full skew
 
     MarketMaker mm(config);
 
@@ -174,8 +176,8 @@ TEST(test_mm_reduces_size_near_limit) {
     // Near max long position - should reduce bid size
     auto quotes = mm.generate_quotes(100000, 180);
 
-    ASSERT_TRUE(quotes.bid_size < 100);  // Reduced
-    ASSERT_EQ(quotes.ask_size, 100);     // Full size to sell
+    ASSERT_TRUE(quotes.bid_size < 100); // Reduced
+    ASSERT_EQ(quotes.ask_size, 100);    // Full size to sell
 }
 
 // === Halt Manager Tests ===
@@ -212,8 +214,8 @@ TEST(test_halt_manager_prevents_double_halt) {
     bool second = halt.halt(HaltReason::MaxLossExceeded);
 
     ASSERT_TRUE(first);
-    ASSERT_FALSE(second);  // Already halted
-    ASSERT_EQ(halt.reason(), HaltReason::PoolExhausted);  // Original reason
+    ASSERT_FALSE(second);                                // Already halted
+    ASSERT_EQ(halt.reason(), HaltReason::PoolExhausted); // Original reason
 }
 
 TEST(test_trading_engine_halt_flattens_positions) {
@@ -226,7 +228,7 @@ TEST(test_trading_engine_halt_flattens_positions) {
 
     // Simulate a position
     auto* world = engine.get_symbol_world(sym);
-    world->position().on_fill(Side::Buy, 500, 100000);  // Long 500
+    world->position().on_fill(Side::Buy, 500, 100000); // Long 500
 
     // Halt - MockOrderSender will record the flatten orders
     engine.halt(HaltReason::PoolCritical, "Test halt");
@@ -237,9 +239,9 @@ TEST(test_trading_engine_halt_flattens_positions) {
     // Should flatten long position by selling
     const auto& order = sender.last_order();
     ASSERT_EQ(order.symbol, sym);
-    ASSERT_EQ(order.side, Side::Sell);  // Sell to close long
+    ASSERT_EQ(order.side, Side::Sell); // Sell to close long
     ASSERT_EQ(order.quantity, 500);
-    ASSERT_TRUE(order.is_market);  // Flatten uses market orders
+    ASSERT_TRUE(order.is_market); // Flatten uses market orders
 }
 
 // === Rate Limiter Tests (DoS Protection) ===
@@ -248,7 +250,7 @@ TEST(test_rate_limiter_allows_normal_traffic) {
     security::RateLimiter limiter;
 
     TraderId trader = 1;
-    Timestamp now = 1'000'000'000;  // 1 second in nanoseconds
+    Timestamp now = 1'000'000'000; // 1 second in nanoseconds
 
     // Normal traffic should be allowed
     for (int i = 0; i < 100; ++i) {
@@ -258,7 +260,7 @@ TEST(test_rate_limiter_allows_normal_traffic) {
 
 TEST(test_rate_limiter_blocks_excessive_orders) {
     security::RateLimiter::Config config;
-    config.orders_per_second = 10;  // Low limit for testing
+    config.orders_per_second = 10; // Low limit for testing
     security::RateLimiter limiter(config);
 
     TraderId trader = 1;
@@ -286,10 +288,10 @@ TEST(test_rate_limiter_resets_each_second) {
     for (int i = 0; i < 5; ++i) {
         ASSERT_TRUE(limiter.allow_order(trader, second_1));
     }
-    ASSERT_FALSE(limiter.allow_order(trader, second_1));  // Blocked
+    ASSERT_FALSE(limiter.allow_order(trader, second_1)); // Blocked
 
     // New second - should reset
-    ASSERT_TRUE(limiter.allow_order(trader, second_2));  // Allowed again
+    ASSERT_TRUE(limiter.allow_order(trader, second_2)); // Allowed again
 }
 
 TEST(test_rate_limiter_tracks_active_orders) {
@@ -332,7 +334,7 @@ TEST(test_rate_limiter_isolates_traders) {
     for (int i = 0; i < 5; ++i) {
         limiter.allow_order(trader1, now);
     }
-    ASSERT_FALSE(limiter.allow_order(trader1, now));  // Blocked
+    ASSERT_FALSE(limiter.allow_order(trader1, now)); // Blocked
 
     // Trader 2 should still be allowed
     ASSERT_TRUE(limiter.allow_order(trader2, now));

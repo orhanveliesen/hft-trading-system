@@ -12,12 +12,13 @@
  */
 
 #include "../include/ipc/shared_event_log.hpp"
-#include <iostream>
-#include <iomanip>
-#include <cstring>
-#include <thread>
+
 #include <chrono>
 #include <csignal>
+#include <cstring>
+#include <iomanip>
+#include <iostream>
+#include <thread>
 #include <unistd.h>
 
 using namespace hft::ipc;
@@ -49,9 +50,9 @@ std::string format_pnl(int64_t pnl_x100) {
     char buf[32];
 
     if (pnl >= 0) {
-        snprintf(buf, sizeof(buf), "\033[32m+$%.2f\033[0m", pnl);  // Green
+        snprintf(buf, sizeof(buf), "\033[32m+$%.2f\033[0m", pnl); // Green
     } else {
-        snprintf(buf, sizeof(buf), "\033[31m-$%.2f\033[0m", -pnl);  // Red
+        snprintf(buf, sizeof(buf), "\033[31m-$%.2f\033[0m", -pnl); // Red
     }
     return buf;
 }
@@ -61,70 +62,65 @@ void print_event(const TunerEvent& e) {
     // Severity color
     const char* sev_color = "";
     switch (e.severity) {
-        case Severity::Warning: sev_color = "\033[33m"; break;   // Yellow
-        case Severity::Critical: sev_color = "\033[31m"; break;  // Red
-        default: break;
+    case Severity::Warning:
+        sev_color = "\033[33m";
+        break; // Yellow
+    case Severity::Critical:
+        sev_color = "\033[31m";
+        break; // Red
+    default:
+        break;
     }
 
     // Type color
     const char* type_color = "\033[0m";
     if (e.is_trade_event()) {
-        type_color = "\033[36m";  // Cyan
+        type_color = "\033[36m"; // Cyan
     } else if (e.is_tuner_event()) {
-        type_color = "\033[35m";  // Magenta
+        type_color = "\033[35m"; // Magenta
     } else if (e.is_market_event()) {
-        type_color = "\033[34m";  // Blue
+        type_color = "\033[34m"; // Blue
     }
 
     // Base output
-    std::cout << std::setw(8) << e.sequence << " "
-              << std::setw(10) << format_time(e.timestamp_ns) << " "
-              << sev_color << type_color
-              << std::setw(12) << e.type_name()
-              << "\033[0m "
-              << std::setw(10) << e.symbol << " ";
+    std::cout << std::setw(8) << e.sequence << " " << std::setw(10) << format_time(e.timestamp_ns) << " " << sev_color
+              << type_color << std::setw(12) << e.type_name() << "\033[0m " << std::setw(10) << e.symbol << " ";
 
     // Type-specific output
     switch (e.type) {
-        case TunerEventType::Signal:
-        case TunerEventType::Order:
-        case TunerEventType::Fill:
-            std::cout << (e.payload.trade.side == TradeSide::Buy ? "BUY " : "SELL")
-                      << " " << std::fixed << std::setprecision(2)
-                      << e.payload.trade.quantity << " @ "
-                      << std::setprecision(4) << e.payload.trade.price;
-            if (e.type == TunerEventType::Fill && e.payload.trade.pnl_x100 != 0) {
-                std::cout << " " << format_pnl(e.payload.trade.pnl_x100);
-            }
-            break;
+    case TunerEventType::Signal:
+    case TunerEventType::Order:
+    case TunerEventType::Fill:
+        std::cout << (e.payload.trade.side == TradeSide::Buy ? "BUY " : "SELL") << " " << std::fixed
+                  << std::setprecision(2) << e.payload.trade.quantity << " @ " << std::setprecision(4)
+                  << e.payload.trade.price;
+        if (e.type == TunerEventType::Fill && e.payload.trade.pnl_x100 != 0) {
+            std::cout << " " << format_pnl(e.payload.trade.pnl_x100);
+        }
+        break;
 
-        case TunerEventType::ConfigChange:
-            std::cout << e.payload.config.param_name << ": "
-                      << (e.payload.config.old_value_x100 / 100.0) << " -> "
-                      << (e.payload.config.new_value_x100 / 100.0)
-                      << " (conf:" << (int)e.payload.config.ai_confidence << "%)";
-            break;
+    case TunerEventType::ConfigChange:
+        std::cout << e.payload.config.param_name << ": " << (e.payload.config.old_value_x100 / 100.0) << " -> "
+                  << (e.payload.config.new_value_x100 / 100.0) << " (conf:" << (int)e.payload.config.ai_confidence
+                  << "%)";
+        break;
 
-        case TunerEventType::RegimeChange:
-            std::cout << "regime " << (int)e.payload.regime.old_regime
-                      << " -> " << (int)e.payload.regime.new_regime
-                      << " (conf:" << std::fixed << std::setprecision(1)
-                      << (e.payload.regime.new_confidence * 100) << "%)";
-            break;
+    case TunerEventType::RegimeChange:
+        std::cout << "regime " << (int)e.payload.regime.old_regime << " -> " << (int)e.payload.regime.new_regime
+                  << " (conf:" << std::fixed << std::setprecision(1) << (e.payload.regime.new_confidence * 100) << "%)";
+        break;
 
-        case TunerEventType::AIDecision:
-            std::cout << "action=" << (int)e.payload.ai.action_taken
-                      << " conf=" << (int)e.payload.ai.confidence << "%"
-                      << " lat=" << e.payload.ai.latency_ms << "ms";
-            break;
+    case TunerEventType::AIDecision:
+        std::cout << "action=" << (int)e.payload.ai.action_taken << " conf=" << (int)e.payload.ai.confidence << "%"
+                  << " lat=" << e.payload.ai.latency_ms << "ms";
+        break;
 
-        case TunerEventType::Error:
-            std::cout << "\033[31m" << e.payload.error.component
-                      << " code=" << e.payload.error.error_code << "\033[0m";
-            break;
+    case TunerEventType::Error:
+        std::cout << "\033[31m" << e.payload.error.component << " code=" << e.payload.error.error_code << "\033[0m";
+        break;
 
-        default:
-            break;
+    default:
+        break;
     }
 
     // Reason if present
@@ -144,30 +140,21 @@ void print_stats(const SharedEventLog* log) {
 
     // Symbol stats
     std::cout << "=== Per-Symbol Stats ===\n\n";
-    std::cout << std::setw(12) << "Symbol"
-              << std::setw(10) << "Signals"
-              << std::setw(10) << "Fills"
-              << std::setw(10) << "Win%"
-              << std::setw(12) << "Session P&L"
-              << std::setw(12) << "Total P&L"
-              << std::setw(10) << "Configs"
+    std::cout << std::setw(12) << "Symbol" << std::setw(10) << "Signals" << std::setw(10) << "Fills" << std::setw(10)
+              << "Win%" << std::setw(12) << "Session P&L" << std::setw(12) << "Total P&L" << std::setw(10) << "Configs"
               << "\n";
     std::cout << std::string(76, '-') << "\n";
 
     uint32_t count = log->symbol_count.load();
     for (uint32_t i = 0; i < count; ++i) {
         const auto& s = log->symbol_stats[i];
-        if (s.is_empty()) continue;
+        if (s.is_empty())
+            continue;
 
-        std::cout << std::setw(12) << s.symbol
-                  << std::setw(10) << s.signal_count.load()
-                  << std::setw(10) << s.fill_count.load()
-                  << std::setw(9) << std::fixed << std::setprecision(1)
-                  << s.win_rate() << "%"
-                  << std::setw(12) << format_pnl(s.session_pnl_x100.load())
-                  << std::setw(12) << format_pnl(s.total_pnl_x100.load())
-                  << std::setw(10) << s.config_changes.load()
-                  << "\n";
+        std::cout << std::setw(12) << s.symbol << std::setw(10) << s.signal_count.load() << std::setw(10)
+                  << s.fill_count.load() << std::setw(9) << std::fixed << std::setprecision(1) << s.win_rate() << "%"
+                  << std::setw(12) << format_pnl(s.session_pnl_x100.load()) << std::setw(12)
+                  << format_pnl(s.total_pnl_x100.load()) << std::setw(10) << s.config_changes.load() << "\n";
     }
 
     // Tuner stats
@@ -177,10 +164,8 @@ void print_stats(const SharedEventLog* log) {
     std::cout << "Config Changes: " << t.config_changes.load() << "\n";
     std::cout << "Pauses: " << t.pauses_triggered.load() << "\n";
     std::cout << "Emergency Exits: " << t.emergency_exits.load() << "\n";
-    std::cout << "Avg Latency: " << std::fixed << std::setprecision(1)
-              << t.avg_latency_ms() << " ms\n";
-    std::cout << "Total Cost: $" << std::setprecision(4)
-              << t.total_cost() << "\n";
+    std::cout << "Avg Latency: " << std::fixed << std::setprecision(1) << t.avg_latency_ms() << " ms\n";
+    std::cout << "Total Cost: $" << std::setprecision(4) << t.total_cost() << "\n";
 }
 
 void print_help() {
@@ -198,19 +183,31 @@ void print_help() {
 }
 
 TunerEventType parse_event_type(const char* type) {
-    if (strcmp(type, "signal") == 0) return TunerEventType::Signal;
-    if (strcmp(type, "order") == 0) return TunerEventType::Order;
-    if (strcmp(type, "fill") == 0) return TunerEventType::Fill;
-    if (strcmp(type, "cancel") == 0) return TunerEventType::Cancel;
-    if (strcmp(type, "config") == 0) return TunerEventType::ConfigChange;
-    if (strcmp(type, "pause") == 0) return TunerEventType::PauseSymbol;
-    if (strcmp(type, "resume") == 0) return TunerEventType::ResumeSymbol;
-    if (strcmp(type, "emergency") == 0) return TunerEventType::EmergencyExit;
-    if (strcmp(type, "ai") == 0) return TunerEventType::AIDecision;
-    if (strcmp(type, "regime") == 0) return TunerEventType::RegimeChange;
-    if (strcmp(type, "news") == 0) return TunerEventType::NewsEvent;
-    if (strcmp(type, "error") == 0) return TunerEventType::Error;
-    return TunerEventType::Signal;  // Default
+    if (strcmp(type, "signal") == 0)
+        return TunerEventType::Signal;
+    if (strcmp(type, "order") == 0)
+        return TunerEventType::Order;
+    if (strcmp(type, "fill") == 0)
+        return TunerEventType::Fill;
+    if (strcmp(type, "cancel") == 0)
+        return TunerEventType::Cancel;
+    if (strcmp(type, "config") == 0)
+        return TunerEventType::ConfigChange;
+    if (strcmp(type, "pause") == 0)
+        return TunerEventType::PauseSymbol;
+    if (strcmp(type, "resume") == 0)
+        return TunerEventType::ResumeSymbol;
+    if (strcmp(type, "emergency") == 0)
+        return TunerEventType::EmergencyExit;
+    if (strcmp(type, "ai") == 0)
+        return TunerEventType::AIDecision;
+    if (strcmp(type, "regime") == 0)
+        return TunerEventType::RegimeChange;
+    if (strcmp(type, "news") == 0)
+        return TunerEventType::NewsEvent;
+    if (strcmp(type, "error") == 0)
+        return TunerEventType::Error;
+    return TunerEventType::Signal; // Default
 }
 
 int main(int argc, char* argv[]) {
@@ -259,26 +256,25 @@ int main(int argc, char* argv[]) {
     signal(SIGTERM, signal_handler);
 
     // Print header
-    std::cout << std::setw(8) << "SEQ"
-              << std::setw(11) << "AGE"
-              << std::setw(13) << "TYPE"
-              << std::setw(11) << "SYMBOL"
+    std::cout << std::setw(8) << "SEQ" << std::setw(11) << "AGE" << std::setw(13) << "TYPE" << std::setw(11) << "SYMBOL"
               << "DETAILS\n";
     std::cout << std::string(80, '-') << "\n";
 
     // Tail mode: show last N events
     if (tail_count > 0) {
         uint64_t current = log->current_position();
-        uint64_t start = current > static_cast<uint64_t>(tail_count)
-                       ? current - tail_count : 0;
+        uint64_t start = current > static_cast<uint64_t>(tail_count) ? current - tail_count : 0;
 
         for (uint64_t seq = start; seq < current; ++seq) {
             const TunerEvent* e = log->get_event(seq);
-            if (!e) continue;
+            if (!e)
+                continue;
 
             // Apply filters
-            if (filter_symbol && strcmp(e->symbol, filter_symbol) != 0) continue;
-            if (has_type_filter && e->type != filter_type) continue;
+            if (filter_symbol && strcmp(e->symbol, filter_symbol) != 0)
+                continue;
+            if (has_type_filter && e->type != filter_type)
+                continue;
 
             print_event(*e);
         }
@@ -296,11 +292,14 @@ int main(int argc, char* argv[]) {
         // Check for new events
         for (uint64_t seq = last_pos; seq < current; ++seq) {
             const TunerEvent* e = log->get_event(seq);
-            if (!e) continue;
+            if (!e)
+                continue;
 
             // Apply filters
-            if (filter_symbol && strcmp(e->symbol, filter_symbol) != 0) continue;
-            if (has_type_filter && e->type != filter_type) continue;
+            if (filter_symbol && strcmp(e->symbol, filter_symbol) != 0)
+                continue;
+            if (has_type_filter && e->type != filter_type)
+                continue;
 
             print_event(*e);
         }

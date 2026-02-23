@@ -21,10 +21,10 @@ namespace strategy {
  */
 
 struct VWAPConfig {
-    Quantity target_quantity = 10000;   // Toplam almak/satmak istenen miktar
-    Quantity slice_size = 100;          // Her seferde ne kadar
-    uint32_t threshold_bps = 5;         // VWAP'tan sapma eşiği
-    bool is_buy = true;                 // Alım mı satım mı
+    Quantity target_quantity = 10000; // Toplam almak/satmak istenen miktar
+    Quantity slice_size = 100;        // Her seferde ne kadar
+    uint32_t threshold_bps = 5;       // VWAP'tan sapma eşiği
+    bool is_buy = true;               // Alım mı satım mı
 };
 
 struct VWAPSignal {
@@ -36,11 +36,9 @@ struct VWAPSignal {
 class VWAPStrategy {
 public:
     explicit VWAPStrategy(const VWAPConfig& config = {})
-        : config_(config)
-        , cumulative_pv_(0)      // Price × Volume toplamı
-        , cumulative_volume_(0)
-        , executed_quantity_(0)
-    {}
+        : config_(config), cumulative_pv_(0) // Price × Volume toplamı
+          ,
+          cumulative_volume_(0), executed_quantity_(0) {}
 
     // Market data güncelle (her trade'de çağrılır)
     void on_trade(Price price, Quantity volume) {
@@ -50,7 +48,8 @@ public:
 
     // VWAP hesapla
     Price vwap() const {
-        if (cumulative_volume_ == 0) return INVALID_PRICE;
+        if (cumulative_volume_ == 0)
+            return INVALID_PRICE;
         return static_cast<Price>(cumulative_pv_ / cumulative_volume_);
     }
 
@@ -60,13 +59,13 @@ public:
 
         // Hedef tamamlandı mı?
         if (executed_quantity_ >= config_.target_quantity) {
-            return signal;  // İş bitti
+            return signal; // İş bitti
         }
 
         // VWAP hesapla
         Price current_vwap = vwap();
         if (current_vwap == INVALID_PRICE) {
-            return signal;  // Yeterli veri yok
+            return signal; // Yeterli veri yok
         }
 
         Price mid = (bid + ask) / 2;
@@ -78,17 +77,15 @@ public:
             // ALIM: Fiyat VWAP'ın altındaysa al
             if (deviation_bps <= -(int64_t)config_.threshold_bps) {
                 signal.should_trade = true;
-                signal.quantity = std::min(config_.slice_size,
-                                          config_.target_quantity - executed_quantity_);
-                signal.limit_price = ask;  // Agresif al
+                signal.quantity = std::min(config_.slice_size, config_.target_quantity - executed_quantity_);
+                signal.limit_price = ask; // Agresif al
             }
         } else {
             // SATIM: Fiyat VWAP'ın üstündeyse sat
             if (deviation_bps >= (int64_t)config_.threshold_bps) {
                 signal.should_trade = true;
-                signal.quantity = std::min(config_.slice_size,
-                                          config_.target_quantity - executed_quantity_);
-                signal.limit_price = bid;  // Agresif sat
+                signal.quantity = std::min(config_.slice_size, config_.target_quantity - executed_quantity_);
+                signal.limit_price = bid; // Agresif sat
             }
         }
 
@@ -96,22 +93,16 @@ public:
     }
 
     // Fill geldiğinde çağır
-    void on_fill(Quantity qty) {
-        executed_quantity_ += qty;
-    }
+    void on_fill(Quantity qty) { executed_quantity_ += qty; }
 
     // Durum sorgulama
     Quantity executed() const { return executed_quantity_; }
     Quantity remaining() const {
-        return config_.target_quantity > executed_quantity_
-             ? config_.target_quantity - executed_quantity_
-             : 0;
+        return config_.target_quantity > executed_quantity_ ? config_.target_quantity - executed_quantity_ : 0;
     }
     bool is_complete() const { return executed_quantity_ >= config_.target_quantity; }
     double fill_rate() const {
-        return config_.target_quantity > 0
-             ? (double)executed_quantity_ / config_.target_quantity
-             : 0.0;
+        return config_.target_quantity > 0 ? (double)executed_quantity_ / config_.target_quantity : 0.0;
     }
 
     const VWAPConfig& config() const { return config_; }
@@ -129,5 +120,5 @@ private:
     Quantity executed_quantity_;
 };
 
-}  // namespace strategy
-}  // namespace hft
+} // namespace strategy
+} // namespace hft

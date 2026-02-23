@@ -1,11 +1,12 @@
 #pragma once
 
-#include "regime_detector.hpp"
 #include "../backtest/kline_backtest.hpp"
 #include "../backtest/strategies.hpp"
-#include <memory>
-#include <iostream>
+#include "regime_detector.hpp"
+
 #include <iomanip>
+#include <iostream>
+#include <memory>
 
 namespace hft {
 namespace strategy {
@@ -32,14 +33,9 @@ public:
     SimpleAdaptive() : SimpleAdaptive(Config{}) {}
 
     explicit SimpleAdaptive(const Config& config)
-        : config_(config)
-        , regime_detector_(make_regime_config(config.regime_lookback))
-        , mr_strategy_(config.mr_lookback, config.mr_std_mult)
-        , breakout_strategy_(config.breakout_lookback)
-        , using_mean_reversion_(true)
-        , bars_since_switch_(0)
-        , switch_count_(0)
-    {}
+        : config_(config), regime_detector_(make_regime_config(config.regime_lookback)),
+          mr_strategy_(config.mr_lookback, config.mr_std_mult), breakout_strategy_(config.breakout_lookback),
+          using_mean_reversion_(true), bars_since_switch_(0), switch_count_(0) {}
 
 private:
     static RegimeConfig make_regime_config(int lookback) {
@@ -49,16 +45,14 @@ private:
     }
 
 public:
-
     void on_start(double capital) override {
         regime_detector_.reset();
-        using_mean_reversion_ = true;  // Start with mean reversion
+        using_mean_reversion_ = true; // Start with mean reversion
         bars_since_switch_ = 0;
         switch_count_ = 0;
     }
 
-    backtest::Signal on_kline(const exchange::Kline& kline,
-                               const backtest::BacktestPosition& position) override {
+    backtest::Signal on_kline(const exchange::Kline& kline, const backtest::BacktestPosition& position) override {
         // Update regime detector
         regime_detector_.update(kline);
 
@@ -67,19 +61,15 @@ public:
 
         // Check if we should switch
         if (bars_since_switch_ >= config_.min_bars_before_switch) {
-            bool should_use_mr = regime_detector_.is_mean_reverting() ||
-                                  regime == MarketRegime::LowVolatility ||
-                                  regime == MarketRegime::HighVolatility;
+            bool should_use_mr = regime_detector_.is_mean_reverting() || regime == MarketRegime::LowVolatility ||
+                                 regime == MarketRegime::HighVolatility;
 
             if (should_use_mr != using_mean_reversion_) {
                 if (config_.verbose) {
-                    std::cout << "[SWITCH] "
-                              << (using_mean_reversion_ ? "MeanReversion" : "Breakout")
-                              << " -> "
+                    std::cout << "[SWITCH] " << (using_mean_reversion_ ? "MeanReversion" : "Breakout") << " -> "
                               << (should_use_mr ? "MeanReversion" : "Breakout")
-                              << " (regime: " << regime_to_string(regime)
-                              << ", trend: " << std::fixed << std::setprecision(2)
-                              << regime_detector_.trend_strength()
+                              << " (regime: " << regime_to_string(regime) << ", trend: " << std::fixed
+                              << std::setprecision(2) << regime_detector_.trend_strength()
                               << ", vol: " << regime_detector_.volatility() << ")\n";
                 }
                 using_mean_reversion_ = should_use_mr;
@@ -100,9 +90,7 @@ public:
     bool is_using_mean_reversion() const { return using_mean_reversion_; }
     int switch_count() const { return switch_count_; }
     MarketRegime current_regime() const { return regime_detector_.current_regime(); }
-    std::string active_strategy_name() const {
-        return using_mean_reversion_ ? "MeanReversion" : "Breakout";
-    }
+    std::string active_strategy_name() const { return using_mean_reversion_ ? "MeanReversion" : "Breakout"; }
 
 private:
     Config config_;
@@ -117,5 +105,5 @@ private:
     int switch_count_;
 };
 
-}  // namespace strategy
-}  // namespace hft
+} // namespace strategy
+} // namespace hft

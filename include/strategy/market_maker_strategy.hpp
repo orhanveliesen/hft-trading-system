@@ -46,22 +46,14 @@ public:
     MarketMakerStrategy() : config_{}, mm_(config_.mm_config), last_mid_(0), samples_(0) {}
 
     explicit MarketMakerStrategy(const Config& config)
-        : config_(config)
-        , mm_(config.mm_config)
-        , last_mid_(0)
-        , samples_(0)
-    {}
+        : config_(config), mm_(config.mm_config), last_mid_(0), samples_(0) {}
 
     // =========================================================================
     // IStrategy Implementation
     // =========================================================================
 
-    Signal generate(
-        Symbol symbol,
-        const MarketSnapshot& market,
-        const StrategyPosition& position,
-        MarketRegime regime
-    ) override {
+    Signal generate(Symbol symbol, const MarketSnapshot& market, const StrategyPosition& position,
+                    MarketRegime regime) override {
         (void)symbol;
 
         if (!ready() || !market.valid()) {
@@ -75,7 +67,7 @@ public:
 
         // Check if spread is wide enough to profit
         if (market.spread_bps() < config_.min_spread_bps) {
-            return Signal::none();  // Spread too tight, no edge
+            return Signal::none(); // Spread too tight, no edge
         }
 
         // Generate quotes from MarketMaker
@@ -110,26 +102,24 @@ public:
         return Signal::none();
     }
 
-    std::string_view name() const override {
-        return "MarketMaker";
-    }
+    std::string_view name() const override { return "MarketMaker"; }
 
     OrderPreference default_order_preference() const override {
-        return OrderPreference::Limit;  // Always limit - that's the whole point!
+        return OrderPreference::Limit; // Always limit - that's the whole point!
     }
 
     bool suitable_for_regime(MarketRegime regime) const override {
         switch (regime) {
-            case MarketRegime::Ranging:
-            case MarketRegime::LowVolatility:
-                return true;  // Ideal for MM
-            case MarketRegime::TrendingUp:
-            case MarketRegime::TrendingDown:
-                return false; // Trending = adverse selection risk
-            case MarketRegime::HighVolatility:
-                return false; // Spread blows out, inventory risk
-            default:
-                return true;  // Unknown, try it
+        case MarketRegime::Ranging:
+        case MarketRegime::LowVolatility:
+            return true; // Ideal for MM
+        case MarketRegime::TrendingUp:
+        case MarketRegime::TrendingDown:
+            return false; // Trending = adverse selection risk
+        case MarketRegime::HighVolatility:
+            return false; // Spread blows out, inventory risk
+        default:
+            return true; // Unknown, try it
         }
     }
 
@@ -146,7 +136,7 @@ public:
     }
 
     bool ready() const override {
-        return samples_ >= 10;  // Need some price history
+        return samples_ >= 10; // Need some price history
     }
 
     // =========================================================================
@@ -166,8 +156,8 @@ private:
 
         Signal sig;
         sig.type = SignalType::Buy;
-        sig.strength = SignalStrength::Weak;  // MM signals are always passive
-        sig.order_pref = OrderPreference::Limit;  // Always limit!
+        sig.strength = SignalStrength::Weak;     // MM signals are always passive
+        sig.order_pref = OrderPreference::Limit; // Always limit!
         sig.suggested_qty = qty_usd;
         sig.limit_price = quote.bid_price;
         sig.reason = "MM bid quote";
@@ -180,8 +170,8 @@ private:
 
         Signal sig;
         sig.type = SignalType::Sell;
-        sig.strength = SignalStrength::Weak;  // MM signals are always passive
-        sig.order_pref = OrderPreference::Limit;  // Always limit!
+        sig.strength = SignalStrength::Weak;     // MM signals are always passive
+        sig.order_pref = OrderPreference::Limit; // Always limit!
         sig.suggested_qty = qty_usd;
         sig.limit_price = quote.ask_price;
         sig.reason = "MM ask quote";
@@ -190,5 +180,5 @@ private:
     }
 };
 
-}  // namespace strategy
-}  // namespace hft
+} // namespace strategy
+} // namespace hft

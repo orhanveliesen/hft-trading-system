@@ -1,8 +1,8 @@
 #pragma once
 
-#include "types.hpp"
-#include "orderbook.hpp"
 #include "market_events.hpp"
+#include "orderbook.hpp"
+#include "types.hpp"
 
 namespace hft {
 
@@ -22,17 +22,11 @@ public:
         book_.add_order(event.order_id, event.side, event.price, event.quantity);
     }
 
-    void on_order_execute(const OrderExecute& event) {
-        book_.execute_order(event.order_id, event.quantity);
-    }
+    void on_order_execute(const OrderExecute& event) { book_.execute_order(event.order_id, event.quantity); }
 
-    void on_order_reduce(const OrderReduce& event) {
-        book_.execute_order(event.order_id, event.reduce_by);
-    }
+    void on_order_reduce(const OrderReduce& event) { book_.execute_order(event.order_id, event.reduce_by); }
 
-    void on_order_delete(const OrderDelete& event) {
-        book_.cancel_order(event.order_id);
-    }
+    void on_order_delete(const OrderDelete& event) { book_.cancel_order(event.order_id); }
 
     // Direct book access (for strategies)
     const OrderBook& book() const { return book_; }
@@ -47,18 +41,14 @@ private:
  *
  * Lighter weight - just tracks trades and quotes, no order book.
  */
-template<typename Strategy>
+template <typename Strategy>
 class TradeHandler {
 public:
     explicit TradeHandler(Strategy& strategy) : strategy_(strategy) {}
 
-    void on_trade(const Trade& event) {
-        strategy_.on_trade(event);
-    }
+    void on_trade(const Trade& event) { strategy_.on_trade(event); }
 
-    void on_quote(const QuoteUpdate& event) {
-        strategy_.on_quote(event);
-    }
+    void on_quote(const QuoteUpdate& event) { strategy_.on_quote(event); }
 
     // Ignore order-level events
     void on_order_add(const OrderAdd&) {}
@@ -70,4 +60,4 @@ private:
     Strategy& strategy_;
 };
 
-}  // namespace hft
+} // namespace hft

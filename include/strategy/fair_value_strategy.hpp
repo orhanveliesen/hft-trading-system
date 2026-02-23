@@ -1,8 +1,9 @@
 #pragma once
 
 #include "istrategy.hpp"
-#include <cmath>
+
 #include <algorithm>
+#include <cmath>
 #include <numeric>
 
 namespace hft {
@@ -42,20 +43,20 @@ public:
         size_t std_dev_period = 20;
 
         // Deviation thresholds (in standard deviations)
-        double strong_deviation = 2.0;    // 2 std dev = strong signal
-        double medium_deviation = 1.5;    // 1.5 std dev = medium signal
-        double weak_deviation = 1.0;      // 1 std dev = weak signal
+        double strong_deviation = 2.0; // 2 std dev = strong signal
+        double medium_deviation = 1.5; // 1.5 std dev = medium signal
+        double weak_deviation = 1.0;   // 1 std dev = weak signal
 
         // Minimum deviation in percentage (avoid tiny moves)
-        double min_deviation_pct = 0.3;   // At least 0.3% from fair value
+        double min_deviation_pct = 0.3; // At least 0.3% from fair value
 
         // Velocity check (is price moving back toward FV?)
-        bool require_reversion = true;    // Only enter if price is reverting
-        size_t velocity_period = 3;       // Look at last N ticks for direction
+        bool require_reversion = true; // Only enter if price is reverting
+        size_t velocity_period = 3;    // Look at last N ticks for direction
 
         // Position sizing
-        double base_position_pct = 0.1;   // 10% of capital (conservative)
-        double max_position_pct = 0.25;   // Max 25% in single asset
+        double base_position_pct = 0.1; // 10% of capital (conservative)
+        double max_position_pct = 0.25; // Max 25% in single asset
 
         // Price scale
         double price_scale = 1e8;
@@ -63,22 +64,14 @@ public:
 
     FairValueStrategy() : config_{} { reset(); }
 
-    explicit FairValueStrategy(const Config& config)
-        : config_(config)
-    {
-        reset();
-    }
+    explicit FairValueStrategy(const Config& config) : config_(config) { reset(); }
 
     // =========================================================================
     // IStrategy Implementation
     // =========================================================================
 
-    Signal generate(
-        Symbol symbol,
-        const MarketSnapshot& market,
-        const StrategyPosition& position,
-        MarketRegime regime
-    ) override {
+    Signal generate(Symbol symbol, const MarketSnapshot& market, const StrategyPosition& position,
+                    MarketRegime regime) override {
         (void)symbol;
 
         if (!ready() || !market.valid()) {
@@ -95,7 +88,7 @@ public:
         double std_dev = standard_deviation();
 
         // Calculate deviation from fair value
-        double deviation = (current_price - fv) / fv * 100.0;  // As percentage
+        double deviation = (current_price - fv) / fv * 100.0; // As percentage
         double deviation_sigmas = (std_dev > 0) ? (current_price - fv) / std_dev : 0;
 
         // Check for exit first (if we have position)
@@ -107,32 +100,31 @@ public:
         return generate_entry_signal(market, position, deviation, deviation_sigmas);
     }
 
-    std::string_view name() const override {
-        return "FairValue";
-    }
+    std::string_view name() const override { return "FairValue"; }
 
     OrderPreference default_order_preference() const override {
-        return OrderPreference::Limit;  // Mean reversion = patient
+        return OrderPreference::Limit; // Mean reversion = patient
     }
 
     bool suitable_for_regime(MarketRegime regime) const override {
         switch (regime) {
-            case MarketRegime::Ranging:
-                return true;  // BEST - price oscillates around mean
-            case MarketRegime::LowVolatility:
-                return true;  // Good - stable fair value
-            case MarketRegime::TrendingUp:
-            case MarketRegime::TrendingDown:
-                return false; // AVOID - fair value keeps moving
-            case MarketRegime::HighVolatility:
-                return false; // Bands too wide, risky
-            default:
-                return true;  // Unknown, try it
+        case MarketRegime::Ranging:
+            return true; // BEST - price oscillates around mean
+        case MarketRegime::LowVolatility:
+            return true; // Good - stable fair value
+        case MarketRegime::TrendingUp:
+        case MarketRegime::TrendingDown:
+            return false; // AVOID - fair value keeps moving
+        case MarketRegime::HighVolatility:
+            return false; // Bands too wide, risky
+        default:
+            return true; // Unknown, try it
         }
     }
 
     void on_tick(const MarketSnapshot& market) override {
-        if (!market.valid()) return;
+        if (!market.valid())
+            return;
 
         double price = market.mid_usd(config_.price_scale);
 
@@ -158,9 +150,7 @@ public:
         ema_ = 0;
     }
 
-    bool ready() const override {
-        return sample_count_ >= std::max(config_.fair_value_period, config_.std_dev_period);
-    }
+    bool ready() const override { return sample_count_ >= std::max(config_.fair_value_period, config_.std_dev_period); }
 
     // =========================================================================
     // Accessors for debugging/dashboard
@@ -169,7 +159,8 @@ public:
     double fair_value() const { return ema_; }
 
     double standard_deviation() const {
-        if (sample_count_ < config_.std_dev_period) return 0;
+        if (sample_count_ < config_.std_dev_period)
+            return 0;
 
         // Calculate mean over std_dev_period
         double sum = 0;
@@ -193,7 +184,8 @@ public:
     double current_deviation_sigmas() const {
         double fv = fair_value();
         double std_dev = standard_deviation();
-        if (std_dev <= 0 || sample_count_ == 0) return 0;
+        if (std_dev <= 0 || sample_count_ == 0)
+            return 0;
 
         double current_price = prices_[(price_idx_ + MAX_PRICES - 1) % MAX_PRICES];
         return (current_price - fv) / std_dev;
@@ -206,10 +198,11 @@ private:
     double prices_[MAX_PRICES];
     size_t price_idx_ = 0;
     size_t sample_count_ = 0;
-    double ema_ = 0;  // Fair value (EMA)
+    double ema_ = 0; // Fair value (EMA)
 
     bool is_price_reverting(bool expect_up) const {
-        if (sample_count_ < config_.velocity_period + 1) return true;  // Assume yes
+        if (sample_count_ < config_.velocity_period + 1)
+            return true; // Assume yes
 
         // Check if price is moving in expected direction
         size_t current_idx = (price_idx_ + MAX_PRICES - 1) % MAX_PRICES;
@@ -219,21 +212,17 @@ private:
         double old = prices_[old_idx];
 
         if (expect_up) {
-            return current > old;  // Price is moving up (reverting from below)
+            return current > old; // Price is moving up (reverting from below)
         } else {
-            return current < old;  // Price is moving down (reverting from above)
+            return current < old; // Price is moving down (reverting from above)
         }
     }
 
-    Signal generate_entry_signal(
-        const MarketSnapshot& market,
-        const StrategyPosition& position,
-        double deviation_pct,
-        double deviation_sigmas
-    ) {
+    Signal generate_entry_signal(const MarketSnapshot& market, const StrategyPosition& position, double deviation_pct,
+                                 double deviation_sigmas) {
         // Check minimum deviation
         if (std::abs(deviation_pct) < config_.min_deviation_pct) {
-            return Signal::none();  // Too close to fair value
+            return Signal::none(); // Too close to fair value
         }
 
         // Determine signal strength based on standard deviations
@@ -245,7 +234,7 @@ private:
         } else if (std::abs(deviation_sigmas) >= config_.weak_deviation) {
             strength = SignalStrength::Weak;
         } else {
-            return Signal::none();  // Deviation too small
+            return Signal::none(); // Deviation too small
         }
 
         // Determine direction
@@ -258,7 +247,7 @@ private:
             if (!is_price_reverting(should_buy)) {
                 // Price still moving away from FV, wait
                 if (strength > SignalStrength::Weak) {
-                    strength = SignalStrength::Weak;  // Downgrade
+                    strength = SignalStrength::Weak; // Downgrade
                 } else {
                     return Signal::none();
                 }
@@ -267,14 +256,15 @@ private:
 
         // Calculate quantity
         double qty = calculate_qty(market, position);
-        if (qty <= 0) return Signal::none();
+        if (qty <= 0)
+            return Signal::none();
 
         // Build signal
         Signal sig;
         sig.type = should_buy ? SignalType::Buy : SignalType::Sell;
         sig.strength = strength;
         sig.suggested_qty = qty;
-        sig.order_pref = OrderPreference::Limit;  // Always limit for FV
+        sig.order_pref = OrderPreference::Limit; // Always limit for FV
 
         // Set limit price inside spread (aggressive limit)
         Price spread = market.spread();
@@ -291,12 +281,8 @@ private:
         return sig;
     }
 
-    Signal generate_exit_signal(
-        const MarketSnapshot& market,
-        const StrategyPosition& position,
-        double deviation_sigmas,
-        double fv
-    ) {
+    Signal generate_exit_signal(const MarketSnapshot& market, const StrategyPosition& position, double deviation_sigmas,
+                                double fv) {
         // Exit conditions for fair value strategy:
         // 1. Price has reverted past fair value (profit taking)
         // 2. Price moved further away (stop loss - deviation > 3 sigma)
@@ -331,7 +317,8 @@ private:
 
     double calculate_qty(const MarketSnapshot& market, const StrategyPosition& position) const {
         double ask_usd = market.ask_usd(config_.price_scale);
-        if (ask_usd <= 0) return 0;
+        if (ask_usd <= 0)
+            return 0;
 
         // Conservative position sizing for mean reversion
         double target_value = position.cash_available * config_.base_position_pct;
@@ -343,5 +330,5 @@ private:
     }
 };
 
-}  // namespace strategy
-}  // namespace hft
+} // namespace strategy
+} // namespace hft

@@ -20,17 +20,17 @@
  * All methods inline to eliminate function call overhead.
  */
 
-#include <array>
-#include <map>
-#include <cstdint>
-#include <cmath>
-#include <chrono>
-#include <algorithm>
-
-#include "../types.hpp"
 #include "../config/defaults.hpp"
 #include "../ipc/shared_config.hpp"
 #include "../ipc/symbol_config.hpp"
+#include "../types.hpp"
+
+#include <algorithm>
+#include <array>
+#include <chrono>
+#include <cmath>
+#include <cstdint>
+#include <map>
 
 namespace hft::trading {
 
@@ -81,7 +81,8 @@ struct SymbolPositions {
     size_t count = 0;
 
     inline bool add(double entry, double qty, double target, double stop_loss) {
-        if (count >= MAX_POSITIONS_PER_SYMBOL) return false;
+        if (count >= MAX_POSITIONS_PER_SYMBOL)
+            return false;
 
         for (auto& slot : slots) {
             if (!slot.active) {
@@ -102,7 +103,8 @@ struct SymbolPositions {
     inline double total_quantity() const {
         double total = 0;
         for (const auto& slot : slots) {
-            if (slot.active) total += slot.quantity;
+            if (slot.active)
+                total += slot.quantity;
         }
         return total;
     }
@@ -119,7 +121,8 @@ struct SymbolPositions {
     }
 
     inline void clear_all() {
-        for (auto& slot : slots) slot.clear();
+        for (auto& slot : slots)
+            slot.clear();
         count = 0;
     }
 };
@@ -143,13 +146,9 @@ struct Portfolio {
     double pending_cash = 0;
 
     // === Config Accessors ===
-    inline double target_pct() const {
-        return config_ ? config_->target_pct() / 100.0 : config::targets::TARGET_PCT;
-    }
+    inline double target_pct() const { return config_ ? config_->target_pct() / 100.0 : config::targets::TARGET_PCT; }
 
-    inline double stop_pct() const {
-        return config_ ? config_->stop_pct() / 100.0 : config::targets::STOP_PCT;
-    }
+    inline double stop_pct() const { return config_ ? config_->stop_pct() / 100.0 : config::targets::STOP_PCT; }
 
     inline double commission_rate() const {
         return config_ ? config_->commission_rate() : config::costs::COMMISSION_PCT;
@@ -180,13 +179,9 @@ struct Portfolio {
     }
 
     // === Setters ===
-    inline void set_config(const ipc::SharedConfig* cfg) {
-        config_ = cfg;
-    }
+    inline void set_config(const ipc::SharedConfig* cfg) { config_ = cfg; }
 
-    inline void set_symbol_configs(const ipc::SharedSymbolConfigs* cfgs) {
-        symbol_configs_ = cfgs;
-    }
+    inline void set_symbol_configs(const ipc::SharedSymbolConfigs* cfgs) { symbol_configs_ = cfgs; }
 
     // === Initialization ===
     inline void init(double capital) {
@@ -203,22 +198,25 @@ struct Portfolio {
 
     // === Position Sizing ===
     inline double calculate_qty(double price, double available_cash, const char* symbol = nullptr) const {
-        if (price <= 0) return 0;
+        if (price <= 0)
+            return 0;
 
         double position_value = available_cash * base_position_pct(symbol);
         double max_value = available_cash * max_position_pct(symbol);
         position_value = std::min(position_value, max_value);
 
         double qty = position_value / price;
-        qty = std::floor(qty * 1e8) / 1e8;  // Binance precision
+        qty = std::floor(qty * 1e8) / 1e8; // Binance precision
 
-        if (qty * price < 10.0) return 0;  // Minimum order size
+        if (qty * price < 10.0)
+            return 0; // Minimum order size
         return qty;
     }
 
     // === Position Queries ===
     inline double get_holding(Symbol s) const {
-        if (s >= MAX_SYMBOLS) return 0;
+        if (s >= MAX_SYMBOLS)
+            return 0;
         return positions[s].total_quantity();
     }
 
@@ -227,9 +225,7 @@ struct Portfolio {
         return available >= price * qty;
     }
 
-    inline bool can_sell(Symbol s, double qty) const {
-        return get_holding(s) >= qty;
-    }
+    inline bool can_sell(Symbol s, double qty) const { return get_holding(s) >= qty; }
 
     /**
      * Check if we can add more positions for a symbol.
@@ -238,29 +234,32 @@ struct Portfolio {
      * orders that will be rejected by the portfolio.
      */
     inline bool can_add_position(Symbol s) const {
-        if (s >= MAX_SYMBOLS) return false;
+        if (s >= MAX_SYMBOLS)
+            return false;
         return positions[s].count < MAX_POSITIONS_PER_SYMBOL;
     }
 
     inline double avg_entry_price(Symbol s) const {
-        if (s >= MAX_SYMBOLS) return 0;
+        if (s >= MAX_SYMBOLS)
+            return 0;
         return positions[s].avg_entry();
     }
 
     // === Cash Reservation ===
-    inline void reserve_cash(double amount) {
-        pending_cash += amount;
-    }
+    inline void reserve_cash(double amount) { pending_cash += amount; }
 
     inline void release_reserved_cash(double amount) {
         pending_cash -= amount;
-        if (pending_cash < 0) pending_cash = 0;
+        if (pending_cash < 0)
+            pending_cash = 0;
     }
 
     // === Trading Operations ===
     inline double buy(Symbol s, double price, double qty, double spread_cost = 0, double commission = 0) {
-        if (qty <= 0 || price <= 0) return 0;
-        if (s >= MAX_SYMBOLS) return 0;
+        if (qty <= 0 || price <= 0)
+            return 0;
+        if (s >= MAX_SYMBOLS)
+            return 0;
 
         double target = price * (1.0 + target_pct());
         double stop_loss = price * (1.0 - stop_pct());
@@ -279,15 +278,18 @@ struct Portfolio {
     }
 
     inline double sell(Symbol s, double price, double qty, double spread_cost = 0, double commission = 0) {
-        if (qty <= 0 || price <= 0) return 0;
-        if (s >= MAX_SYMBOLS) return 0;
+        if (qty <= 0 || price <= 0)
+            return 0;
+        if (s >= MAX_SYMBOLS)
+            return 0;
 
         double remaining = qty;
         auto& sym_pos = positions[s];
         double actual_sold = 0;
 
         for (auto& slot : sym_pos.slots) {
-            if (!slot.active || remaining <= 0) continue;
+            if (!slot.active || remaining <= 0)
+                continue;
 
             double sell_qty = std::min(remaining, slot.quantity);
             slot.quantity -= sell_qty;
@@ -318,17 +320,18 @@ struct Portfolio {
     }
 
     // === Target/Stop Checking (template - must be in header) ===
-    template<typename OnTargetHit, typename OnStopHit, typename OnTrendExit>
-    inline int check_and_close(Symbol s, double current_price,
-                               OnTargetHit on_target, OnStopHit on_stop, OnTrendExit on_trend_exit,
-                               double pullback_threshold = 0.005) {
-        if (s >= MAX_SYMBOLS) return 0;
+    template <typename OnTargetHit, typename OnStopHit, typename OnTrendExit>
+    inline int check_and_close(Symbol s, double current_price, OnTargetHit on_target, OnStopHit on_stop,
+                               OnTrendExit on_trend_exit, double pullback_threshold = 0.005) {
+        if (s >= MAX_SYMBOLS)
+            return 0;
 
         int closed = 0;
         auto& sym_pos = positions[s];
 
         for (auto& slot : sym_pos.slots) {
-            if (!slot.active) continue;
+            if (!slot.active)
+                continue;
 
             // TARGET HIT
             if (current_price >= slot.target_price) {
@@ -405,7 +408,8 @@ struct Portfolio {
     inline int position_count() const {
         int count = 0;
         for (size_t s = 0; s < MAX_SYMBOLS; s++) {
-            if (symbol_active[s] && positions[s].count > 0) count++;
+            if (symbol_active[s] && positions[s].count > 0)
+                count++;
         }
         return count;
     }

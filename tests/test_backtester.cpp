@@ -1,16 +1,18 @@
-#include <cassert>
-#include <iostream>
-#include <cmath>
 #include "../include/backtester.hpp"
+
+#include <cassert>
+#include <cmath>
+#include <iostream>
 
 using namespace hft;
 
 #define TEST(name) void name()
-#define RUN_TEST(name) do { \
-    std::cout << "Running " << #name << "... "; \
-    name(); \
-    std::cout << "PASSED\n"; \
-} while(0)
+#define RUN_TEST(name)                                                                                                 \
+    do {                                                                                                               \
+        std::cout << "Running " << #name << "... ";                                                                    \
+        name();                                                                                                        \
+        std::cout << "PASSED\n";                                                                                       \
+    } while (0)
 
 #define ASSERT_EQ(a, b) assert((a) == (b))
 #define ASSERT_TRUE(x) assert(x)
@@ -39,7 +41,7 @@ TEST(test_backtest_processes_ticks) {
 // Test: Market maker earns spread when market oscillates
 TEST(test_earn_spread_on_oscillation) {
     SimulatorConfig config;
-    config.spread_bps = 100;  // 1% spread = 100 bps
+    config.spread_bps = 100; // 1% spread = 100 bps
     config.quote_size = 10;
     config.max_position = 100;
 
@@ -49,11 +51,11 @@ TEST(test_earn_spread_on_oscillation) {
     // Our quotes: bid ~9950, ask ~10050 (with 1% spread)
 
     // Market oscillates - first down (we buy), then up (we sell)
-    bt.add_tick(1, 10000, 10010, 1000, 1000);  // Initial, place quotes
-    bt.add_tick(2, 9940, 9950, 1000, 1000);    // Market drops, hits our bid
-    bt.add_tick(3, 10000, 10010, 1000, 1000);  // Back to normal
-    bt.add_tick(4, 10050, 10060, 1000, 1000);  // Market up, hits our ask
-    bt.add_tick(5, 10000, 10010, 1000, 1000);  // Back to normal
+    bt.add_tick(1, 10000, 10010, 1000, 1000); // Initial, place quotes
+    bt.add_tick(2, 9940, 9950, 1000, 1000);   // Market drops, hits our bid
+    bt.add_tick(3, 10000, 10010, 1000, 1000); // Back to normal
+    bt.add_tick(4, 10050, 10060, 1000, 1000); // Market up, hits our ask
+    bt.add_tick(5, 10000, 10010, 1000, 1000); // Back to normal
 
     auto result = bt.run();
 
@@ -65,18 +67,18 @@ TEST(test_earn_spread_on_oscillation) {
 // Test: Losing money on adverse selection
 TEST(test_adverse_selection_loss) {
     SimulatorConfig config;
-    config.spread_bps = 20;   // Tight spread
+    config.spread_bps = 20; // Tight spread
     config.quote_size = 100;
     config.max_position = 1000;
 
     Backtester bt(config, FillMode::Aggressive);
 
     // Market trends strongly against us
-    bt.add_tick(1, 10000, 10010, 1000, 1000);  // Place quotes
-    bt.add_tick(2, 9980, 9990, 1000, 1000);    // Market drops, we buy
-    bt.add_tick(3, 9960, 9970, 1000, 1000);    // Drops more, we buy more
-    bt.add_tick(4, 9940, 9950, 1000, 1000);    // Even more
-    bt.add_tick(5, 9900, 9910, 1000, 1000);    // Big drop - unrealized loss
+    bt.add_tick(1, 10000, 10010, 1000, 1000); // Place quotes
+    bt.add_tick(2, 9980, 9990, 1000, 1000);   // Market drops, we buy
+    bt.add_tick(3, 9960, 9970, 1000, 1000);   // Drops more, we buy more
+    bt.add_tick(4, 9940, 9950, 1000, 1000);   // Even more
+    bt.add_tick(5, 9900, 9910, 1000, 1000);   // Big drop - unrealized loss
 
     auto result = bt.run();
 
@@ -96,9 +98,9 @@ TEST(test_drawdown_tracking) {
 
     // Up then down market
     bt.add_tick(1, 10000, 10010, 1000, 1000);
-    bt.add_tick(2, 10050, 10060, 1000, 1000);  // Up - we sell, profit
-    bt.add_tick(3, 9950, 9960, 1000, 1000);    // Down - we buy
-    bt.add_tick(4, 9900, 9910, 1000, 1000);    // More down - drawdown
+    bt.add_tick(2, 10050, 10060, 1000, 1000); // Up - we sell, profit
+    bt.add_tick(3, 9950, 9960, 1000, 1000);   // Down - we buy
+    bt.add_tick(4, 9900, 9910, 1000, 1000);   // More down - drawdown
 
     auto result = bt.run();
 
@@ -117,7 +119,7 @@ TEST(test_position_limits) {
 
     // Market keeps hitting our bid
     for (int i = 0; i < 10; ++i) {
-        bt.add_tick(i, 9900, 9910, 1000, 1000);  // Always hits our bid
+        bt.add_tick(i, 9900, 9910, 1000, 1000); // Always hits our bid
     }
 
     auto result = bt.run();
@@ -140,7 +142,7 @@ TEST(test_metrics_calculation) {
         if (i % 4 == 0) {
             bt.add_tick(i, 10000, 10010, 1000, 1000);
         } else if (i % 4 == 1) {
-            bt.add_tick(i, 9940, 9950, 1000, 1000);  // Hit bid
+            bt.add_tick(i, 9940, 9950, 1000, 1000); // Hit bid
         } else if (i % 4 == 2) {
             bt.add_tick(i, 10000, 10010, 1000, 1000);
         } else {

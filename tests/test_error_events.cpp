@@ -1,18 +1,20 @@
-#include <cassert>
-#include <iostream>
-#include <cstring>
-#include <vector>
-#include "../include/ipc/tuner_event.hpp"
 #include "../include/ipc/shared_event_log.hpp"
+#include "../include/ipc/tuner_event.hpp"
+
+#include <cassert>
+#include <cstring>
+#include <iostream>
+#include <vector>
 
 using namespace hft::ipc;
 
 #define TEST(name) void name()
-#define RUN_TEST(name) do { \
-    std::cout << "  " << #name << "... "; \
-    name(); \
-    std::cout << "PASSED\n"; \
-} while(0)
+#define RUN_TEST(name)                                                                                                 \
+    do {                                                                                                               \
+        std::cout << "  " << #name << "... ";                                                                          \
+        name();                                                                                                        \
+        std::cout << "PASSED\n";                                                                                       \
+    } while (0)
 
 #define ASSERT_EQ(a, b) assert((a) == (b))
 #define ASSERT_TRUE(x) assert(x)
@@ -35,12 +37,9 @@ constexpr const char* TEST_SHM_NAME = "/error_event_test";
 // ============================================================================
 
 TEST(error_event_creation) {
-    auto event = TunerEvent::make_error(
-        "claude_client",
-        ERROR_JSON_PARSE_FAILED,
-        true,  // recoverable
-        "No valid JSON in response"
-    );
+    auto event = TunerEvent::make_error("claude_client", ERROR_JSON_PARSE_FAILED,
+                                        true, // recoverable
+                                        "No valid JSON in response");
 
     // Verify event type
     ASSERT_EQ(event.type, TunerEventType::Error);
@@ -61,12 +60,9 @@ TEST(error_event_creation) {
 }
 
 TEST(error_event_non_recoverable) {
-    auto event = TunerEvent::make_error(
-        "binance_ws",
-        ERROR_WS_DISCONNECT,
-        false,  // not recoverable
-        "WebSocket connection lost permanently"
-    );
+    auto event = TunerEvent::make_error("binance_ws", ERROR_WS_DISCONNECT,
+                                        false, // not recoverable
+                                        "WebSocket connection lost permanently");
 
     ASSERT_EQ(event.type, TunerEventType::Error);
     ASSERT_EQ(event.payload.error.error_code, ERROR_WS_DISCONNECT);
@@ -76,24 +72,15 @@ TEST(error_event_non_recoverable) {
 
 TEST(error_event_component_truncation) {
     // Component field is 24 bytes, test truncation
-    auto event = TunerEvent::make_error(
-        "very_long_component_name_that_exceeds_24_bytes",
-        ERROR_API_TIMEOUT,
-        true,
-        "Timeout"
-    );
+    auto event =
+        TunerEvent::make_error("very_long_component_name_that_exceeds_24_bytes", ERROR_API_TIMEOUT, true, "Timeout");
 
     // Should be truncated to 23 chars + null
     ASSERT_TRUE(strlen(event.payload.error.component) <= 23);
 }
 
 TEST(error_event_is_system_event) {
-    auto event = TunerEvent::make_error(
-        "test",
-        1001,
-        true,
-        "test error"
-    );
+    auto event = TunerEvent::make_error("test", 1001, true, "test error");
 
     // Error type (51) is >= 48, so it's a system event
     ASSERT_TRUE(event.is_system_event());
@@ -112,12 +99,8 @@ TEST(log_error_event) {
     ASSERT_TRUE(log != nullptr);
 
     // Create and log an error event
-    auto error_event = TunerEvent::make_error(
-        "claude_client",
-        ERROR_JSON_PARSE_FAILED,
-        true,
-        "No valid JSON in response"
-    );
+    auto error_event =
+        TunerEvent::make_error("claude_client", ERROR_JSON_PARSE_FAILED, true, "No valid JSON in response");
     log->log(error_event);
 
     // Verify event was logged
@@ -194,12 +177,7 @@ TEST(multiple_error_events_ring_buffer) {
     for (int i = 0; i < 10; ++i) {
         char reason[128];
         snprintf(reason, sizeof(reason), "Error %d", i);
-        auto event = TunerEvent::make_error(
-            "tuner",
-            1000 + i,
-            true,
-            reason
-        );
+        auto event = TunerEvent::make_error("tuner", 1000 + i, true, reason);
         log->log(event);
     }
 
@@ -219,12 +197,7 @@ TEST(multiple_error_events_ring_buffer) {
 }
 
 TEST(error_event_type_name) {
-    auto event = TunerEvent::make_error(
-        "test",
-        1001,
-        true,
-        "test"
-    );
+    auto event = TunerEvent::make_error("test", 1001, true, "test");
 
     ASSERT_STREQ(event.type_name(), "ERROR");
 }

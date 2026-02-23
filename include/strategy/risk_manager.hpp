@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../types.hpp"
+
 #include <cstdint>
 #include <cstdlib>
 
@@ -18,18 +19,16 @@ struct RiskConfig {
 // Checks limits before allowing trades
 class RiskManager {
 public:
-    explicit RiskManager(const RiskConfig& config)
-        : config_(config)
-        , current_pnl_(0)
-        , halted_(false)
-    {}
+    explicit RiskManager(const RiskConfig& config) : config_(config), current_pnl_(0), halted_(false) {}
 
     // Check if a trade is allowed
     bool can_trade(Side side, Quantity size, int64_t current_position) const {
-        if (halted_) return false;
+        if (halted_)
+            return false;
 
         // Check order size limit
-        if (size > config_.max_order_size) return false;
+        if (size > config_.max_order_size)
+            return false;
 
         // Check position limit after trade
         int64_t new_position = current_position;
@@ -39,7 +38,8 @@ public:
             new_position -= size;
         }
 
-        if (std::abs(new_position) > config_.max_position) return false;
+        if (std::abs(new_position) > config_.max_position)
+            return false;
 
         return true;
     }
@@ -66,5 +66,5 @@ private:
     bool halted_;
 };
 
-}  // namespace strategy
-}  // namespace hft
+} // namespace strategy
+} // namespace hft

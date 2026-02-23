@@ -10,13 +10,14 @@
  * Run with: ./test_execution_overselling
  */
 
-#include <iostream>
-#include <cassert>
-#include <cmath>
-#include <string>
-#include <functional>
 #include "../include/execution/execution_engine.hpp"
 #include "../include/strategy/istrategy.hpp"
+
+#include <cassert>
+#include <cmath>
+#include <functional>
+#include <iostream>
+#include <string>
 
 using namespace hft;
 using namespace hft::execution;
@@ -40,35 +41,23 @@ public:
     std::vector<SentOrder> orders;
     uint64_t next_order_id = 1000;
 
-    uint64_t send_market_order(
-        Symbol symbol, Side side, double qty, Price expected_price
-    ) override {
+    uint64_t send_market_order(Symbol symbol, Side side, double qty, Price expected_price) override {
         orders.push_back({symbol, side, qty, expected_price, true});
         return next_order_id++;
     }
 
-    uint64_t send_limit_order(
-        Symbol symbol, Side side, double qty, Price limit_price
-    ) override {
+    uint64_t send_limit_order(Symbol symbol, Side side, double qty, Price limit_price) override {
         orders.push_back({symbol, side, qty, limit_price, false});
         return next_order_id++;
     }
 
-    bool cancel_order(uint64_t order_id) override {
-        return true;
-    }
+    bool cancel_order(uint64_t order_id) override { return true; }
 
-    bool is_order_pending(uint64_t order_id) const override {
-        return false;
-    }
+    bool is_order_pending(uint64_t order_id) const override { return false; }
 
-    bool is_paper() const override {
-        return true;
-    }
+    bool is_paper() const override { return true; }
 
-    void clear() {
-        orders.clear();
-    }
+    void clear() { orders.clear(); }
 };
 
 // =============================================================================
@@ -76,33 +65,36 @@ public:
 // =============================================================================
 
 #define TEST(name) void test_##name()
-#define RUN_TEST(name) do { \
-    std::cout << "  Running " #name "... "; \
-    test_##name(); \
-    std::cout << "PASSED\n"; \
-} while(0)
+#define RUN_TEST(name)                                                                                                 \
+    do {                                                                                                               \
+        std::cout << "  Running " #name "... ";                                                                        \
+        test_##name();                                                                                                 \
+        std::cout << "PASSED\n";                                                                                       \
+    } while (0)
 
-#define ASSERT_EQ(a, b) do { \
-    if ((a) != (b)) { \
-        std::cerr << "\nFAILED: " << #a << " != " << #b << "\n"; \
-        assert(false); \
-    } \
-} while(0)
+#define ASSERT_EQ(a, b)                                                                                                \
+    do {                                                                                                               \
+        if ((a) != (b)) {                                                                                              \
+            std::cerr << "\nFAILED: " << #a << " != " << #b << "\n";                                                   \
+            assert(false);                                                                                             \
+        }                                                                                                              \
+    } while (0)
 
-#define ASSERT_DOUBLE_NEAR(a, b, tol) do { \
-    if (std::abs((a) - (b)) > (tol)) { \
-        std::cerr << "\nFAILED: " << #a << " != " << #b \
-                  << " (" << (a) << " != " << (b) << ")\n"; \
-        assert(false); \
-    } \
-} while(0)
+#define ASSERT_DOUBLE_NEAR(a, b, tol)                                                                                  \
+    do {                                                                                                               \
+        if (std::abs((a) - (b)) > (tol)) {                                                                             \
+            std::cerr << "\nFAILED: " << #a << " != " << #b << " (" << (a) << " != " << (b) << ")\n";                  \
+            assert(false);                                                                                             \
+        }                                                                                                              \
+    } while (0)
 
-#define ASSERT_TRUE(expr) do { \
-    if (!(expr)) { \
-        std::cerr << "\nFAILED: " << #expr << " is false\n"; \
-        assert(false); \
-    } \
-} while(0)
+#define ASSERT_TRUE(expr)                                                                                              \
+    do {                                                                                                               \
+        if (!(expr)) {                                                                                                 \
+            std::cerr << "\nFAILED: " << #expr << " is false\n";                                                       \
+            assert(false);                                                                                             \
+        }                                                                                                              \
+    } while (0)
 
 // =============================================================================
 // Tests
@@ -149,7 +141,7 @@ TEST(sell_order_rejected_when_no_position) {
 
     // Order should be rejected (0 = no order sent)
     ASSERT_EQ(order_id, 0u);
-    ASSERT_EQ(mock.orders.size(), 0u);  // No order should be sent
+    ASSERT_EQ(mock.orders.size(), 0u); // No order should be sent
 }
 
 TEST(sell_order_limited_to_available_position) {
@@ -161,7 +153,7 @@ TEST(sell_order_limited_to_available_position) {
     // Position callback: we own 0.5 units
     engine.set_position_callback([](Symbol) { return 0.5; });
 
-    Signal sell_signal = Signal::sell(SignalStrength::Strong, 1.0, "test");  // Try to sell 1.0
+    Signal sell_signal = Signal::sell(SignalStrength::Strong, 1.0, "test"); // Try to sell 1.0
 
     MarketSnapshot market;
     market.bid = 50000;
@@ -173,7 +165,7 @@ TEST(sell_order_limited_to_available_position) {
     ASSERT_TRUE(order_id > 0);
     ASSERT_EQ(mock.orders.size(), 1u);
     ASSERT_EQ(mock.orders[0].side, Side::Sell);
-    ASSERT_DOUBLE_NEAR(mock.orders[0].qty, 0.5, 0.001);  // Limited to position
+    ASSERT_DOUBLE_NEAR(mock.orders[0].qty, 0.5, 0.001); // Limited to position
 }
 
 TEST(sell_order_full_quantity_when_position_sufficient) {
@@ -185,7 +177,7 @@ TEST(sell_order_full_quantity_when_position_sufficient) {
     // Position callback: we own 2.0 units
     engine.set_position_callback([](Symbol) { return 2.0; });
 
-    Signal sell_signal = Signal::sell(SignalStrength::Strong, 1.0, "test");  // Sell 1.0
+    Signal sell_signal = Signal::sell(SignalStrength::Strong, 1.0, "test"); // Sell 1.0
 
     MarketSnapshot market;
     market.bid = 50000;
@@ -195,7 +187,7 @@ TEST(sell_order_full_quantity_when_position_sufficient) {
 
     ASSERT_TRUE(order_id > 0);
     ASSERT_EQ(mock.orders.size(), 1u);
-    ASSERT_DOUBLE_NEAR(mock.orders[0].qty, 1.0, 0.001);  // Full quantity
+    ASSERT_DOUBLE_NEAR(mock.orders[0].qty, 1.0, 0.001); // Full quantity
 }
 
 TEST(no_position_callback_allows_sell_for_backwards_compat) {
@@ -229,7 +221,7 @@ TEST(position_callback_receives_correct_symbol) {
     Symbol received_symbol = 999;
     engine.set_position_callback([&received_symbol](Symbol s) {
         received_symbol = s;
-        return 1.0;  // Return some position
+        return 1.0; // Return some position
     });
 
     Signal sell_signal = Signal::sell(SignalStrength::Strong, 0.5, "test");
@@ -253,7 +245,7 @@ TEST(fractional_position_handled_correctly) {
     // Position: 0.03 BTC
     engine.set_position_callback([](Symbol) { return 0.03; });
 
-    Signal sell_signal = Signal::sell(SignalStrength::Strong, 0.05, "test");  // Try to sell more
+    Signal sell_signal = Signal::sell(SignalStrength::Strong, 0.05, "test"); // Try to sell more
 
     MarketSnapshot market;
     market.bid = 50000;

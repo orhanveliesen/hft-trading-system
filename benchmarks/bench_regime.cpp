@@ -5,13 +5,14 @@
  */
 
 #include "../include/strategy/regime_detector.hpp"
-#include <iostream>
+
+#include <algorithm>
+#include <chrono>
 #include <iomanip>
+#include <iostream>
+#include <numeric>
 #include <random>
 #include <vector>
-#include <chrono>
-#include <algorithm>
-#include <numeric>
 
 using namespace hft;
 using namespace hft::strategy;
@@ -22,21 +23,18 @@ struct Stats {
 
     void record(double ns) { samples.push_back(ns); }
 
-    double mean() const {
-        return std::accumulate(samples.begin(), samples.end(), 0.0) / samples.size();
-    }
+    double mean() const { return std::accumulate(samples.begin(), samples.end(), 0.0) / samples.size(); }
 
     double percentile(double p) {
-        if (samples.empty()) return 0;
+        if (samples.empty())
+            return 0;
         std::vector<double> sorted = samples;
         std::sort(sorted.begin(), sorted.end());
         size_t idx = static_cast<size_t>(p / 100.0 * (sorted.size() - 1));
         return sorted[idx];
     }
 
-    double max_val() const {
-        return *std::max_element(samples.begin(), samples.end());
-    }
+    double max_val() const { return *std::max_element(samples.begin(), samples.end()); }
 
     size_t count() const { return samples.size(); }
 };
@@ -46,10 +44,10 @@ int main() {
 
     // Generate synthetic price data
     std::mt19937 rng(42);
-    std::normal_distribution<double> returns(0.0001, 0.02);  // Mean 0.01%, stddev 2%
+    std::normal_distribution<double> returns(0.0001, 0.02); // Mean 0.01%, stddev 2%
 
     std::vector<double> prices;
-    double price = 50000.0;  // Start at $50,000 (like BTC)
+    double price = 50000.0; // Start at $50,000 (like BTC)
     for (int i = 0; i < 10000; ++i) {
         price *= (1.0 + returns(rng));
         prices.push_back(price);
@@ -65,7 +63,7 @@ int main() {
         k.low = static_cast<Price>(base * 0.995 * 10000);
         k.close = static_cast<Price>(base * (1.0 + (rng() % 100 - 50) / 10000.0) * 10000);
         k.volume = 1000;
-        k.open_time = i * 3600000;  // 1 hour intervals
+        k.open_time = i * 3600000; // 1 hour intervals
         klines.push_back(k);
     }
 
@@ -92,7 +90,8 @@ int main() {
         std::cout << "P99:     " << stats.percentile(99) << " ns\n";
         std::cout << "P99.9:   " << stats.percentile(99.9) << " ns\n";
         std::cout << "Max:     " << stats.max_val() << " ns\n";
-        std::cout << "Total:   " << std::setprecision(2) << (stats.mean() * stats.count() / 1e6) << " ms for " << stats.count() << " updates\n";
+        std::cout << "Total:   " << std::setprecision(2) << (stats.mean() * stats.count() / 1e6) << " ms for "
+                  << stats.count() << " updates\n";
         std::cout << "\n";
     }
 
@@ -116,7 +115,8 @@ int main() {
         std::cout << "P99:     " << stats.percentile(99) << " ns\n";
         std::cout << "P99.9:   " << stats.percentile(99.9) << " ns\n";
         std::cout << "Max:     " << stats.max_val() << " ns\n";
-        std::cout << "Total:   " << std::setprecision(2) << (stats.mean() * stats.count() / 1e6) << " ms for " << stats.count() << " updates\n";
+        std::cout << "Total:   " << std::setprecision(2) << (stats.mean() * stats.count() / 1e6) << " ms for "
+                  << stats.count() << " updates\n";
         std::cout << "\n";
     }
 
@@ -132,9 +132,11 @@ int main() {
             for (const auto& p : prices) {
                 auto start = Clock::now();
                 window.push_back(p);
-                if (window.size() > 20) window.erase(window.begin());
+                if (window.size() > 20)
+                    window.erase(window.begin());
                 ma = 0;
-                for (double v : window) ma += v;
+                for (double v : window)
+                    ma += v;
                 ma /= window.size();
                 [[maybe_unused]] bool buy = (p > ma * 1.01);
                 auto end = Clock::now();
@@ -159,7 +161,8 @@ int main() {
         std::cout << "Simple MA strategy:     " << std::fixed << std::setprecision(0)
                   << (simple_total_ns / prices.size()) << " ns/update\n";
         std::cout << "With regime detection:  " << (regime_total_ns / prices.size()) << " ns/update\n";
-        std::cout << "Overhead:               " << ((regime_total_ns - simple_total_ns) / prices.size()) << " ns/update\n";
+        std::cout << "Overhead:               " << ((regime_total_ns - simple_total_ns) / prices.size())
+                  << " ns/update\n";
         std::cout << "Overhead ratio:         " << std::setprecision(1)
                   << (100.0 * regime_total_ns / simple_total_ns - 100) << "%\n";
         std::cout << "\n";
@@ -174,7 +177,7 @@ int main() {
         std::cout << "Max buffer size:       " << (config.lookback * 2) << " elements\n";
 
         size_t deque_size = config.lookback * 2 * sizeof(double);
-        size_t total_deques = 3 * deque_size;  // prices_, highs_, lows_
+        size_t total_deques = 3 * deque_size; // prices_, highs_, lows_
         size_t config_size = sizeof(RegimeConfig);
         size_t state_size = sizeof(double) * 3 + sizeof(MarketRegime);
 
@@ -205,7 +208,8 @@ int main() {
 
         std::cout << "Iterations:      " << iterations << "\n";
         std::cout << "Total time:      " << std::fixed << std::setprecision(2) << total_ms << " ms\n";
-        std::cout << "Throughput:      " << std::setprecision(0) << (iterations / (total_ms / 1000.0)) << " updates/sec\n";
+        std::cout << "Throughput:      " << std::setprecision(0) << (iterations / (total_ms / 1000.0))
+                  << " updates/sec\n";
         std::cout << "Avg latency:     " << std::setprecision(0) << (total_ms * 1e6 / iterations) << " ns/update\n";
         std::cout << "\n";
     }

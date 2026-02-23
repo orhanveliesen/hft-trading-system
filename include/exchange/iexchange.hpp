@@ -1,9 +1,10 @@
 #pragma once
 
-#include "../types.hpp"
 #include "../execution/execution_engine.hpp"
-#include <functional>
+#include "../types.hpp"
+
 #include <cstdint>
+#include <functional>
 
 namespace hft {
 namespace exchange {
@@ -24,14 +25,11 @@ public:
     // NOTE: qty is double (not Quantity/uint32_t) because crypto trades use
     // fractional quantities (e.g., 0.01 BTC). Using uint32_t would truncate
     // these to 0, breaking portfolio accounting.
-    using FillCallback = std::function<void(
-        uint64_t order_id,
-        const char* symbol_name,  // Symbol name directly, no ID conversion needed
-        Side side,
-        double qty,               // Fractional quantity (e.g., 0.01 BTC)
-        Price fill_price,
-        double commission
-    )>;
+    using FillCallback = std::function<void(uint64_t order_id,
+                                            const char* symbol_name, // Symbol name directly, no ID conversion needed
+                                            Side side,
+                                            double qty, // Fractional quantity (e.g., 0.01 BTC)
+                                            Price fill_price, double commission)>;
 
     using SlippageCallback = std::function<void(double slippage_cost)>;
 
@@ -42,14 +40,10 @@ public:
     // =========================================================================
 
     /// Send market order - fills immediately at current price + slippage
-    uint64_t send_market_order(
-        Symbol symbol, Side side, double qty, Price expected_price
-    ) override = 0;
+    uint64_t send_market_order(Symbol symbol, Side side, double qty, Price expected_price) override = 0;
 
     /// Send limit order - pending until price crosses limit
-    uint64_t send_limit_order(
-        Symbol symbol, Side side, double qty, Price limit_price
-    ) override = 0;
+    uint64_t send_limit_order(Symbol symbol, Side side, double qty, Price limit_price) override = 0;
 
     /// Cancel a pending order
     bool cancel_order(uint64_t order_id) override = 0;
@@ -62,12 +56,7 @@ public:
     // =========================================================================
 
     /// Called on each price update to check for limit fills
-    virtual void on_price_update(
-        Symbol symbol,
-        Price bid,
-        Price ask,
-        uint64_t timestamp_ns
-    ) = 0;
+    virtual void on_price_update(Symbol symbol, Price bid, Price ask, uint64_t timestamp_ns) = 0;
 
     // =========================================================================
     // Callbacks
@@ -109,5 +98,5 @@ public:
     virtual double total_commission() const = 0;
 };
 
-}  // namespace exchange
-}  // namespace hft
+} // namespace exchange
+} // namespace hft

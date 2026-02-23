@@ -1,12 +1,13 @@
 #pragma once
 
 #include "../types.hpp"
-#include <unordered_map>
-#include <vector>
-#include <string>
+
+#include <algorithm>
 #include <cstdint>
 #include <cstdlib>
-#include <algorithm>
+#include <string>
+#include <unordered_map>
+#include <vector>
 
 namespace hft {
 namespace risk {
@@ -26,39 +27,39 @@ constexpr int64_t PRICE_SCALE = 10000;
  */
 struct EnhancedRiskConfig {
     // Initial capital (required - all percentage limits are calculated from this)
-    Capital initial_capital = 0;            // Must be set!
+    Capital initial_capital = 0; // Must be set!
 
     // Daily loss limit as percentage of initial capital
-    double daily_loss_limit_pct = 0.02;     // 2% daily loss limit (0.02 = 2%)
+    double daily_loss_limit_pct = 0.02; // 2% daily loss limit (0.02 = 2%)
 
     // Max drawdown from peak as percentage
-    double max_drawdown_pct = 0.10;         // 10% max drawdown (0.10 = 10%)
+    double max_drawdown_pct = 0.10; // 10% max drawdown (0.10 = 10%)
 
     // Max total notional exposure as percentage of initial capital
-    double max_notional_pct = 1.0;          // 100% of capital (1.0 = 100%)
+    double max_notional_pct = 1.0; // 100% of capital (1.0 = 100%)
 
     // Order limits (quantity-based, not percentage)
-    Quantity max_order_size = 10000;        // Max single order size
+    Quantity max_order_size = 10000; // Max single order size
 
     // Position limits (quantity-based, not percentage)
-    Position max_total_position = 100000;   // Max total absolute position
+    Position max_total_position = 100000; // Max total absolute position
 };
 
 /**
  * Per-symbol risk limits
  */
 struct SymbolRiskLimit {
-    Position max_position = 0;   // 0 = no limit
-    Notional max_notional = 0;   // 0 = no limit
+    Position max_position = 0; // 0 = no limit
+    Notional max_notional = 0; // 0 = no limit
 };
 
 /**
  * Per-symbol risk state (updated on each fill)
  */
 struct SymbolRiskState {
-    Position position = 0;       // Current net position (negative = short)
-    Notional notional = 0;       // Current notional (abs(position) * last_price)
-    Price last_price = 0;        // Last fill price (for notional calc)
+    Position position = 0; // Current net position (negative = short)
+    Notional notional = 0; // Current notional (abs(position) * last_price)
+    Price last_price = 0;  // Last fill price (for notional calc)
 
     void reset() {
         position = 0;
@@ -101,16 +102,9 @@ struct RiskState {
 class EnhancedRiskManager {
 public:
     explicit EnhancedRiskManager(const EnhancedRiskConfig& config = EnhancedRiskConfig{})
-        : config_(config)
-        , initial_capital_(config.initial_capital)
-        , current_pnl_(0)
-        , peak_equity_(config.initial_capital)
-        , daily_start_pnl_(0)
-        , total_notional_(0)
-        , daily_limit_breached_(false)
-        , drawdown_breached_(false)
-        , halted_(false)
-    {}
+        : config_(config), initial_capital_(config.initial_capital), current_pnl_(0),
+          peak_equity_(config.initial_capital), daily_start_pnl_(0), total_notional_(0), daily_limit_breached_(false),
+          drawdown_breached_(false), halted_(false) {}
 
     // ========================================
     // Symbol Registration (Cold Path)
@@ -135,9 +129,7 @@ public:
      * @param max_notional Max notional limit (0 = no limit)
      * @return SymbolIndex for hot path operations
      */
-    SymbolIndex register_symbol(const std::string& symbol,
-                                 Position max_position = 0,
-                                 Notional max_notional = 0) {
+    SymbolIndex register_symbol(const std::string& symbol, Position max_position = 0, Notional max_notional = 0) {
         // Check if already registered
         auto it = symbol_to_index_.find(symbol);
         if (it != symbol_to_index_.end()) {
@@ -173,7 +165,8 @@ public:
      */
     const std::string& get_symbol_name(SymbolIndex index) const {
         static const std::string empty;
-        if (index >= index_to_symbol_.size()) return empty;
+        if (index >= index_to_symbol_.size())
+            return empty;
         return index_to_symbol_[index];
     }
 
@@ -212,8 +205,7 @@ public:
 
         // Check drawdown from peak
         if (peak_equity_ > 0) {
-            double drawdown = static_cast<double>(peak_equity_ - current_equity) /
-                              static_cast<double>(peak_equity_);
+            double drawdown = static_cast<double>(peak_equity_ - current_equity) / static_cast<double>(peak_equity_);
             if (drawdown > config_.max_drawdown_pct) {
                 drawdown_breached_ = true;
                 halted_ = true;
@@ -247,8 +239,8 @@ public:
      *
      * Performance: ~4-5 cycles (array indexing only)
      */
-    __attribute__((always_inline))
-    bool check_order(SymbolIndex symbol_index, Side side, Quantity qty, Price price) const {
+    __attribute__((always_inline)) bool check_order(SymbolIndex symbol_index, Side side, Quantity qty,
+                                                    Price price) const {
         // Global halt check
         if (halted_) [[unlikely]] {
             return false;
@@ -317,10 +309,7 @@ public:
     /**
      * Quick check if trading is allowed at all
      */
-    __attribute__((always_inline))
-    bool can_trade() const {
-        return !halted_;
-    }
+    __attribute__((always_inline)) bool can_trade() const { return !halted_; }
 
     // ========================================
     // Fill Updates - HOT PATH
@@ -329,9 +318,9 @@ public:
     /**
      * Update state after a fill (HOT PATH)
      */
-    __attribute__((always_inline))
-    void on_fill(SymbolIndex symbol_index, Side side, Quantity qty, Price price) {
-        if (symbol_index >= states_.size()) [[unlikely]] return;
+    __attribute__((always_inline)) void on_fill(SymbolIndex symbol_index, Side side, Quantity qty, Price price) {
+        if (symbol_index >= states_.size()) [[unlikely]]
+            return;
 
         auto& state = states_[symbol_index];
 
@@ -357,7 +346,7 @@ public:
     void on_fill(const std::string& symbol, Side side, Quantity qty, Price price) {
         SymbolIndex idx = get_symbol_index(symbol);
         if (idx == INVALID_SYMBOL_INDEX) {
-            idx = register_symbol(symbol);  // Auto-register
+            idx = register_symbol(symbol); // Auto-register
         }
         on_fill(idx, side, qty, price);
     }
@@ -374,30 +363,31 @@ public:
     Capital peak_equity() const { return peak_equity_; }
     Notional total_notional() const { return total_notional_; }
 
-    PnL daily_pnl() const {
-        return current_pnl_ - daily_start_pnl_;
-    }
+    PnL daily_pnl() const { return current_pnl_ - daily_start_pnl_; }
 
     double current_drawdown_pct() const {
-        if (peak_equity_ <= 0) return 0.0;
+        if (peak_equity_ <= 0)
+            return 0.0;
         Capital current_equity = initial_capital_ + current_pnl_;
-        return static_cast<double>(peak_equity_ - current_equity) /
-               static_cast<double>(peak_equity_);
+        return static_cast<double>(peak_equity_ - current_equity) / static_cast<double>(peak_equity_);
     }
 
     Position symbol_position(SymbolIndex index) const {
-        if (index >= states_.size()) return 0;
+        if (index >= states_.size())
+            return 0;
         return states_[index].position;
     }
 
     Position symbol_position(const std::string& symbol) const {
         SymbolIndex idx = get_symbol_index(symbol);
-        if (idx == INVALID_SYMBOL_INDEX) return 0;
+        if (idx == INVALID_SYMBOL_INDEX)
+            return 0;
         return states_[idx].position;
     }
 
     Notional symbol_notional(SymbolIndex index) const {
-        if (index >= states_.size()) return 0;
+        if (index >= states_.size())
+            return 0;
         return states_[index].notional;
     }
 
@@ -418,9 +408,7 @@ public:
     // Control
     // ========================================
 
-    void halt() {
-        halted_ = true;
-    }
+    void halt() { halted_ = true; }
 
     void reset_halt() {
         halted_ = false;
@@ -450,9 +438,7 @@ public:
 
     size_t symbol_count() const { return states_.size(); }
 
-    const std::vector<std::string>& symbols() const {
-        return index_to_symbol_;
-    }
+    const std::vector<std::string>& symbols() const { return index_to_symbol_; }
 
 private:
     void recalculate_total_notional() {
@@ -486,5 +472,5 @@ private:
     std::vector<std::string> index_to_symbol_;
 };
 
-}  // namespace risk
-}  // namespace hft
+} // namespace risk
+} // namespace hft

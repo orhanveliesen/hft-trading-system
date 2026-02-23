@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../types.hpp"
+
 #include <cmath>
 
 namespace hft {
@@ -21,15 +22,15 @@ namespace strategy {
 
 struct PairSignal {
     bool should_trade = false;
-    bool long_first = false;   // true: Long A, Short B | false: Short A, Long B
+    bool long_first = false; // true: Long A, Short B | false: Short A, Long B
     Quantity quantity = 0;
 };
 
 struct PairsConfig {
-    double hedge_ratio = 1.0;        // B'nin kaç katı A'yı hedge eder
-    double entry_zscore = 2.0;       // Pozisyon aç (2 sigma)
-    double exit_zscore = 0.5;        // Pozisyon kapat (0.5 sigma)
-    uint32_t lookback = 100;         // Mean/std hesaplama penceresi
+    double hedge_ratio = 1.0;  // B'nin kaç katı A'yı hedge eder
+    double entry_zscore = 2.0; // Pozisyon aç (2 sigma)
+    double exit_zscore = 0.5;  // Pozisyon kapat (0.5 sigma)
+    uint32_t lookback = 100;   // Mean/std hesaplama penceresi
     Quantity order_size = 100;
     int64_t max_position = 1000;
 };
@@ -39,13 +40,7 @@ public:
     static constexpr size_t MAX_LOOKBACK = 256;
 
     explicit PairsTrading(const PairsConfig& config = {})
-        : config_(config)
-        , spreads_{}
-        , head_(0)
-        , count_(0)
-        , in_position_(false)
-        , position_is_long_first_(false)
-    {
+        : config_(config), spreads_{}, head_(0), count_(0), in_position_(false), position_is_long_first_(false) {
         if (config_.lookback > MAX_LOOKBACK) {
             config_.lookback = MAX_LOOKBACK;
         }
@@ -67,14 +62,15 @@ public:
         head_ = (head_ + 1) % config_.lookback;
         if (count_ < config_.lookback) {
             ++count_;
-            return signal;  // Yeterli veri yok
+            return signal; // Yeterli veri yok
         }
 
         // Mean ve std hesapla
         double mean = calculate_mean();
         double std = calculate_std(mean);
 
-        if (std < 0.0001) return signal;  // Volatilite çok düşük
+        if (std < 0.0001)
+            return signal; // Volatilite çok düşük
 
         // Z-score hesapla
         double zscore = (spread - mean) / std;
@@ -86,7 +82,7 @@ public:
                 // Spread çok yüksek → Short A, Long B
                 if (current_position > -config_.max_position) {
                     signal.should_trade = true;
-                    signal.long_first = false;  // Short A, Long B
+                    signal.long_first = false; // Short A, Long B
                     signal.quantity = config_.order_size;
                     in_position_ = true;
                     position_is_long_first_ = false;
@@ -95,7 +91,7 @@ public:
                 // Spread çok düşük → Long A, Short B
                 if (current_position < config_.max_position) {
                     signal.should_trade = true;
-                    signal.long_first = true;  // Long A, Short B
+                    signal.long_first = true; // Long A, Short B
                     signal.quantity = config_.order_size;
                     in_position_ = true;
                     position_is_long_first_ = true;
@@ -116,7 +112,7 @@ public:
 
             if (should_exit) {
                 signal.should_trade = true;
-                signal.long_first = !position_is_long_first_;  // Ters pozisyon
+                signal.long_first = !position_is_long_first_; // Ters pozisyon
                 signal.quantity = config_.order_size;
                 in_position_ = false;
             }
@@ -128,10 +124,12 @@ public:
     // Durum sorgulama
     bool in_position() const { return in_position_; }
     double current_zscore() const {
-        if (count_ < config_.lookback) return 0.0;
+        if (count_ < config_.lookback)
+            return 0.0;
         double mean = calculate_mean();
         double std = calculate_std(mean);
-        if (std < 0.0001) return 0.0;
+        if (std < 0.0001)
+            return 0.0;
         return (spreads_[(head_ + config_.lookback - 1) % config_.lookback] - mean) / std;
     }
 
@@ -169,5 +167,5 @@ private:
     bool position_is_long_first_;
 };
 
-}  // namespace strategy
-}  // namespace hft
+} // namespace strategy
+} // namespace hft

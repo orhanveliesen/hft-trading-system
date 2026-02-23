@@ -1,22 +1,24 @@
+#include "../include/ipc/shared_config.hpp"
+#include "../include/paper/queue_fill_detector.hpp"
+#include "../include/risk/enhanced_risk_manager.hpp"
+#include "../include/types.hpp"
+
+#include <algorithm>
 #include <cassert>
+#include <functional>
 #include <iostream>
 #include <vector>
-#include <functional>
-#include <algorithm>
-#include "../include/types.hpp"
-#include "../include/paper/queue_fill_detector.hpp"
-#include "../include/ipc/shared_config.hpp"
-#include "../include/risk/enhanced_risk_manager.hpp"
 
 using namespace hft;
 using namespace hft::paper;
 
 #define TEST(name) void name()
-#define RUN_TEST(name) do { \
-    std::cout << "  " << #name << "... "; \
-    name(); \
-    std::cout << "PASSED\n"; \
-} while(0)
+#define RUN_TEST(name)                                                                                                 \
+    do {                                                                                                               \
+        std::cout << "  " << #name << "... ";                                                                          \
+        name();                                                                                                        \
+        std::cout << "PASSED\n";                                                                                       \
+    } while (0)
 
 #define ASSERT_EQ(a, b) assert((a) == (b))
 #define ASSERT_TRUE(x) assert(x)
@@ -41,20 +43,16 @@ public:
     using FillCallback = std::function<void(Symbol, OrderId, Side, double qty, Price)>;
     using SlippageCallback = std::function<void(double)>;
 
-    PaperOrderSender() : next_id_(1), total_orders_(0), total_fills_(0),
-                         config_(nullptr), total_slippage_(0),
-                         use_queue_sim_(false), default_queue_depth_(0) {}
+    PaperOrderSender()
+        : next_id_(1), total_orders_(0), total_fills_(0), config_(nullptr), total_slippage_(0), use_queue_sim_(false),
+          default_queue_depth_(0) {}
 
     void set_config(const ipc::SharedConfig* config) { config_ = config; }
 
     // Queue simulation configuration
-    void enable_queue_simulation(bool enable) {
-        use_queue_sim_ = enable;
-    }
+    void enable_queue_simulation(bool enable) { use_queue_sim_ = enable; }
 
-    void set_default_queue_depth(Quantity depth) {
-        default_queue_depth_ = depth;
-    }
+    void set_default_queue_depth(Quantity depth) { default_queue_depth_ = depth; }
 
     // Feed trade data to queue detector (for queue position updates)
     void on_trade(Symbol symbol, Price price, Quantity qty, Side aggressor_side, uint64_t timestamp_ns) {
@@ -70,12 +68,11 @@ public:
 
         // Register limit orders with QueueFillDetector if queue simulation enabled
         if (!is_market && use_queue_sim_) {
-            queue_detector_.register_order(id, symbol, side, expected_price,
-                                          static_cast<Quantity>(qty), current_time_ns());
+            queue_detector_.register_order(id, symbol, side, expected_price, static_cast<Quantity>(qty),
+                                           current_time_ns());
 
             if (default_queue_depth_ > 0) {
-                queue_detector_.set_initial_queue_depth(symbol, side, expected_price,
-                                                       default_queue_depth_);
+                queue_detector_.set_initial_queue_depth(symbol, side, expected_price, default_queue_depth_);
             }
         }
 
@@ -89,8 +86,7 @@ public:
     }
 
     bool cancel_order(Symbol /*symbol*/, OrderId id) {
-        auto it = std::find_if(pending_.begin(), pending_.end(),
-            [id](const Order& o) { return o.id == id; });
+        auto it = std::find_if(pending_.begin(), pending_.end(), [id](const Order& o) { return o.id == id; });
         if (it != pending_.end()) {
             if (use_queue_sim_) {
                 queue_detector_.cancel_order(id);
@@ -136,9 +132,11 @@ public:
 
                 double slippage_cost = slippage_amount * o.qty / risk::PRICE_SCALE;
                 total_slippage_ += slippage_cost;
-                if (on_slippage_) on_slippage_(slippage_cost);
+                if (on_slippage_)
+                    on_slippage_(slippage_cost);
 
-                if (on_fill_) on_fill_(o.symbol, o.id, o.side, o.qty, fill_price);
+                if (on_fill_)
+                    on_fill_(o.symbol, o.id, o.side, o.qty, fill_price);
                 total_fills_++;
 
             } else if (use_queue_sim_) {
@@ -147,7 +145,8 @@ public:
                 if (result.filled && result.confidence == FillConfidence::Confirmed) {
                     // Queue cleared, fill at limit price
                     fill_price = o.expected_price;
-                    if (on_fill_) on_fill_(o.symbol, o.id, o.side, o.qty, fill_price);
+                    if (on_fill_)
+                        on_fill_(o.symbol, o.id, o.side, o.qty, fill_price);
                     total_fills_++;
                 } else {
                     // Still in queue, keep pending
@@ -175,7 +174,8 @@ public:
                 }
 
                 if (can_fill) {
-                    if (on_fill_) on_fill_(o.symbol, o.id, o.side, o.qty, fill_price);
+                    if (on_fill_)
+                        on_fill_(o.symbol, o.id, o.side, o.qty, fill_price);
                     total_fills_++;
                 } else {
                     remaining.push_back(o);
@@ -241,7 +241,7 @@ TEST(test_queue_sim_disabled_fills_immediately) {
     // Limit buy at ask price (ask = 100000000, which equals limit)
     constexpr Price ASK = 100000000;
     constexpr Price BID = 99000000;
-    sender.send_order(0, Side::Buy, 1.0, ASK, false);  // Limit order at ask
+    sender.send_order(0, Side::Buy, 1.0, ASK, false); // Limit order at ask
     sender.process_fills(0, BID, ASK);
 
     // Should fill immediately (old behavior) since ask <= limit_price
@@ -255,12 +255,10 @@ TEST(test_queue_sim_disabled_fills_immediately) {
 TEST(test_queue_sim_enabled_waits_in_queue) {
     PaperOrderSender sender;
     sender.enable_queue_simulation(true);
-    sender.set_default_queue_depth(1000);  // 1000 units ahead
+    sender.set_default_queue_depth(1000); // 1000 units ahead
 
     int fill_count = 0;
-    sender.set_fill_callback([&](Symbol, OrderId, Side, double, Price) {
-        fill_count++;
-    });
+    sender.set_fill_callback([&](Symbol, OrderId, Side, double, Price) { fill_count++; });
 
     constexpr Price ASK = 100000000;
     constexpr Price BID = 99000000;
@@ -281,9 +279,7 @@ TEST(test_queue_sim_fills_after_trades) {
     sender.set_default_queue_depth(1000);
 
     int fill_count = 0;
-    sender.set_fill_callback([&](Symbol, OrderId, Side, double, Price) {
-        fill_count++;
-    });
+    sender.set_fill_callback([&](Symbol, OrderId, Side, double, Price) { fill_count++; });
 
     constexpr Price LIMIT_PRICE = 100000000;
     constexpr Price BID = 99000000;
@@ -312,16 +308,14 @@ TEST(test_queue_sim_fills_after_trades) {
 TEST(test_market_order_bypasses_queue) {
     PaperOrderSender sender;
     sender.enable_queue_simulation(true);
-    sender.set_default_queue_depth(10000);  // Big queue
+    sender.set_default_queue_depth(10000); // Big queue
 
     int fill_count = 0;
-    sender.set_fill_callback([&](Symbol, OrderId, Side, double, Price) {
-        fill_count++;
-    });
+    sender.set_fill_callback([&](Symbol, OrderId, Side, double, Price) { fill_count++; });
 
     constexpr Price ASK = 100000000;
     constexpr Price BID = 99000000;
-    sender.send_order(0, Side::Buy, 1.0, ASK, true);  // MARKET order
+    sender.send_order(0, Side::Buy, 1.0, ASK, true); // MARKET order
     sender.process_fills(0, BID, ASK);
 
     // Market order ignores queue, fills immediately
@@ -336,13 +330,11 @@ TEST(test_market_order_slippage_with_queue_sim) {
     sender.enable_queue_simulation(true);
 
     Price filled_price = 0;
-    sender.set_fill_callback([&](Symbol, OrderId, Side, double, Price p) {
-        filled_price = p;
-    });
+    sender.set_fill_callback([&](Symbol, OrderId, Side, double, Price p) { filled_price = p; });
 
     constexpr Price ASK = 100000000;
     constexpr Price BID = 99000000;
-    sender.send_order(0, Side::Buy, 1.0, ASK, true);  // MARKET order
+    sender.send_order(0, Side::Buy, 1.0, ASK, true); // MARKET order
     sender.process_fills(0, BID, ASK);
 
     // Should have slippage (fill > expected for buy)
@@ -365,7 +357,7 @@ TEST(test_sell_limit_queue_sim) {
         fill_price = p;
     });
 
-    constexpr Price LIMIT_PRICE = 99000000;  // Sell at bid
+    constexpr Price LIMIT_PRICE = 99000000; // Sell at bid
     constexpr Price BID = 99000000;
     constexpr Price ASK = 100000000;
 
@@ -395,9 +387,7 @@ TEST(test_cancel_removes_from_queue) {
     sender.set_default_queue_depth(1000);
 
     int fill_count = 0;
-    sender.set_fill_callback([&](Symbol, OrderId, Side, double, Price) {
-        fill_count++;
-    });
+    sender.set_fill_callback([&](Symbol, OrderId, Side, double, Price) { fill_count++; });
 
     constexpr Price LIMIT_PRICE = 100000000;
     sender.send_order(0, Side::Buy, 1.0, LIMIT_PRICE, false);
@@ -423,18 +413,16 @@ TEST(test_cancel_removes_from_queue) {
 TEST(test_multiple_orders_queue_fifo) {
     PaperOrderSender sender;
     sender.enable_queue_simulation(true);
-    sender.set_default_queue_depth(0);  // No depth ahead, first order at front
+    sender.set_default_queue_depth(0); // No depth ahead, first order at front
 
     std::vector<OrderId> filled_ids;
-    sender.set_fill_callback([&](Symbol, OrderId id, Side, double, Price) {
-        filled_ids.push_back(id);
-    });
+    sender.set_fill_callback([&](Symbol, OrderId id, Side, double, Price) { filled_ids.push_back(id); });
 
     constexpr Price LIMIT_PRICE = 100000000;
 
     // Submit two orders at same price
-    sender.send_order(0, Side::Buy, 1.0, LIMIT_PRICE, false);  // Order 1
-    sender.send_order(0, Side::Buy, 1.0, LIMIT_PRICE, false);  // Order 2
+    sender.send_order(0, Side::Buy, 1.0, LIMIT_PRICE, false); // Order 1
+    sender.send_order(0, Side::Buy, 1.0, LIMIT_PRICE, false); // Order 2
 
     // Trade for only first order quantity
     sender.on_trade(0, LIMIT_PRICE, 1, Side::Sell, 2000);
@@ -458,9 +446,7 @@ TEST(test_stats_with_queue_sim) {
     sender.set_default_queue_depth(100);
 
     double total_slippage = 0;
-    sender.set_slippage_callback([&](double slip) {
-        total_slippage += slip;
-    });
+    sender.set_slippage_callback([&](double slip) { total_slippage += slip; });
 
     sender.set_fill_callback([](Symbol, OrderId, Side, double, Price) {});
 
@@ -478,7 +464,7 @@ TEST(test_stats_with_queue_sim) {
 
     ASSERT_EQ(sender.total_orders(), 2u);
     ASSERT_EQ(sender.total_fills(), 2u);
-    ASSERT_GT(total_slippage, 0);  // Only market order had slippage
+    ASSERT_GT(total_slippage, 0); // Only market order had slippage
 }
 
 // ============================================

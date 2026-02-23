@@ -8,53 +8,58 @@
  * - Performance tracking (streak, total trades, win rate)
  */
 
-#include <iostream>
+#include "../include/ipc/symbol_config.hpp"
+
 #include <cassert>
 #include <cstring>
-
-#include "../include/ipc/symbol_config.hpp"
+#include <iostream>
 
 #define TEST(name) void name()
 
-#define RUN_TEST(name) do { \
-    std::cout << "  " << #name << "... "; \
-    try { \
-        name(); \
-        std::cout << "PASSED\n"; \
-    } catch (...) { \
-        std::cout << "FAILED (exception)\n"; \
-        return 1; \
-    } \
-} while(0)
+#define RUN_TEST(name)                                                                                                 \
+    do {                                                                                                               \
+        std::cout << "  " << #name << "... ";                                                                          \
+        try {                                                                                                          \
+            name();                                                                                                    \
+            std::cout << "PASSED\n";                                                                                   \
+        } catch (...) {                                                                                                \
+            std::cout << "FAILED (exception)\n";                                                                       \
+            return 1;                                                                                                  \
+        }                                                                                                              \
+    } while (0)
 
-#define ASSERT_EQ(a, b) do { \
-    if ((a) != (b)) { \
-        std::cerr << "\nFAIL: " << #a << " (" << (a) << ") != " << #b << " (" << (b) << ")\n"; \
-        assert(false); \
-    } \
-} while(0)
+#define ASSERT_EQ(a, b)                                                                                                \
+    do {                                                                                                               \
+        if ((a) != (b)) {                                                                                              \
+            std::cerr << "\nFAIL: " << #a << " (" << (a) << ") != " << #b << " (" << (b) << ")\n";                     \
+            assert(false);                                                                                             \
+        }                                                                                                              \
+    } while (0)
 
-#define ASSERT_TRUE(expr) do { \
-    if (!(expr)) { \
-        std::cerr << "\nFAIL: " << #expr << " is false\n"; \
-        assert(false); \
-    } \
-} while(0)
+#define ASSERT_TRUE(expr)                                                                                              \
+    do {                                                                                                               \
+        if (!(expr)) {                                                                                                 \
+            std::cerr << "\nFAIL: " << #expr << " is false\n";                                                         \
+            assert(false);                                                                                             \
+        }                                                                                                              \
+    } while (0)
 
-#define ASSERT_FALSE(expr) do { \
-    if ((expr)) { \
-        std::cerr << "\nFAIL: " << #expr << " is true (expected false)\n"; \
-        assert(false); \
-    } \
-} while(0)
+#define ASSERT_FALSE(expr)                                                                                             \
+    do {                                                                                                               \
+        if ((expr)) {                                                                                                  \
+            std::cerr << "\nFAIL: " << #expr << " is true (expected false)\n";                                         \
+            assert(false);                                                                                             \
+        }                                                                                                              \
+    } while (0)
 
-#define ASSERT_NEAR(a, b, eps) do { \
-    double _a = (a), _b = (b), _eps = (eps); \
-    if (std::abs(_a - _b) > _eps) { \
-        std::cerr << "\nFAIL: " << #a << " (" << _a << ") != " << #b << " (" << _b << ") within " << _eps << "\n"; \
-        assert(false); \
-    } \
-} while(0)
+#define ASSERT_NEAR(a, b, eps)                                                                                         \
+    do {                                                                                                               \
+        double _a = (a), _b = (b), _eps = (eps);                                                                       \
+        if (std::abs(_a - _b) > _eps) {                                                                                \
+            std::cerr << "\nFAIL: " << #a << " (" << _a << ") != " << #b << " (" << _b << ") within " << _eps << "\n"; \
+            assert(false);                                                                                             \
+        }                                                                                                              \
+    } while (0)
 
 // =============================================================================
 // TEST 1: Default values after init
@@ -79,7 +84,7 @@ TEST(symbol_tuning_config_default_values) {
     // Initial state (zeroed by memset in init())
     ASSERT_EQ(cfg.consecutive_losses, 0);
     ASSERT_EQ(cfg.consecutive_wins, 0);
-    ASSERT_EQ(cfg.current_mode, 0);  // AGGRESSIVE (default from memset)
+    ASSERT_EQ(cfg.current_mode, 0); // AGGRESSIVE (default from memset)
 
     // Performance
     ASSERT_EQ(cfg.total_trades, 0);
@@ -106,8 +111,8 @@ TEST(symbol_tuning_config_threshold_accessors) {
     ASSERT_NEAR(cfg.sharpe_defensive(), 0.0, 0.01);
 
     // Win rate thresholds (0-100 scale)
-    ASSERT_NEAR(cfg.win_rate_aggressive_threshold(), 60.0, 0.01);  // 60%
-    ASSERT_NEAR(cfg.win_rate_cautious_threshold(), 40.0, 0.01);    // 40%
+    ASSERT_NEAR(cfg.win_rate_aggressive_threshold(), 60.0, 0.01); // 60%
+    ASSERT_NEAR(cfg.win_rate_cautious_threshold(), 40.0, 0.01);   // 40%
 }
 
 // =============================================================================
@@ -120,12 +125,12 @@ TEST(symbol_tuning_config_record_trade) {
     cfg.init("SOLUSDT");
 
     // Record a winning trade
-    cfg.record_trade(true, 1.5);  // 1.5% profit
+    cfg.record_trade(true, 1.5); // 1.5% profit
     ASSERT_EQ(cfg.consecutive_wins, 1);
     ASSERT_EQ(cfg.consecutive_losses, 0);
     ASSERT_EQ(cfg.total_trades, 1);
     ASSERT_EQ(cfg.winning_trades, 1);
-    ASSERT_NEAR(cfg.win_rate(), 100.0, 0.01);  // 100% (0-100 scale)
+    ASSERT_NEAR(cfg.win_rate(), 100.0, 0.01); // 100% (0-100 scale)
 
     // Record another winning trade
     cfg.record_trade(true, 2.0);
@@ -134,12 +139,12 @@ TEST(symbol_tuning_config_record_trade) {
     ASSERT_EQ(cfg.winning_trades, 2);
 
     // Record a losing trade - resets win streak
-    cfg.record_trade(false, -1.0);  // 1% loss
+    cfg.record_trade(false, -1.0); // 1% loss
     ASSERT_EQ(cfg.consecutive_wins, 0);
     ASSERT_EQ(cfg.consecutive_losses, 1);
     ASSERT_EQ(cfg.total_trades, 3);
     ASSERT_EQ(cfg.winning_trades, 2);
-    ASSERT_NEAR(cfg.win_rate(), 66.67, 0.1);  // 2/3 = 66.67% (0-100 scale)
+    ASSERT_NEAR(cfg.win_rate(), 66.67, 0.1); // 2/3 = 66.67% (0-100 scale)
 }
 
 // =============================================================================
@@ -159,7 +164,7 @@ TEST(shared_symbol_configs_create_and_find) {
     // Find existing config
     auto* btc2 = configs.find("BTCUSDT");
     ASSERT_TRUE(btc2 != nullptr);
-    ASSERT_TRUE(btc == btc2);  // Same pointer
+    ASSERT_TRUE(btc == btc2); // Same pointer
 
     // Find non-existent returns nullptr
     auto* unknown = configs.find("UNKNOWN");
@@ -186,14 +191,14 @@ TEST(shared_symbol_configs_update) {
     // Create initial config
     auto* cfg = configs.get_or_create("BTCUSDT");
     ASSERT_TRUE(cfg != nullptr);
-    ASSERT_EQ(cfg->losses_to_cautious, 2);  // Default
+    ASSERT_EQ(cfg->losses_to_cautious, 2); // Default
 
     // Create new config with different values
     SymbolTuningConfig new_cfg;
     new_cfg.init("BTCUSDT");
     new_cfg.losses_to_cautious = 3;  // Changed from default 2
-    new_cfg.losses_to_defensive = 5;  // Changed from default 4
-    new_cfg.target_pct_x100 = 400;  // 4%
+    new_cfg.losses_to_defensive = 5; // Changed from default 4
+    new_cfg.target_pct_x100 = 400;   // 4%
 
     // Update
     bool updated = configs.update("BTCUSDT", new_cfg);
@@ -216,14 +221,14 @@ TEST(symbol_tuning_config_position_sizing) {
     cfg.init("BTCUSDT");
 
     // Check default position sizing (from defaults.hpp)
-    ASSERT_NEAR(cfg.base_position_pct(), 2.0, 0.1);  // Default 2%
-    ASSERT_NEAR(cfg.max_position_pct(), 5.0, 0.1);   // Default 5%
-    ASSERT_NEAR(cfg.min_position_pct(), 1.0, 0.1);   // Default 1% (MIN_POSITION_X100=100)
+    ASSERT_NEAR(cfg.base_position_pct(), 2.0, 0.1); // Default 2%
+    ASSERT_NEAR(cfg.max_position_pct(), 5.0, 0.1);  // Default 5%
+    ASSERT_NEAR(cfg.min_position_pct(), 1.0, 0.1);  // Default 1% (MIN_POSITION_X100=100)
 
     // Modify and check
-    cfg.base_position_x100 = 300;  // 3%
-    cfg.max_position_x100 = 1000;  // 10%
-    cfg.min_position_x100 = 100;   // 1%
+    cfg.base_position_x100 = 300; // 3%
+    cfg.max_position_x100 = 1000; // 10%
+    cfg.min_position_x100 = 100;  // 1%
 
     ASSERT_NEAR(cfg.base_position_pct(), 3.0, 0.1);
     ASSERT_NEAR(cfg.max_position_pct(), 10.0, 0.1);
@@ -241,24 +246,24 @@ TEST(symbol_tuning_config_cooldown_bounds) {
 
     // Default cooldown should be reasonable
     ASSERT_TRUE(cfg.cooldown_ms > 0);
-    ASSERT_TRUE(cfg.cooldown_ms <= 30000);  // Max 30 seconds is reasonable
+    ASSERT_TRUE(cfg.cooldown_ms <= 30000); // Max 30 seconds is reasonable
 
     // Test setting valid cooldown
-    cfg.set_cooldown_ms(5000);  // 5 seconds
+    cfg.set_cooldown_ms(5000); // 5 seconds
     ASSERT_EQ(cfg.cooldown_ms, 5000);
 
     // Test clamping large values (must not overflow to negative)
-    cfg.set_cooldown_ms(45000);  // Larger than int16_t max (32767)
-    ASSERT_TRUE(cfg.cooldown_ms > 0);  // Must never be negative
-    ASSERT_TRUE(cfg.cooldown_ms <= 32767);  // Clamped to int16_t max
+    cfg.set_cooldown_ms(45000);            // Larger than int16_t max (32767)
+    ASSERT_TRUE(cfg.cooldown_ms > 0);      // Must never be negative
+    ASSERT_TRUE(cfg.cooldown_ms <= 32767); // Clamped to int16_t max
 
     // Test clamping negative values
     cfg.set_cooldown_ms(-1000);
-    ASSERT_TRUE(cfg.cooldown_ms > 0);  // Must not allow negative
+    ASSERT_TRUE(cfg.cooldown_ms > 0); // Must not allow negative
 
     // Verify it's clamped to a sensible minimum
     cfg.set_cooldown_ms(0);
-    ASSERT_TRUE(cfg.cooldown_ms >= 100);  // At least 100ms
+    ASSERT_TRUE(cfg.cooldown_ms >= 100); // At least 100ms
 }
 
 // =============================================================================

@@ -9,37 +9,38 @@
  * Run with: ./test_position_store
  */
 
-#include <iostream>
-#include <fstream>
-#include <cmath>
-#include <cassert>
-#include <cstdio>
 #include "../include/ipc/shared_portfolio_state.hpp"
 #include "../include/strategy/position_store.hpp"
+
+#include <cassert>
+#include <cmath>
+#include <cstdio>
+#include <fstream>
+#include <iostream>
 
 using namespace hft::ipc;
 using namespace hft::strategy;
 
 #define TEST(name) void test_##name()
-#define RUN_TEST(name) do { \
-    std::cout << "  Running " #name "... "; \
-    test_##name(); \
-    std::cout << "PASSED\n"; \
-} while(0)
+#define RUN_TEST(name)                                                                                                 \
+    do {                                                                                                               \
+        std::cout << "  Running " #name "... ";                                                                        \
+        test_##name();                                                                                                 \
+        std::cout << "PASSED\n";                                                                                       \
+    } while (0)
 
-#define ASSERT_DOUBLE_NEAR(a, b, tol) do { \
-    if (std::abs((a) - (b)) > (tol)) { \
-        std::cerr << "\nFAILED: " << #a << " != " << #b \
-                  << " (" << (a) << " != " << (b) << ")\n"; \
-        assert(false); \
-    } \
-} while(0)
+#define ASSERT_DOUBLE_NEAR(a, b, tol)                                                                                  \
+    do {                                                                                                               \
+        if (std::abs((a) - (b)) > (tol)) {                                                                             \
+            std::cerr << "\nFAILED: " << #a << " != " << #b << " (" << (a) << " != " << (b) << ")\n";                  \
+            assert(false);                                                                                             \
+        }                                                                                                              \
+    } while (0)
 
 static const char* TEST_FILE = "/tmp/test_positions.json";
 
 // Create a corrupted position file (simulating overselling bug)
-void write_corrupted_file(double initial_capital, double corrupted_cash,
-                          double position_qty, double position_price,
+void write_corrupted_file(double initial_capital, double corrupted_cash, double position_qty, double position_price,
                           double realized_pnl = 0) {
     std::ofstream out(TEST_FILE);
     out << "{\n"
@@ -90,8 +91,8 @@ TEST(corrupted_cash_is_corrected) {
     double initial_capital = 100000.0;
     double position_qty = 0.5;
     double position_price = 50000.0;
-    double corrupted_cash = 150000.0;  // Obviously wrong - more than initial!
-    double expected_cash = initial_capital - (position_qty * position_price);  // $75k
+    double corrupted_cash = 150000.0;                                         // Obviously wrong - more than initial!
+    double expected_cash = initial_capital - (position_qty * position_price); // $75k
 
     write_corrupted_file(initial_capital, corrupted_cash, position_qty, position_price);
 
@@ -107,11 +108,11 @@ TEST(corrupted_cash_is_corrected) {
 
     // Cash should be corrected to ~$75k, not the corrupted $150k
     double restored_cash = portfolio.cash();
-    ASSERT_DOUBLE_NEAR(restored_cash, expected_cash, 1000.0);  // Within $1k tolerance
+    ASSERT_DOUBLE_NEAR(restored_cash, expected_cash, 1000.0); // Within $1k tolerance
 
     // Definitely should NOT be the corrupted value
     assert(restored_cash < corrupted_cash);
-    assert(restored_cash <= initial_capital);  // Cash can't exceed initial if we bought something
+    assert(restored_cash <= initial_capital); // Cash can't exceed initial if we bought something
 
     cleanup_test_file();
 }
@@ -124,7 +125,7 @@ TEST(valid_cash_is_preserved) {
     double initial_capital = 100000.0;
     double position_qty = 0.5;
     double position_price = 50000.0;
-    double valid_cash = 74990.0;  // Slightly less due to commissions
+    double valid_cash = 74990.0; // Slightly less due to commissions
     double expected_cash = initial_capital - (position_qty * position_price);
 
     write_corrupted_file(initial_capital, valid_cash, position_qty, position_price);
@@ -148,10 +149,10 @@ TEST(massive_oversell_attack_corrected) {
     // Simulate massive overselling: $100k initial, tiny position
     // but attacker tried to sell 1000x what they had
     double initial_capital = 100000.0;
-    double position_qty = 0.0001;  // Tiny BTC position
-    double position_price = 100000.0;  // = $10 worth
-    double attack_cash = 10000000.0;  // $10 million (1000x oversell!)
-    double expected_cash = initial_capital - (position_qty * position_price);  // ~$99,990
+    double position_qty = 0.0001;                                             // Tiny BTC position
+    double position_price = 100000.0;                                         // = $10 worth
+    double attack_cash = 10000000.0;                                          // $10 million (1000x oversell!)
+    double expected_cash = initial_capital - (position_qty * position_price); // ~$99,990
 
     write_corrupted_file(initial_capital, attack_cash, position_qty, position_price);
 
@@ -178,8 +179,8 @@ TEST(negative_realized_pnl_reduces_cash) {
     double initial_capital = 100000.0;
     double position_qty = 0.0;
     double position_price = 0.0;
-    double realized_pnl = -5000.0;  // Lost $5k
-    double valid_cash = 95000.0;  // $100k - $5k
+    double realized_pnl = -5000.0; // Lost $5k
+    double valid_cash = 95000.0;   // $100k - $5k
     double expected_cash = initial_capital + realized_pnl;
 
     std::ofstream out(TEST_FILE);
@@ -221,8 +222,8 @@ TEST(cash_cannot_exceed_initial_plus_realized_pnl) {
     double initial_capital = 100000.0;
     double position_qty = 0.1;
     double position_price = 50000.0;  // $5k position
-    double realized_pnl = 1000.0;  // Made $1k profit
-    double corrupted_cash = 200000.0;  // Impossible - double the initial!
+    double realized_pnl = 1000.0;     // Made $1k profit
+    double corrupted_cash = 200000.0; // Impossible - double the initial!
     double expected_cash = initial_capital - (position_qty * position_price) + realized_pnl;
 
     write_corrupted_file(initial_capital, corrupted_cash, position_qty, position_price, realized_pnl);

@@ -1,18 +1,19 @@
-#include <cassert>
-#include <iostream>
-#include <atomic>
-#include <csignal>
-
 #include "../include/util/system.hpp"
+
+#include <atomic>
+#include <cassert>
+#include <csignal>
+#include <iostream>
 
 using namespace hft::util;
 
 #define TEST(name) void name()
-#define RUN_TEST(name) do { \
-    std::cout << "Running " << #name << "... "; \
-    name(); \
-    std::cout << "PASSED\n"; \
-} while(0)
+#define RUN_TEST(name)                                                                                                 \
+    do {                                                                                                               \
+        std::cout << "Running " << #name << "... ";                                                                    \
+        name();                                                                                                        \
+        std::cout << "PASSED\n";                                                                                       \
+    } while (0)
 
 #define ASSERT_TRUE(x) assert(x)
 #define ASSERT_FALSE(x) assert(!(x))

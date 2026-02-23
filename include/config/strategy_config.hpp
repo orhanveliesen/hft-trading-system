@@ -1,13 +1,13 @@
 #pragma once
 
-#include <string>
-#include <vector>
-#include <map>
+#include <algorithm>
 #include <fstream>
+#include <map>
+#include <memory>
 #include <sstream>
 #include <stdexcept>
-#include <memory>
-#include <algorithm>
+#include <string>
+#include <vector>
 
 namespace hft {
 namespace config {
@@ -15,37 +15,43 @@ namespace config {
 /**
  * Strategy type enumeration
  */
-enum class StrategyType {
-    SMA,
-    RSI,
-    MeanReversion,
-    Breakout,
-    MACD,
-    SimpleMR_HFT,
-    Momentum_HFT
-};
+enum class StrategyType { SMA, RSI, MeanReversion, Breakout, MACD, SimpleMR_HFT, Momentum_HFT };
 
 inline std::string strategy_type_to_string(StrategyType type) {
     switch (type) {
-        case StrategyType::SMA: return "sma";
-        case StrategyType::RSI: return "rsi";
-        case StrategyType::MeanReversion: return "mr";
-        case StrategyType::Breakout: return "breakout";
-        case StrategyType::MACD: return "macd";
-        case StrategyType::SimpleMR_HFT: return "simple_mr";
-        case StrategyType::Momentum_HFT: return "momentum";
+    case StrategyType::SMA:
+        return "sma";
+    case StrategyType::RSI:
+        return "rsi";
+    case StrategyType::MeanReversion:
+        return "mr";
+    case StrategyType::Breakout:
+        return "breakout";
+    case StrategyType::MACD:
+        return "macd";
+    case StrategyType::SimpleMR_HFT:
+        return "simple_mr";
+    case StrategyType::Momentum_HFT:
+        return "momentum";
     }
     return "unknown";
 }
 
 inline StrategyType string_to_strategy_type(const std::string& s) {
-    if (s == "sma") return StrategyType::SMA;
-    if (s == "rsi") return StrategyType::RSI;
-    if (s == "mr" || s == "mean_reversion") return StrategyType::MeanReversion;
-    if (s == "breakout") return StrategyType::Breakout;
-    if (s == "macd") return StrategyType::MACD;
-    if (s == "simple_mr") return StrategyType::SimpleMR_HFT;
-    if (s == "momentum") return StrategyType::Momentum_HFT;
+    if (s == "sma")
+        return StrategyType::SMA;
+    if (s == "rsi")
+        return StrategyType::RSI;
+    if (s == "mr" || s == "mean_reversion")
+        return StrategyType::MeanReversion;
+    if (s == "breakout")
+        return StrategyType::Breakout;
+    if (s == "macd")
+        return StrategyType::MACD;
+    if (s == "simple_mr")
+        return StrategyType::SimpleMR_HFT;
+    if (s == "momentum")
+        return StrategyType::Momentum_HFT;
     throw std::runtime_error("Unknown strategy type: " + s);
 }
 
@@ -83,14 +89,14 @@ struct StrategyParams {
  * Symbol-specific configuration
  */
 struct SymbolConfig {
-    std::string symbol;              // e.g., "BTCUSDT"
-    StrategyType strategy;           // Best strategy for this symbol
-    StrategyParams params;           // Strategy parameters
+    std::string symbol;    // e.g., "BTCUSDT"
+    StrategyType strategy; // Best strategy for this symbol
+    StrategyParams params; // Strategy parameters
 
     // Risk management (per-symbol overrides)
-    double max_position_pct = 0.5;   // Max position size as % of capital
-    double stop_loss_pct = 0.03;     // 3% stop loss
-    double take_profit_pct = 0.06;   // 6% take profit
+    double max_position_pct = 0.5; // Max position size as % of capital
+    double stop_loss_pct = 0.03;   // 3% stop loss
+    double take_profit_pct = 0.06; // 6% take profit
 
     // Performance metrics (from optimization)
     double expected_return = 0.0;
@@ -106,8 +112,8 @@ struct SymbolConfig {
 struct TradingConfig {
     // Capital allocation
     double initial_capital = 10000.0;
-    double fee_rate = 0.001;         // 0.1%
-    double slippage = 0.0005;        // 0.05%
+    double fee_rate = 0.001;  // 0.1%
+    double slippage = 0.0005; // 0.05%
 
     // Global risk limits
     double max_total_exposure = 0.8; // Max 80% capital in positions
@@ -120,7 +126,8 @@ struct TradingConfig {
     // Find config for a symbol
     const SymbolConfig* find_symbol(const std::string& symbol) const {
         for (const auto& cfg : symbols) {
-            if (cfg.symbol == symbol) return &cfg;
+            if (cfg.symbol == symbol)
+                return &cfg;
         }
         return nullptr;
     }
@@ -208,33 +215,33 @@ public:
 
             // Write strategy-specific params
             switch (sym.strategy) {
-                case StrategyType::SMA:
-                    file << "      \"sma_fast\": " << sym.params.sma_fast << ",\n";
-                    file << "      \"sma_slow\": " << sym.params.sma_slow << ",\n";
-                    break;
-                case StrategyType::RSI:
-                    file << "      \"rsi_period\": " << sym.params.rsi_period << ",\n";
-                    file << "      \"rsi_oversold\": " << sym.params.rsi_oversold << ",\n";
-                    file << "      \"rsi_overbought\": " << sym.params.rsi_overbought << ",\n";
-                    break;
-                case StrategyType::MeanReversion:
-                    file << "      \"mr_lookback\": " << sym.params.mr_lookback << ",\n";
-                    file << "      \"mr_std_mult\": " << sym.params.mr_std_mult << ",\n";
-                    break;
-                case StrategyType::Breakout:
-                    file << "      \"breakout_lookback\": " << sym.params.breakout_lookback << ",\n";
-                    break;
-                case StrategyType::MACD:
-                    file << "      \"macd_fast\": " << sym.params.macd_fast << ",\n";
-                    file << "      \"macd_slow\": " << sym.params.macd_slow << ",\n";
-                    file << "      \"macd_signal\": " << sym.params.macd_signal << ",\n";
-                    break;
-                case StrategyType::Momentum_HFT:
-                    file << "      \"momentum_lookback\": " << sym.params.momentum_lookback << ",\n";
-                    file << "      \"momentum_threshold_bps\": " << sym.params.momentum_threshold_bps << ",\n";
-                    break;
-                default:
-                    break;
+            case StrategyType::SMA:
+                file << "      \"sma_fast\": " << sym.params.sma_fast << ",\n";
+                file << "      \"sma_slow\": " << sym.params.sma_slow << ",\n";
+                break;
+            case StrategyType::RSI:
+                file << "      \"rsi_period\": " << sym.params.rsi_period << ",\n";
+                file << "      \"rsi_oversold\": " << sym.params.rsi_oversold << ",\n";
+                file << "      \"rsi_overbought\": " << sym.params.rsi_overbought << ",\n";
+                break;
+            case StrategyType::MeanReversion:
+                file << "      \"mr_lookback\": " << sym.params.mr_lookback << ",\n";
+                file << "      \"mr_std_mult\": " << sym.params.mr_std_mult << ",\n";
+                break;
+            case StrategyType::Breakout:
+                file << "      \"breakout_lookback\": " << sym.params.breakout_lookback << ",\n";
+                break;
+            case StrategyType::MACD:
+                file << "      \"macd_fast\": " << sym.params.macd_fast << ",\n";
+                file << "      \"macd_slow\": " << sym.params.macd_slow << ",\n";
+                file << "      \"macd_signal\": " << sym.params.macd_signal << ",\n";
+                break;
+            case StrategyType::Momentum_HFT:
+                file << "      \"momentum_lookback\": " << sym.params.momentum_lookback << ",\n";
+                file << "      \"momentum_threshold_bps\": " << sym.params.momentum_threshold_bps << ",\n";
+                break;
+            default:
+                break;
             }
 
             file << "      \"max_position_pct\": " << sym.max_position_pct << ",\n";
@@ -256,18 +263,23 @@ private:
     static double parse_double(const std::string& json, const std::string& key, double def) {
         std::string search = "\"" + key + "\"";
         size_t pos = json.find(search);
-        if (pos == std::string::npos) return def;
+        if (pos == std::string::npos)
+            return def;
 
         pos = json.find(':', pos);
-        if (pos == std::string::npos) return def;
+        if (pos == std::string::npos)
+            return def;
 
         size_t start = pos + 1;
-        while (start < json.size() && (json[start] == ' ' || json[start] == '\t')) ++start;
+        while (start < json.size() && (json[start] == ' ' || json[start] == '\t'))
+            ++start;
 
         size_t end = start;
-        while (end < json.size() && (isdigit(json[end]) || json[end] == '.' || json[end] == '-')) ++end;
+        while (end < json.size() && (isdigit(json[end]) || json[end] == '.' || json[end] == '-'))
+            ++end;
 
-        if (start == end) return def;
+        if (start == end)
+            return def;
         return std::stod(json.substr(start, end - start));
     }
 
@@ -278,45 +290,56 @@ private:
     static bool parse_bool(const std::string& json, const std::string& key, bool def) {
         std::string search = "\"" + key + "\"";
         size_t pos = json.find(search);
-        if (pos == std::string::npos) return def;
+        if (pos == std::string::npos)
+            return def;
 
         pos = json.find(':', pos);
-        if (pos == std::string::npos) return def;
+        if (pos == std::string::npos)
+            return def;
 
-        if (json.find("true", pos) < json.find(',', pos)) return true;
-        if (json.find("false", pos) < json.find(',', pos)) return false;
+        if (json.find("true", pos) < json.find(',', pos))
+            return true;
+        if (json.find("false", pos) < json.find(',', pos))
+            return false;
         return def;
     }
 
     static std::string parse_string(const std::string& json, const std::string& key, const std::string& def) {
         std::string search = "\"" + key + "\"";
         size_t pos = json.find(search);
-        if (pos == std::string::npos) return def;
+        if (pos == std::string::npos)
+            return def;
 
         pos = json.find(':', pos);
-        if (pos == std::string::npos) return def;
+        if (pos == std::string::npos)
+            return def;
 
         size_t start = json.find('"', pos + 1);
-        if (start == std::string::npos) return def;
+        if (start == std::string::npos)
+            return def;
 
         size_t end = json.find('"', start + 1);
-        if (end == std::string::npos) return def;
+        if (end == std::string::npos)
+            return def;
 
         return json.substr(start + 1, end - start - 1);
     }
 
     static size_t find_matching_bracket(const std::string& json, size_t start) {
-        if (start >= json.size()) return std::string::npos;
+        if (start >= json.size())
+            return std::string::npos;
 
         char open = json[start];
         char close = (open == '[') ? ']' : '}';
         int depth = 1;
 
         for (size_t i = start + 1; i < json.size(); ++i) {
-            if (json[i] == open) ++depth;
+            if (json[i] == open)
+                ++depth;
             else if (json[i] == close) {
                 --depth;
-                if (depth == 0) return i;
+                if (depth == 0)
+                    return i;
             }
         }
         return std::string::npos;
@@ -326,10 +349,12 @@ private:
         size_t pos = 0;
         while (pos < json.size()) {
             size_t obj_start = json.find('{', pos);
-            if (obj_start == std::string::npos) break;
+            if (obj_start == std::string::npos)
+                break;
 
             size_t obj_end = find_matching_bracket(json, obj_start);
-            if (obj_end == std::string::npos) break;
+            if (obj_end == std::string::npos)
+                break;
 
             std::string obj = json.substr(obj_start, obj_end - obj_start + 1);
             SymbolConfig sym = parse_symbol_config(obj);
@@ -377,5 +402,5 @@ private:
     }
 };
 
-}  // namespace config
-}  // namespace hft
+} // namespace config
+} // namespace hft

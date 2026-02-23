@@ -29,16 +29,17 @@
 
 #define CPPHTTPLIB_NO_OPENSSL 1
 
-#include "../external/httplib.h"
-#include "../include/ipc/symbol_config.hpp"
-#include "../include/ipc/shared_event_log.hpp"
 #include "../include/ipc/shared_config.hpp"
+#include "../include/ipc/shared_event_log.hpp"
 #include "../include/ipc/shared_portfolio_state.hpp"
-#include <iostream>
-#include <sstream>
-#include <iomanip>
+#include "../include/ipc/symbol_config.hpp"
+#include "httplib.h"
+
 #include <csignal>
 #include <cstring>
+#include <iomanip>
+#include <iostream>
+#include <sstream>
 
 using namespace hft::ipc;
 
@@ -55,24 +56,33 @@ void signal_handler(int) {
 
 class JsonBuilder {
 public:
-    void start_object() { ss_ << "{"; first_ = true; }
-    void end_object() { ss_ << "}"; first_ = false; }  // Next key needs comma
-    void start_array() { ss_ << "["; first_ = true; }
-    void end_array() { ss_ << "]"; first_ = false; }   // Next key needs comma
+    void start_object() {
+        ss_ << "{";
+        first_ = true;
+    }
+    void end_object() {
+        ss_ << "}";
+        first_ = false;
+    } // Next key needs comma
+    void start_array() {
+        ss_ << "[";
+        first_ = true;
+    }
+    void end_array() {
+        ss_ << "]";
+        first_ = false;
+    } // Next key needs comma
 
     void key(const char* k) {
-        if (!first_) ss_ << ",";
+        if (!first_)
+            ss_ << ",";
         first_ = false;
         ss_ << "\"" << k << "\":";
     }
 
-    void value(const char* v) {
-        ss_ << "\"" << escape(v) << "\"";
-    }
+    void value(const char* v) { ss_ << "\"" << escape(v) << "\""; }
 
-    void value(const std::string& v) {
-        ss_ << "\"" << escape(v.c_str()) << "\"";
-    }
+    void value(const std::string& v) { ss_ << "\"" << escape(v.c_str()) << "\""; }
 
     void value(int64_t v) { ss_ << v; }
     void value(uint64_t v) { ss_ << v; }
@@ -82,14 +92,38 @@ public:
 
     void raw_value(const char* v) { ss_ << v; }
 
-    void kv(const char* k, const char* v) { key(k); value(v); }
-    void kv(const char* k, const std::string& v) { key(k); value(v); }
-    void kv(const char* k, int64_t v) { key(k); value(v); }
-    void kv(const char* k, uint64_t v) { key(k); value(v); }
-    void kv(const char* k, uint32_t v) { key(k); value(static_cast<uint64_t>(v)); }
-    void kv(const char* k, int v) { key(k); value(v); }
-    void kv(const char* k, double v) { key(k); value(v); }
-    void kv(const char* k, bool v) { key(k); value(v); }
+    void kv(const char* k, const char* v) {
+        key(k);
+        value(v);
+    }
+    void kv(const char* k, const std::string& v) {
+        key(k);
+        value(v);
+    }
+    void kv(const char* k, int64_t v) {
+        key(k);
+        value(v);
+    }
+    void kv(const char* k, uint64_t v) {
+        key(k);
+        value(v);
+    }
+    void kv(const char* k, uint32_t v) {
+        key(k);
+        value(static_cast<uint64_t>(v));
+    }
+    void kv(const char* k, int v) {
+        key(k);
+        value(v);
+    }
+    void kv(const char* k, double v) {
+        key(k);
+        value(v);
+    }
+    void kv(const char* k, bool v) {
+        key(k);
+        value(v);
+    }
 
     std::string str() const { return ss_.str(); }
 
@@ -101,12 +135,23 @@ private:
         std::string result;
         while (*s) {
             switch (*s) {
-                case '"': result += "\\\""; break;
-                case '\\': result += "\\\\"; break;
-                case '\n': result += "\\n"; break;
-                case '\r': result += "\\r"; break;
-                case '\t': result += "\\t"; break;
-                default: result += *s;
+            case '"':
+                result += "\\\"";
+                break;
+            case '\\':
+                result += "\\\\";
+                break;
+            case '\n':
+                result += "\\n";
+                break;
+            case '\r':
+                result += "\\r";
+                break;
+            case '\t':
+                result += "\\t";
+                break;
+            default:
+                result += *s;
             }
             s++;
         }
@@ -120,9 +165,7 @@ private:
 
 class WebApiServer {
 public:
-    WebApiServer(int port, bool enable_cors)
-        : port_(port), enable_cors_(enable_cors)
-    {
+    WebApiServer(int port, bool enable_cors) : port_(port), enable_cors_(enable_cors) {
         // Connect to shared memory (read-write for control operations)
         symbol_configs_ = SharedSymbolConfigs::open_rw("/trader_symbol_configs");
         event_log_ = SharedEventLog::open_readonly();
@@ -135,17 +178,19 @@ public:
     void run() {
         std::cout << "[WEB] Starting API server on port " << port_ << "\n";
 
-        if (symbol_configs_) std::cout << "[IPC] Connected to symbol configs\n";
-        if (event_log_) std::cout << "[IPC] Connected to event log\n";
-        if (shared_config_) std::cout << "[IPC] Connected to shared config\n";
-        if (portfolio_state_) std::cout << "[IPC] Connected to portfolio state\n";
+        if (symbol_configs_)
+            std::cout << "[IPC] Connected to symbol configs\n";
+        if (event_log_)
+            std::cout << "[IPC] Connected to event log\n";
+        if (shared_config_)
+            std::cout << "[IPC] Connected to shared config\n";
+        if (portfolio_state_)
+            std::cout << "[IPC] Connected to portfolio state\n";
 
         server_.listen("0.0.0.0", port_);
     }
 
-    void stop() {
-        server_.stop();
-    }
+    void stop() { server_.stop(); }
 
 private:
     httplib::Server server_;
@@ -321,23 +366,19 @@ private:
     </script>
 </body>
 </html>
-)HTML", "text/html");
+)HTML",
+                            "text/html");
         });
 
         // Status endpoint
-        server_.Get("/api/status", [this](const httplib::Request&, httplib::Response& res) {
-            handle_status(res);
-        });
+        server_.Get("/api/status", [this](const httplib::Request&, httplib::Response& res) { handle_status(res); });
 
         // Portfolio endpoint
-        server_.Get("/api/portfolio", [this](const httplib::Request&, httplib::Response& res) {
-            handle_portfolio(res);
-        });
+        server_.Get("/api/portfolio",
+                    [this](const httplib::Request&, httplib::Response& res) { handle_portfolio(res); });
 
         // Symbols endpoint
-        server_.Get("/api/symbols", [this](const httplib::Request&, httplib::Response& res) {
-            handle_symbols(res);
-        });
+        server_.Get("/api/symbols", [this](const httplib::Request&, httplib::Response& res) { handle_symbols(res); });
 
         // Events endpoint
         server_.Get("/api/events", [this](const httplib::Request& req, httplib::Response& res) {
@@ -349,44 +390,33 @@ private:
         });
 
         // Stats endpoint
-        server_.Get("/api/stats", [this](const httplib::Request&, httplib::Response& res) {
-            handle_stats(res);
-        });
+        server_.Get("/api/stats", [this](const httplib::Request&, httplib::Response& res) { handle_stats(res); });
 
         // Manual tune trigger
-        server_.Post("/api/tune", [this](const httplib::Request&, httplib::Response& res) {
-            handle_tune(res);
-        });
+        server_.Post("/api/tune", [this](const httplib::Request&, httplib::Response& res) { handle_tune(res); });
 
         // Control command (legacy)
-        server_.Post("/api/control", [this](const httplib::Request& req, httplib::Response& res) {
-            handle_control(req, res);
-        });
+        server_.Post("/api/control",
+                     [this](const httplib::Request& req, httplib::Response& res) { handle_control(req, res); });
 
         // NEW: Trading control endpoint
-        server_.Post("/api/control/trading", [this](const httplib::Request& req, httplib::Response& res) {
-            handle_control_trading(req, res);
-        });
+        server_.Post("/api/control/trading",
+                     [this](const httplib::Request& req, httplib::Response& res) { handle_control_trading(req, res); });
 
         // NEW: Tuner control endpoint
-        server_.Post("/api/control/tuner", [this](const httplib::Request& req, httplib::Response& res) {
-            handle_control_tuner(req, res);
-        });
+        server_.Post("/api/control/tuner",
+                     [this](const httplib::Request& req, httplib::Response& res) { handle_control_tuner(req, res); });
 
         // NEW: Per-symbol config update
-        server_.Put("/api/symbols/:symbol", [this](const httplib::Request& req, httplib::Response& res) {
-            handle_symbol_update(req, res);
-        });
+        server_.Put("/api/symbols/:symbol",
+                    [this](const httplib::Request& req, httplib::Response& res) { handle_symbol_update(req, res); });
 
         // NEW: Force immediate tuning
-        server_.Post("/api/tuner/trigger", [this](const httplib::Request&, httplib::Response& res) {
-            handle_tuner_trigger(res);
-        });
+        server_.Post("/api/tuner/trigger",
+                     [this](const httplib::Request&, httplib::Response& res) { handle_tuner_trigger(res); });
 
         // NEW: Alerts and connection status
-        server_.Get("/api/alerts", [this](const httplib::Request&, httplib::Response& res) {
-            handle_alerts(res);
-        });
+        server_.Get("/api/alerts", [this](const httplib::Request&, httplib::Response& res) { handle_alerts(res); });
 
         // NEW: Tuner error log
         server_.Get("/api/errors", [this](const httplib::Request& req, httplib::Response& res) {
@@ -398,17 +428,15 @@ private:
         });
 
         // NEW: Regime-Strategy mapping
-        server_.Get("/api/config/regime_strategy", [this](const httplib::Request&, httplib::Response& res) {
-            handle_regime_strategy_get(res);
-        });
+        server_.Get("/api/config/regime_strategy",
+                    [this](const httplib::Request&, httplib::Response& res) { handle_regime_strategy_get(res); });
         server_.Put("/api/config/regime_strategy", [this](const httplib::Request& req, httplib::Response& res) {
             handle_regime_strategy_put(req, res);
         });
 
         // Trading status (why no trades)
-        server_.Get("/api/trading-status", [this](const httplib::Request&, httplib::Response& res) {
-            handle_trading_status(res);
-        });
+        server_.Get("/api/trading-status",
+                    [this](const httplib::Request&, httplib::Response& res) { handle_trading_status(res); });
 
         // Serve static files (for frontend)
         server_.set_mount_point("/", "../web");
@@ -438,9 +466,10 @@ private:
             json.key("hft");
             json.start_object();
             uint8_t status = shared_config_->get_trader_status();
-            const char* status_name = status == 0 ? "stopped" :
-                                      status == 1 ? "starting" :
-                                      status == 2 ? "running" : "shutting_down";
+            const char* status_name = status == 0   ? "stopped"
+                                      : status == 1 ? "starting"
+                                      : status == 2 ? "running"
+                                                    : "shutting_down";
             json.kv("status", status_name);
             json.kv("heartbeat_age_ms", age_ms);
             json.kv("heartbeat_ok", age_ms < 3000);
@@ -484,9 +513,11 @@ private:
         bool first_pos = true;
         for (uint32_t i = 0; i < MAX_PORTFOLIO_SYMBOLS; ++i) {
             const auto& pos = portfolio_state_->positions[i];
-            if (!pos.active.load()) continue;
+            if (!pos.active.load())
+                continue;
 
-            if (!first_pos) json.raw_value(",");
+            if (!first_pos)
+                json.raw_value(",");
             first_pos = false;
             json.start_object();
             json.kv("symbol", pos.symbol);
@@ -525,7 +556,8 @@ private:
         for (uint32_t i = 0; i < count; ++i) {
             const auto& cfg = symbol_configs_->symbols[i];
 
-            if (i > 0) json.raw_value(",");
+            if (i > 0)
+                json.raw_value(",");
             json.start_object();
             json.kv("symbol", cfg.symbol);
             json.kv("enabled", cfg.is_enabled());
@@ -583,9 +615,11 @@ private:
         bool first = true;
         for (uint64_t seq = start; seq < current; ++seq) {
             const TunerEvent* e = event_log_->get_event(seq);
-            if (!e) continue;
+            if (!e)
+                continue;
 
-            if (!first) json.raw_value(",");
+            if (!first)
+                json.raw_value(",");
             first = false;
 
             json.start_object();
@@ -596,39 +630,39 @@ private:
 
             // Type-specific payload
             switch (e->type) {
-                case TunerEventType::Signal:
-                case TunerEventType::Order:
-                case TunerEventType::Fill:
-                    json.key("trade");
-                    json.start_object();
-                    json.kv("side", e->payload.trade.side == TradeSide::Buy ? "BUY" : "SELL");
-                    json.kv("price", e->payload.trade.price);
-                    json.kv("quantity", e->payload.trade.quantity);
-                    json.kv("pnl", e->payload.trade.pnl_x100 / 100.0);
-                    json.end_object();
-                    break;
+            case TunerEventType::Signal:
+            case TunerEventType::Order:
+            case TunerEventType::Fill:
+                json.key("trade");
+                json.start_object();
+                json.kv("side", e->payload.trade.side == TradeSide::Buy ? "BUY" : "SELL");
+                json.kv("price", e->payload.trade.price);
+                json.kv("quantity", e->payload.trade.quantity);
+                json.kv("pnl", e->payload.trade.pnl_x100 / 100.0);
+                json.end_object();
+                break;
 
-                case TunerEventType::ConfigChange:
-                    json.key("config_change");
-                    json.start_object();
-                    json.kv("param", e->payload.config.param_name);
-                    json.kv("old_value", e->payload.config.old_value_x100 / 100.0);
-                    json.kv("new_value", e->payload.config.new_value_x100 / 100.0);
-                    json.kv("ai_confidence", static_cast<int>(e->payload.config.ai_confidence));
-                    json.end_object();
-                    break;
+            case TunerEventType::ConfigChange:
+                json.key("config_change");
+                json.start_object();
+                json.kv("param", e->payload.config.param_name);
+                json.kv("old_value", e->payload.config.old_value_x100 / 100.0);
+                json.kv("new_value", e->payload.config.new_value_x100 / 100.0);
+                json.kv("ai_confidence", static_cast<int>(e->payload.config.ai_confidence));
+                json.end_object();
+                break;
 
-                case TunerEventType::AIDecision:
-                    json.key("ai");
-                    json.start_object();
-                    json.kv("confidence", static_cast<int>(e->payload.ai.confidence));
-                    json.kv("action", static_cast<int>(e->payload.ai.action_taken));
-                    json.kv("latency_ms", static_cast<int>(e->payload.ai.latency_ms));
-                    json.end_object();
-                    break;
+            case TunerEventType::AIDecision:
+                json.key("ai");
+                json.start_object();
+                json.kv("confidence", static_cast<int>(e->payload.ai.confidence));
+                json.kv("action", static_cast<int>(e->payload.ai.action_taken));
+                json.kv("latency_ms", static_cast<int>(e->payload.ai.latency_ms));
+                json.end_object();
+                break;
 
-                default:
-                    break;
+            default:
+                break;
             }
 
             if (e->reason[0] != '\0') {
@@ -677,9 +711,11 @@ private:
         uint32_t count = event_log_->symbol_count.load();
         for (uint32_t i = 0; i < count; ++i) {
             const auto& s = event_log_->symbol_stats[i];
-            if (s.is_empty()) continue;
+            if (s.is_empty())
+                continue;
 
-            if (i > 0) json.raw_value(",");
+            if (i > 0)
+                json.raw_value(",");
             json.start_object();
             json.kv("symbol", s.symbol);
             json.kv("signal_count", s.signal_count.load());
@@ -760,16 +796,20 @@ private:
     static std::string extract_json_string(const std::string& body, const char* key) {
         std::string search = "\"" + std::string(key) + "\"";
         auto pos = body.find(search);
-        if (pos == std::string::npos) return "";
+        if (pos == std::string::npos)
+            return "";
 
         pos = body.find(':', pos);
-        if (pos == std::string::npos) return "";
+        if (pos == std::string::npos)
+            return "";
 
         pos = body.find('"', pos);
-        if (pos == std::string::npos) return "";
+        if (pos == std::string::npos)
+            return "";
 
         auto end = body.find('"', pos + 1);
-        if (end == std::string::npos) return "";
+        if (end == std::string::npos)
+            return "";
 
         return body.substr(pos + 1, end - pos - 1);
     }
@@ -777,13 +817,16 @@ private:
     static bool extract_json_bool(const std::string& body, const char* key, bool& out) {
         std::string search = "\"" + std::string(key) + "\"";
         auto pos = body.find(search);
-        if (pos == std::string::npos) return false;
+        if (pos == std::string::npos)
+            return false;
 
         pos = body.find(':', pos);
-        if (pos == std::string::npos) return false;
+        if (pos == std::string::npos)
+            return false;
 
         // Skip whitespace
-        while (pos < body.size() && (body[pos] == ':' || body[pos] == ' ')) pos++;
+        while (pos < body.size() && (body[pos] == ':' || body[pos] == ' '))
+            pos++;
 
         if (body.substr(pos, 4) == "true") {
             out = true;
@@ -798,13 +841,16 @@ private:
     static bool extract_json_double(const std::string& body, const char* key, double& out) {
         std::string search = "\"" + std::string(key) + "\"";
         auto pos = body.find(search);
-        if (pos == std::string::npos) return false;
+        if (pos == std::string::npos)
+            return false;
 
         pos = body.find(':', pos);
-        if (pos == std::string::npos) return false;
+        if (pos == std::string::npos)
+            return false;
 
         // Skip whitespace
-        while (pos < body.size() && (body[pos] == ':' || body[pos] == ' ')) pos++;
+        while (pos < body.size() && (body[pos] == ':' || body[pos] == ' '))
+            pos++;
 
         try {
             out = std::stod(body.substr(pos));
@@ -817,13 +863,16 @@ private:
     static bool extract_json_int(const std::string& body, const char* key, int& out) {
         std::string search = "\"" + std::string(key) + "\"";
         auto pos = body.find(search);
-        if (pos == std::string::npos) return false;
+        if (pos == std::string::npos)
+            return false;
 
         pos = body.find(':', pos);
-        if (pos == std::string::npos) return false;
+        if (pos == std::string::npos)
+            return false;
 
         // Skip whitespace
-        while (pos < body.size() && (body[pos] == ':' || body[pos] == ' ')) pos++;
+        while (pos < body.size() && (body[pos] == ':' || body[pos] == ' '))
+            pos++;
 
         try {
             out = std::stoi(body.substr(pos));
@@ -1062,14 +1111,12 @@ private:
         if (shared_config_) {
             // WebSocket market data status
             uint8_t ws_market = shared_config_->get_ws_market_status();
-            const char* ws_status_name = ws_market == 0 ? "disconnected" :
-                                         ws_market == 1 ? "degraded" : "healthy";
+            const char* ws_status_name = ws_market == 0 ? "disconnected" : ws_market == 1 ? "degraded" : "healthy";
             json.kv("market_data", ws_status_name);
 
             // User stream status (if applicable)
             uint8_t ws_user = shared_config_->get_ws_user_status();
-            const char* ws_user_name = ws_user == 0 ? "disconnected" :
-                                       ws_user == 1 ? "degraded" : "healthy";
+            const char* ws_user_name = ws_user == 0 ? "disconnected" : ws_user == 1 ? "degraded" : "healthy";
             json.kv("user_stream", ws_user_name);
 
             // Reconnection stats
@@ -1086,9 +1133,10 @@ private:
 
             // Trader process status
             uint8_t trader_status = shared_config_->get_trader_status();
-            const char* trader_status_name = trader_status == 0 ? "stopped" :
-                                          trader_status == 1 ? "starting" :
-                                          trader_status == 2 ? "running" : "shutting_down";
+            const char* trader_status_name = trader_status == 0   ? "stopped"
+                                             : trader_status == 1 ? "starting"
+                                             : trader_status == 2 ? "running"
+                                                                  : "shutting_down";
             json.kv("trader_status", trader_status_name);
 
             // Heartbeat check
@@ -1167,7 +1215,7 @@ private:
                         json.kv("message", e->reason);
                         json.kv("code", "TUNER_ERROR");
                         json.end_object();
-                        break;  // Just show latest error
+                        break; // Just show latest error
                     }
                 }
             }
@@ -1203,7 +1251,7 @@ private:
 
         // Count error events and collect them
         uint64_t current = event_log_->current_position();
-        uint64_t scan_limit = static_cast<uint64_t>(limit * 10);  // Scan more to find errors
+        uint64_t scan_limit = static_cast<uint64_t>(limit * 10); // Scan more to find errors
         uint64_t start = current > scan_limit ? current - scan_limit : 0;
 
         // First pass: count total errors
@@ -1227,7 +1275,8 @@ private:
         // Scan from newest to oldest to get most recent errors
         for (uint64_t seq = current; seq > start && error_count < limit; --seq) {
             const TunerEvent* e = event_log_->get_event(seq - 1);
-            if (!e || e->type != TunerEventType::Error) continue;
+            if (!e || e->type != TunerEventType::Error)
+                continue;
 
             if (!first_error) {
                 json.raw_value(",");
@@ -1244,8 +1293,9 @@ private:
             json.kv("sequence", e->sequence);
 
             // Severity
-            const char* sev_name = e->severity == Severity::Critical ? "CRITICAL" :
-                                   e->severity == Severity::Warning ? "WARNING" : "INFO";
+            const char* sev_name = e->severity == Severity::Critical  ? "CRITICAL"
+                                   : e->severity == Severity::Warning ? "WARNING"
+                                                                      : "INFO";
             json.kv("severity", sev_name);
 
             // Error payload
@@ -1383,21 +1433,25 @@ private:
             bool first_reason = true;
 
             if (!trading_enabled) {
-                if (!first_reason) json.raw_value(",");
+                if (!first_reason)
+                    json.raw_value(",");
                 first_reason = false;
                 json.value("Trading is disabled globally");
             }
             if (manual_override) {
-                if (!first_reason) json.raw_value(",");
+                if (!first_reason)
+                    json.raw_value(",");
                 first_reason = false;
                 json.value("Manual override is active");
             }
             if (consecutive_losses >= shared_config_->get_losses_to_exit_only()) {
-                if (!first_reason) json.raw_value(",");
+                if (!first_reason)
+                    json.raw_value(",");
                 first_reason = false;
                 json.value("Too many consecutive losses - EXIT_ONLY mode");
             } else if (consecutive_losses >= shared_config_->get_losses_to_defensive()) {
-                if (!first_reason) json.raw_value(",");
+                if (!first_reason)
+                    json.raw_value(",");
                 first_reason = false;
                 json.value("Loss streak triggered DEFENSIVE mode");
             }
@@ -1416,9 +1470,11 @@ private:
 
             for (uint32_t i = 0; i < MAX_PORTFOLIO_SYMBOLS; ++i) {
                 const auto& pos = portfolio_state_->positions[i];
-                if (!pos.active.load()) continue;
+                if (!pos.active.load())
+                    continue;
 
-                if (!first_symbol) json.raw_value(",");
+                if (!first_symbol)
+                    json.raw_value(",");
                 first_symbol = false;
 
                 json.start_object();

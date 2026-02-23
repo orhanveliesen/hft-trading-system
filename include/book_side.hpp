@@ -1,8 +1,9 @@
 #pragma once
 
 #include "types.hpp"
-#include <memory>
+
 #include <cstring>
+#include <memory>
 
 namespace hft {
 
@@ -27,15 +28,12 @@ struct AskCompare {
  * - Memory allocation (parent provides pre-allocated levels)
  * - Pool management
  */
-template<typename Compare>
+template <typename Compare>
 class BookSide {
 public:
     BookSide(Price base_price, size_t price_range)
-        : base_price_(base_price)
-        , price_range_(price_range)
-        , levels_(new PriceLevel*[price_range])
-        , best_level_(nullptr)
-    {
+        : base_price_(base_price), price_range_(price_range), levels_(new PriceLevel*[price_range]),
+          best_level_(nullptr) {
         std::memset(levels_.get(), 0, price_range * sizeof(PriceLevel*));
     }
 
@@ -53,9 +51,7 @@ public:
         return level ? level->total_quantity : 0;
     }
 
-    Price best_price() const {
-        return best_level_ ? best_level_->price : INVALID_PRICE;
-    }
+    Price best_price() const { return best_level_ ? best_level_->price : INVALID_PRICE; }
 
     // === Level Management ===
 
@@ -115,11 +111,9 @@ private:
 
     std::unique_ptr<PriceLevel*[]> levels_;
     PriceLevel* best_level_;
-    Compare compare_;  // Stored instance for readability
+    Compare compare_; // Stored instance for readability
 
-    bool is_in_range(Price price) const {
-        return price >= base_price_ && price < base_price_ + price_range_;
-    }
+    bool is_in_range(Price price) const { return price >= base_price_ && price < base_price_ + price_range_; }
 
     void remove_level(PriceLevel* level) {
         Price price = level->price;
@@ -146,4 +140,4 @@ private:
 using BidSide = BookSide<BidCompare>;
 using AskSide = BookSide<AskCompare>;
 
-}  // namespace hft
+} // namespace hft

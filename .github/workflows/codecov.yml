@@ -1,0 +1,74 @@
+name: Code Coverage
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  # Wait for Docker image to be ready before running coverage
+  wait-for-image:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Wait for Docker build
+        run: sleep 30
+
+  coverage:
+    runs-on: ubuntu-22.04
+    needs: [wait-for-image]
+    if: always()  # Run even if wait-for-image is skipped (e.g., on push to main)
+    container: ghcr.io/orhanveliesen/hft-builder:latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure CMake with coverage flags
+        run: |
+          mkdir -p build
+          cd build
+          cmake -DCMAKE_BUILD_TYPE=Debug \
+                -DCMAKE_CXX_FLAGS="-fprofile-arcs -ftest-coverage" \
+                -DCMAKE_EXE_LINKER_FLAGS="-lgcov" \
+                ..
+
+      - name: Build with coverage
+        run: |
+          cd build
+          make -j$(nproc)
+
+      - name: Run tests
+        run: |
+          cd build
+          ctest --output-on-failure
+
+      - name: Generate coverage report
+        run: |
+          cd build
+          lcov --capture --directory . --output-file coverage.info
+          lcov --remove coverage.info '/usr/*' '*/external/*' '*/tests/*' --output-file coverage.info
+          lcov --list coverage.info
+
+      - name: Check coverage threshold (100%)
+        run: |
+          cd build
+          COVERAGE=$(lcov --summary coverage.info 2>&1 | grep "lines" | awk '{print $2}' | sed 's/%//')
+          echo "Coverage: ${COVERAGE}%"
+          if (( $(echo "$COVERAGE < 100.0" | bc -l) )); then
+            echo "ERROR: Coverage ${COVERAGE}% is below 100% threshold"
+            echo "Use LCOV_EXCL_LINE for unreachable error paths if needed"
+            exit 1
+          fi
+          echo "Coverage requirement met: ${COVERAGE}%"
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        continue-on-error: true  # Don't fail if token is missing
+        with:
+          file: build/coverage.info
+          token: ${{ secrets.CODECOV_TOKEN }}  # Optional: add token to repository secrets
+          fail_ci_if_error: false
+          flags: unittests
+          name: codecov-hft

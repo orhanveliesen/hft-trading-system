@@ -1,18 +1,19 @@
-#include "../include/types.hpp"
+#include "../include/mock_order_sender.hpp"
 #include "../include/symbol_config.hpp"
 #include "../include/trading_engine.hpp"
-#include "../include/mock_order_sender.hpp"
+#include "../include/types.hpp"
+
 #include <cassert>
-#include <iostream>
 #include <cstring>
+#include <iostream>
 
 using namespace hft;
 
 void test_symbol_config_creation() {
     SymbolConfig config;
     config.symbol = "AAPL";
-    config.base_price = 170'0000;  // $170.00 (4 decimals)
-    config.price_range = 100'000;   // $10 range
+    config.base_price = 170'0000; // $170.00 (4 decimals)
+    config.price_range = 100'000; // $10 range
 
     assert(config.symbol == "AAPL");
     assert(config.base_price == 170'0000);
@@ -66,7 +67,7 @@ void test_trading_engine_get_orderbook() {
     assert(book != nullptr);
 
     // Add order through engine
-    book->add_order(1, Side::Buy, 170'5000, 100);  // $170.50
+    book->add_order(1, Side::Buy, 170'5000, 100); // $170.50
     assert(book->best_bid() == 170'5000);
 
     OrderBook* null_book = engine.get_orderbook("GOOGL");

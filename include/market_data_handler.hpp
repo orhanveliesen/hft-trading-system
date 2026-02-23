@@ -1,7 +1,7 @@
 #pragma once
 
-#include "types.hpp"
 #include "orderbook.hpp"
+#include "types.hpp"
 
 namespace hft {
 
@@ -27,19 +27,15 @@ public:
     }
 
     // Order executed (partial or full)
-    void on_order_executed(OrderId order_id, Quantity qty) {
-        book_.execute_order(order_id, qty);
-    }
+    void on_order_executed(OrderId order_id, Quantity qty) { book_.execute_order(order_id, qty); }
 
     // Order partially cancelled (reduce quantity)
     void on_order_cancelled(OrderId order_id, Quantity qty) {
-        book_.execute_order(order_id, qty);  // Same effect as partial execute
+        book_.execute_order(order_id, qty); // Same effect as partial execute
     }
 
     // Order fully removed from book
-    void on_order_deleted(OrderId order_id) {
-        book_.cancel_order(order_id);
-    }
+    void on_order_deleted(OrderId order_id) { book_.cancel_order(order_id); }
 
     // Direct book access
     const OrderBook& book() const { return book_; }
@@ -49,4 +45,4 @@ private:
     OrderBook& book_;
 };
 
-}  // namespace hft
+} // namespace hft

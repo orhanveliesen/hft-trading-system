@@ -1,9 +1,9 @@
 #pragma once
 
-#include <string>
-#include <vector>
-#include <unordered_map>
 #include <cstdint>
+#include <string>
+#include <unordered_map>
+#include <vector>
 
 namespace hft {
 namespace strategy {
@@ -13,9 +13,9 @@ namespace arbitrage {
  * Configuration for a single triangular arbitrage relationship
  */
 struct TriangularArbConfig {
-    std::string leg1;  // e.g., "BTC/USDT"
-    std::string leg2;  // e.g., "ETH/BTC"
-    std::string leg3;  // e.g., "ETH/USDT"
+    std::string leg1; // e.g., "BTC/USDT"
+    std::string leg2; // e.g., "ETH/BTC"
+    std::string leg3; // e.g., "ETH/USDT"
 
     // Minimum spread to trigger (percentage, 0.001 = 0.1%)
     double min_spread_pct = 0.001;
@@ -59,7 +59,7 @@ struct ArbitrageConfig {
     bool log_opportunities = false;
 
     // Cooldown between executions on same relationship (microseconds)
-    uint64_t execution_cooldown_us = 1000000;  // 1 second default
+    uint64_t execution_cooldown_us = 1000000; // 1 second default
 };
 
 /**
@@ -75,8 +75,8 @@ struct TriangularArbState {
     double leg3_ask = 0.0;
 
     // Computed spreads
-    double forward_spread = 0.0;   // Buy path
-    double reverse_spread = 0.0;   // Sell path
+    double forward_spread = 0.0; // Buy path
+    double reverse_spread = 0.0; // Sell path
 
     // Last execution timestamp
     uint64_t last_execution_ns = 0;
@@ -87,12 +87,10 @@ struct TriangularArbState {
     double total_profit = 0.0;
 
     bool has_all_prices() const {
-        return leg1_bid > 0 && leg1_ask > 0 &&
-               leg2_bid > 0 && leg2_ask > 0 &&
-               leg3_bid > 0 && leg3_ask > 0;
+        return leg1_bid > 0 && leg1_ask > 0 && leg2_bid > 0 && leg2_ask > 0 && leg3_bid > 0 && leg3_ask > 0;
     }
 };
 
-}  // namespace arbitrage
-}  // namespace strategy
-}  // namespace hft
+} // namespace arbitrage
+} // namespace strategy
+} // namespace hft

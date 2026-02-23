@@ -10,12 +10,13 @@
  */
 
 #include "../include/ipc/udp_telemetry.hpp"
-#include <iostream>
-#include <iomanip>
-#include <csignal>
+
 #include <atomic>
 #include <chrono>
+#include <csignal>
 #include <cstring>
+#include <iomanip>
+#include <iostream>
 
 using namespace hft::ipc;
 
@@ -27,16 +28,26 @@ void signal_handler(int) {
 
 const char* type_name(TelemetryType t) {
     switch (t) {
-        case TelemetryType::Heartbeat: return "HEARTBEAT";
-        case TelemetryType::Quote:     return "QUOTE";
-        case TelemetryType::Fill:      return "FILL";
-        case TelemetryType::Order:     return "ORDER";
-        case TelemetryType::Position:  return "POSITION";
-        case TelemetryType::PnL:       return "PNL";
-        case TelemetryType::Regime:    return "REGIME";
-        case TelemetryType::Risk:      return "RISK";
-        case TelemetryType::Latency:   return "LATENCY";
-        default:                       return "UNKNOWN";
+    case TelemetryType::Heartbeat:
+        return "HEARTBEAT";
+    case TelemetryType::Quote:
+        return "QUOTE";
+    case TelemetryType::Fill:
+        return "FILL";
+    case TelemetryType::Order:
+        return "ORDER";
+    case TelemetryType::Position:
+        return "POSITION";
+    case TelemetryType::PnL:
+        return "PNL";
+    case TelemetryType::Regime:
+        return "REGIME";
+    case TelemetryType::Risk:
+        return "RISK";
+    case TelemetryType::Latency:
+        return "LATENCY";
+    default:
+        return "UNKNOWN";
     }
 }
 
@@ -45,13 +56,10 @@ void print_packet(const TelemetryPacket& pkt) {
     auto time = std::chrono::system_clock::to_time_t(now);
     auto tm = std::localtime(&time);
 
-    std::cout << std::setfill('0')
-              << std::setw(2) << tm->tm_hour << ":"
-              << std::setw(2) << tm->tm_min << ":"
+    std::cout << std::setfill('0') << std::setw(2) << tm->tm_hour << ":" << std::setw(2) << tm->tm_min << ":"
               << std::setw(2) << tm->tm_sec << " ";
 
-    std::cout << "[" << std::setw(5) << pkt.sequence << "] "
-              << std::setw(9) << type_name(pkt.type);
+    std::cout << "[" << std::setw(5) << pkt.sequence << "] " << std::setw(9) << type_name(pkt.type);
 
     if (pkt.symbol_id > 0) {
         std::cout << " sym=" << pkt.symbol_id;
@@ -60,54 +68,47 @@ void print_packet(const TelemetryPacket& pkt) {
     std::cout << std::setfill(' ');
 
     switch (pkt.type) {
-        case TelemetryType::Heartbeat:
-            std::cout << " (alive)";
-            break;
+    case TelemetryType::Heartbeat:
+        std::cout << " (alive)";
+        break;
 
-        case TelemetryType::Quote:
-            std::cout << std::fixed << std::setprecision(2)
-                      << " bid=" << (pkt.data.quote.bid_price / 1e8)
-                      << " ask=" << (pkt.data.quote.ask_price / 1e8)
-                      << " spread=" << ((pkt.data.quote.ask_price - pkt.data.quote.bid_price) / 1e8);
-            break;
+    case TelemetryType::Quote:
+        std::cout << std::fixed << std::setprecision(2) << " bid=" << (pkt.data.quote.bid_price / 1e8)
+                  << " ask=" << (pkt.data.quote.ask_price / 1e8)
+                  << " spread=" << ((pkt.data.quote.ask_price - pkt.data.quote.bid_price) / 1e8);
+        break;
 
-        case TelemetryType::Fill:
-            std::cout << " " << (pkt.data.fill.side == 0 ? "BUY" : "SELL")
-                      << std::fixed << std::setprecision(2)
-                      << " qty=" << pkt.data.fill.quantity
-                      << " price=$" << (pkt.data.fill.price / 1e8);
-            break;
+    case TelemetryType::Fill:
+        std::cout << " " << (pkt.data.fill.side == 0 ? "BUY" : "SELL") << std::fixed << std::setprecision(2)
+                  << " qty=" << pkt.data.fill.quantity << " price=$" << (pkt.data.fill.price / 1e8);
+        break;
 
-        case TelemetryType::Position:
-            std::cout << std::fixed << std::setprecision(4)
-                      << " qty=" << (pkt.data.position.quantity / 1e8)
-                      << " avg=$" << (pkt.data.position.avg_price / 1e8)
-                      << " unrealized=$" << std::setprecision(2)
-                      << (pkt.data.position.unrealized_pnl / 1e8);
-            break;
+    case TelemetryType::Position:
+        std::cout << std::fixed << std::setprecision(4) << " qty=" << (pkt.data.position.quantity / 1e8) << " avg=$"
+                  << (pkt.data.position.avg_price / 1e8) << " unrealized=$" << std::setprecision(2)
+                  << (pkt.data.position.unrealized_pnl / 1e8);
+        break;
 
-        case TelemetryType::PnL:
-            std::cout << std::fixed << std::setprecision(2)
-                      << " realized=$" << (pkt.data.pnl.realized_pnl / 1e8)
-                      << " unrealized=$" << (pkt.data.pnl.unrealized_pnl / 1e8)
-                      << " equity=$" << (pkt.data.pnl.total_equity / 1e8)
-                      << " wins=" << pkt.data.pnl.win_count
-                      << " losses=" << pkt.data.pnl.loss_count;
-            break;
+    case TelemetryType::PnL:
+        std::cout << std::fixed << std::setprecision(2) << " realized=$" << (pkt.data.pnl.realized_pnl / 1e8)
+                  << " unrealized=$" << (pkt.data.pnl.unrealized_pnl / 1e8) << " equity=$"
+                  << (pkt.data.pnl.total_equity / 1e8) << " wins=" << pkt.data.pnl.win_count
+                  << " losses=" << pkt.data.pnl.loss_count;
+        break;
 
-        case TelemetryType::Regime:
-            std::cout << " regime=" << (int)pkt.data.regime.regime
-                      << " confidence=" << (int)pkt.data.regime.confidence << "%";
-            break;
+    case TelemetryType::Regime:
+        std::cout << " regime=" << (int)pkt.data.regime.regime << " confidence=" << (int)pkt.data.regime.confidence
+                  << "%";
+        break;
 
-        case TelemetryType::Latency:
-            std::cout << " tick→decision=" << pkt.data.latency.tick_to_decision_ns << "ns"
-                      << " decision→order=" << pkt.data.latency.decision_to_order_ns << "ns"
-                      << " total=" << pkt.data.latency.total_roundtrip_ns << "ns";
-            break;
+    case TelemetryType::Latency:
+        std::cout << " tick→decision=" << pkt.data.latency.tick_to_decision_ns << "ns"
+                  << " decision→order=" << pkt.data.latency.decision_to_order_ns << "ns"
+                  << " total=" << pkt.data.latency.total_roundtrip_ns << "ns";
+        break;
 
-        default:
-            break;
+    default:
+        break;
     }
 
     std::cout << "\n";
@@ -162,7 +163,8 @@ int main(int argc, char* argv[]) {
     std::cout << "HFT Telemetry Collector\n";
     std::cout << "=======================\n";
     std::cout << "Listening on " << address << ":" << port << "\n";
-    if (quiet) std::cout << "Quiet mode: showing fills and P&L only\n";
+    if (quiet)
+        std::cout << "Quiet mode: showing fills and P&L only\n";
     std::cout << "Press Ctrl+C to exit\n\n";
 
     TelemetrySubscriber sub(address, port);
@@ -174,8 +176,7 @@ int main(int argc, char* argv[]) {
     sub.set_callback([quiet](const TelemetryPacket& pkt) {
         if (quiet) {
             // Only show fills and P&L in quiet mode
-            if (pkt.type != TelemetryType::Fill &&
-                pkt.type != TelemetryType::PnL) {
+            if (pkt.type != TelemetryType::Fill && pkt.type != TelemetryType::PnL) {
                 return;
             }
         }
@@ -195,10 +196,8 @@ int main(int argc, char* argv[]) {
     std::cout << "Packets dropped:  " << sub.packets_dropped() << "\n";
 
     if (sub.packets_dropped() > 0) {
-        double loss_rate = 100.0 * sub.packets_dropped() /
-            (sub.packets_received() + sub.packets_dropped());
-        std::cout << "Loss rate:        " << std::fixed << std::setprecision(2)
-                  << loss_rate << "%\n";
+        double loss_rate = 100.0 * sub.packets_dropped() / (sub.packets_received() + sub.packets_dropped());
+        std::cout << "Loss rate:        " << std::fixed << std::setprecision(2) << loss_rate << "%\n";
     }
 
     return 0;

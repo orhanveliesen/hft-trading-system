@@ -13,12 +13,12 @@
  * - C++ header documentation
  */
 
-#include <string>
-#include <vector>
-#include <sstream>
 #include <chrono>
 #include <cstring>
 #include <curl/curl.h>
+#include <sstream>
+#include <string>
+#include <vector>
 
 namespace hft {
 namespace tuner {
@@ -26,8 +26,8 @@ namespace tuner {
 // Request structure for RAG queries
 struct RagQueryRequest {
     std::string query;
-    std::string regime;   // Optional: filter by regime
-    std::string symbol;   // Optional: filter by symbol
+    std::string regime; // Optional: filter by regime
+    std::string symbol; // Optional: filter by symbol
     int n_results = 5;
 };
 
@@ -58,9 +58,7 @@ struct RagHealthResponse {
  */
 class RagClient {
 public:
-    explicit RagClient(const std::string& base_url = "")
-        : timeout_ms_(5000)
-    {
+    explicit RagClient(const std::string& base_url = "") : timeout_ms_(5000) {
         // Check environment variable first
         const char* env_url = std::getenv("RAG_SERVICE_URL");
         if (!base_url.empty()) {
@@ -80,9 +78,7 @@ public:
         }
     }
 
-    RagClient(const std::string& base_url, uint32_t timeout_ms)
-        : timeout_ms_(timeout_ms)
-    {
+    RagClient(const std::string& base_url, uint32_t timeout_ms) : timeout_ms_(timeout_ms) {
         base_url_ = base_url;
         curl_ = curl_easy_init();
         if (curl_) {
@@ -169,7 +165,7 @@ public:
         curl_easy_setopt(curl_, CURLOPT_URL, url.c_str());
         curl_easy_setopt(curl_, CURLOPT_POST, 1L);
         curl_easy_setopt(curl_, CURLOPT_HTTPHEADER, headers);
-        curl_easy_setopt(curl_, CURLOPT_COPYPOSTFIELDS, request_body.c_str());  // Use COPY to avoid dangling pointer
+        curl_easy_setopt(curl_, CURLOPT_COPYPOSTFIELDS, request_body.c_str()); // Use COPY to avoid dangling pointer
         curl_easy_setopt(curl_, CURLOPT_WRITEDATA, &response_body);
         curl_easy_setopt(curl_, CURLOPT_TIMEOUT_MS, static_cast<long>(timeout_ms_));
 
@@ -207,12 +203,8 @@ public:
      * Combines multiple RAG queries to build comprehensive context
      * for the AI tuner based on current trading situation.
      */
-    std::string build_tuner_context(
-        const std::string& symbol,
-        const std::string& regime,
-        int consecutive_losses,
-        double win_rate)
-    {
+    std::string build_tuner_context(const std::string& symbol, const std::string& regime, int consecutive_losses,
+                                    double win_rate) {
         std::ostringstream context;
 
         // Query 1: Regime-specific parameters
@@ -301,11 +293,13 @@ public:
                 size_t pos = 0;
                 while (pos < arr.size()) {
                     size_t quote_start = arr.find("\"", pos);
-                    if (quote_start == std::string::npos) break;
+                    if (quote_start == std::string::npos)
+                        break;
 
                     size_t quote_end = quote_start + 1;
                     while (quote_end < arr.size()) {
-                        if (arr[quote_end] == '"' && arr[quote_end - 1] != '\\') break;
+                        if (arr[quote_end] == '"' && arr[quote_end - 1] != '\\')
+                            break;
                         quote_end++;
                     }
 
@@ -355,12 +349,23 @@ private:
         std::string escaped;
         for (char c : str) {
             switch (c) {
-                case '"': escaped += "\\\""; break;
-                case '\\': escaped += "\\\\"; break;
-                case '\n': escaped += "\\n"; break;
-                case '\r': escaped += "\\r"; break;
-                case '\t': escaped += "\\t"; break;
-                default: escaped += c;
+            case '"':
+                escaped += "\\\"";
+                break;
+            case '\\':
+                escaped += "\\\\";
+                break;
+            case '\n':
+                escaped += "\\n";
+                break;
+            case '\r':
+                escaped += "\\r";
+                break;
+            case '\t':
+                escaped += "\\t";
+                break;
+            default:
+                escaped += c;
             }
         }
         return escaped;
@@ -369,10 +374,12 @@ private:
     static std::string extract_string(const std::string& json, const char* key) {
         std::string search = "\"" + std::string(key) + "\"";
         size_t pos = json.find(search);
-        if (pos == std::string::npos) return "";
+        if (pos == std::string::npos)
+            return "";
 
         size_t colon = json.find(":", pos);
-        if (colon == std::string::npos) return "";
+        if (colon == std::string::npos)
+            return "";
 
         // Skip whitespace
         size_t start = colon + 1;
@@ -380,11 +387,13 @@ private:
             start++;
         }
 
-        if (start >= json.size() || json[start] != '"') return "";
+        if (start >= json.size() || json[start] != '"')
+            return "";
 
         size_t quote_end = start + 1;
         while (quote_end < json.size()) {
-            if (json[quote_end] == '"' && json[quote_end - 1] != '\\') break;
+            if (json[quote_end] == '"' && json[quote_end - 1] != '\\')
+                break;
             quote_end++;
         }
 
@@ -395,12 +404,28 @@ private:
         for (size_t i = 0; i < value.size(); i++) {
             if (value[i] == '\\' && i + 1 < value.size()) {
                 switch (value[i + 1]) {
-                    case 'n': unescaped += '\n'; i++; break;
-                    case 'r': unescaped += '\r'; i++; break;
-                    case 't': unescaped += '\t'; i++; break;
-                    case '"': unescaped += '"'; i++; break;
-                    case '\\': unescaped += '\\'; i++; break;
-                    default: unescaped += value[i];
+                case 'n':
+                    unescaped += '\n';
+                    i++;
+                    break;
+                case 'r':
+                    unescaped += '\r';
+                    i++;
+                    break;
+                case 't':
+                    unescaped += '\t';
+                    i++;
+                    break;
+                case '"':
+                    unescaped += '"';
+                    i++;
+                    break;
+                case '\\':
+                    unescaped += '\\';
+                    i++;
+                    break;
+                default:
+                    unescaped += value[i];
                 }
             } else {
                 unescaped += value[i];
@@ -413,10 +438,12 @@ private:
     static double extract_number(const std::string& json, const char* key) {
         std::string search = "\"" + std::string(key) + "\"";
         size_t pos = json.find(search);
-        if (pos == std::string::npos) return 0;
+        if (pos == std::string::npos)
+            return 0;
 
         size_t colon = json.find(":", pos);
-        if (colon == std::string::npos) return 0;
+        if (colon == std::string::npos)
+            return 0;
 
         // Skip whitespace
         size_t num_start = colon + 1;
@@ -428,5 +455,5 @@ private:
     }
 };
 
-}  // namespace tuner
-}  // namespace hft
+} // namespace tuner
+} // namespace hft

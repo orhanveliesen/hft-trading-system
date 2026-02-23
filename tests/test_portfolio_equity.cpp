@@ -1,16 +1,18 @@
-#include <cassert>
-#include <iostream>
-#include <cmath>
 #include "../include/ipc/shared_portfolio_state.hpp"
+
+#include <cassert>
+#include <cmath>
+#include <iostream>
 
 using namespace hft::ipc;
 
 #define TEST(name) void name()
-#define RUN_TEST(name) do { \
-    std::cout << "  " << #name << "... "; \
-    name(); \
-    std::cout << "PASSED\n"; \
-} while(0)
+#define RUN_TEST(name)                                                                                                 \
+    do {                                                                                                               \
+        std::cout << "  " << #name << "... ";                                                                          \
+        name();                                                                                                        \
+        std::cout << "PASSED\n";                                                                                       \
+    } while (0)
 
 #define ASSERT_NEAR(a, b, eps) assert(std::abs((a) - (b)) < (eps))
 #define ASSERT_EQ(a, b) assert((a) == (b))
@@ -52,8 +54,8 @@ TEST(equity_equals_cash_plus_market_value) {
     ASSERT_NEAR(unrealized_pnl, 10000.0, 0.01);
 
     // CRITICAL: equity must be cash + market_value, NOT cash + unrealized_pnl
-    ASSERT_NEAR(equity, 70000.0, 0.01);  // cash + market_value
-    assert(std::abs(equity - 20000.0) > 1000.0);  // Must NOT be cash + unrealized_pnl
+    ASSERT_NEAR(equity, 70000.0, 0.01);          // cash + market_value
+    assert(std::abs(equity - 20000.0) > 1000.0); // Must NOT be cash + unrealized_pnl
 
     SharedPortfolioState::destroy(TEST_SHM_NAME);
 }

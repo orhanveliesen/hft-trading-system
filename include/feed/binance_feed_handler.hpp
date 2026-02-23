@@ -2,9 +2,10 @@
 
 #include "../market_events.hpp"
 #include "../types.hpp"
-#include <string_view>
-#include <cstdint>
+
 #include <charconv>
+#include <cstdint>
+#include <string_view>
 
 namespace hft {
 namespace feed {
@@ -26,13 +27,11 @@ namespace feed {
  *   void on_quote(const QuoteUpdate&)
  *   void on_book_level(const BookLevelUpdate&)
  */
-template<typename Callback>
+template <typename Callback>
 class BinanceFeedHandler {
 public:
     explicit BinanceFeedHandler(Callback& callback, SymbolId symbol_id = 0)
-        : callback_(callback)
-        , symbol_id_(symbol_id)
-    {}
+        : callback_(callback), symbol_id_(symbol_id) {}
 
     void set_symbol_id(SymbolId id) { symbol_id_ = id; }
 
@@ -50,9 +49,11 @@ public:
 
         // Extract event type (simple parsing, no external JSON lib)
         auto type_start = json.find('"', event_pos + 4);
-        if (type_start == std::string_view::npos) return false;
+        if (type_start == std::string_view::npos)
+            return false;
         auto type_end = json.find('"', type_start + 1);
-        if (type_end == std::string_view::npos) return false;
+        if (type_end == std::string_view::npos)
+            return false;
 
         std::string_view event_type = json.substr(type_start + 1, type_end - type_start - 1);
 
@@ -64,7 +65,7 @@ public:
             return parse_book_ticker(json);
         }
 
-        return true;  // Unknown event type, skip
+        return true; // Unknown event type, skip
     }
 
 private:
@@ -78,13 +79,16 @@ private:
         event.symbol_id = symbol_id_;
 
         // Parse price "p":"..."
-        if (!parse_decimal_field(json, "\"p\":\"", event.price)) return false;
+        if (!parse_decimal_field(json, "\"p\":\"", event.price))
+            return false;
 
         // Parse quantity "q":"..."
-        if (!parse_decimal_field(json, "\"q\":\"", event.quantity)) return false;
+        if (!parse_decimal_field(json, "\"q\":\"", event.quantity))
+            return false;
 
         // Parse timestamp "T":...
-        if (!parse_int_field(json, "\"T\":", event.timestamp)) return false;
+        if (!parse_int_field(json, "\"T\":", event.timestamp))
+            return false;
 
         // Parse maker side "m":true/false (true = buyer is maker, so seller aggressed)
         auto m_pos = json.find("\"m\":");
@@ -101,19 +105,23 @@ private:
     bool parse_book_ticker(std::string_view json) {
         QuoteUpdate event;
         event.symbol_id = symbol_id_;
-        event.timestamp = 0;  // bookTicker doesn't have timestamp
+        event.timestamp = 0; // bookTicker doesn't have timestamp
 
         // Parse best bid "b":"..."
-        if (!parse_decimal_field(json, "\"b\":\"", event.bid_price)) return false;
+        if (!parse_decimal_field(json, "\"b\":\"", event.bid_price))
+            return false;
 
         // Parse bid size "B":"..."
-        if (!parse_decimal_field(json, "\"B\":\"", event.bid_size)) return false;
+        if (!parse_decimal_field(json, "\"B\":\"", event.bid_size))
+            return false;
 
         // Parse best ask "a":"..."
-        if (!parse_decimal_field(json, "\"a\":\"", event.ask_price)) return false;
+        if (!parse_decimal_field(json, "\"a\":\"", event.ask_price))
+            return false;
 
         // Parse ask size "A":"..."
-        if (!parse_decimal_field(json, "\"A\":\"", event.ask_size)) return false;
+        if (!parse_decimal_field(json, "\"A\":\"", event.ask_size))
+            return false;
 
         callback_.on_quote(event);
         return true;
@@ -139,7 +147,8 @@ private:
     // Parse depth snapshot (full order book)
     bool parse_depth_snapshot(std::string_view json) {
         // Check if this looks like a depth snapshot
-        if (json.find("\"bids\":") == std::string_view::npos) return false;
+        if (json.find("\"bids\":") == std::string_view::npos)
+            return false;
 
         Timestamp ts = 0;
         parse_int_field(json, "\"lastUpdateId\":", ts);
@@ -152,21 +161,25 @@ private:
 
     void parse_book_side(std::string_view json, const char* field, Side side, Timestamp ts) {
         auto pos = json.find(field);
-        if (pos == std::string_view::npos) return;
+        if (pos == std::string_view::npos)
+            return;
 
         // Find the array start
         auto arr_start = json.find('[', pos);
-        if (arr_start == std::string_view::npos) return;
+        if (arr_start == std::string_view::npos)
+            return;
 
         // Parse each [price, qty] pair
         size_t i = arr_start + 1;
         while (i < json.size()) {
             // Find next level array
             auto level_start = json.find('[', i);
-            if (level_start == std::string_view::npos) break;
+            if (level_start == std::string_view::npos)
+                break;
 
             auto level_end = json.find(']', level_start);
-            if (level_end == std::string_view::npos) break;
+            if (level_end == std::string_view::npos)
+                break;
 
             std::string_view level = json.substr(level_start + 1, level_end - level_start - 1);
 
@@ -192,18 +205,21 @@ private:
             callback_.on_book_level(event);
 
             i = level_end + 1;
-            if (i < json.size() && json[i] == ']') break;  // End of array
+            if (i < json.size() && json[i] == ']')
+                break; // End of array
         }
     }
 
     // Helper: parse a decimal string field to Price (multiply by 10000)
     bool parse_decimal_field(std::string_view json, const char* field, Price& out) {
         auto pos = json.find(field);
-        if (pos == std::string_view::npos) return false;
+        if (pos == std::string_view::npos)
+            return false;
 
         pos += strlen(field);
         auto end = json.find('"', pos);
-        if (end == std::string_view::npos) return false;
+        if (end == std::string_view::npos)
+            return false;
 
         out = parse_price(json.substr(pos, end - pos));
         return true;
@@ -211,11 +227,13 @@ private:
 
     bool parse_decimal_field(std::string_view json, const char* field, Quantity& out) {
         auto pos = json.find(field);
-        if (pos == std::string_view::npos) return false;
+        if (pos == std::string_view::npos)
+            return false;
 
         pos += strlen(field);
         auto end = json.find('"', pos);
-        if (end == std::string_view::npos) return false;
+        if (end == std::string_view::npos)
+            return false;
 
         out = parse_quantity(json.substr(pos, end - pos));
         return true;
@@ -224,7 +242,8 @@ private:
     // Helper: parse an integer field
     bool parse_int_field(std::string_view json, const char* field, uint64_t& out) {
         auto pos = json.find(field);
-        if (pos == std::string_view::npos) return false;
+        if (pos == std::string_view::npos)
+            return false;
 
         pos += strlen(field);
         auto result = std::from_chars(json.data() + pos, json.data() + json.size(), out);
@@ -275,5 +294,5 @@ private:
     }
 };
 
-}  // namespace feed
-}  // namespace hft
+} // namespace feed
+} // namespace hft

@@ -9,64 +9,71 @@
  *   DIFFERENCE == 0.00 (always!)
  */
 
-#include <iostream>
+#include <array>
 #include <cassert>
 #include <cmath>
 #include <cstring>
-#include <array>
+#include <iostream>
 
 // Include the TradeRecorder header (will be created)
-#include "../include/trading/trade_recorder.hpp"
 #include "../include/ipc/shared_ledger.hpp"
+#include "../include/trading/trade_recorder.hpp"
 
 // Test framework macros
 #define TEST(name) void name()
 
-#define RUN_TEST(name) do { \
-    std::cout << "  " << #name << "... "; \
-    try { \
-        name(); \
-        std::cout << "PASSED\n"; \
-    } catch (...) { \
-        std::cout << "FAILED (exception)\n"; \
-        return 1; \
-    } \
-} while(0)
+#define RUN_TEST(name)                                                                                                 \
+    do {                                                                                                               \
+        std::cout << "  " << #name << "... ";                                                                          \
+        try {                                                                                                          \
+            name();                                                                                                    \
+            std::cout << "PASSED\n";                                                                                   \
+        } catch (...) {                                                                                                \
+            std::cout << "FAILED (exception)\n";                                                                       \
+            return 1;                                                                                                  \
+        }                                                                                                              \
+    } while (0)
 
-#define ASSERT_EQ(a, b) do { \
-    if ((a) != (b)) { \
-        std::cerr << "\nFAIL: " << #a << " (" << (a) << ") != " << #b << " (" << (b) << ")\n"; \
-        assert(false); \
-    } \
-} while(0)
+#define ASSERT_EQ(a, b)                                                                                                \
+    do {                                                                                                               \
+        if ((a) != (b)) {                                                                                              \
+            std::cerr << "\nFAIL: " << #a << " (" << (a) << ") != " << #b << " (" << (b) << ")\n";                     \
+            assert(false);                                                                                             \
+        }                                                                                                              \
+    } while (0)
 
-#define ASSERT_NEAR(a, b, tol) do { \
-    if (std::abs((a) - (b)) > (tol)) { \
-        std::cerr << "\nFAIL: " << #a << " (" << (a) << ") != " << #b << " (" << (b) << ") within " << (tol) << "\n"; \
-        assert(false); \
-    } \
-} while(0)
+#define ASSERT_NEAR(a, b, tol)                                                                                         \
+    do {                                                                                                               \
+        if (std::abs((a) - (b)) > (tol)) {                                                                             \
+            std::cerr << "\nFAIL: " << #a << " (" << (a) << ") != " << #b << " (" << (b) << ") within " << (tol)       \
+                      << "\n";                                                                                         \
+            assert(false);                                                                                             \
+        }                                                                                                              \
+    } while (0)
 
-#define ASSERT_TRUE(expr) do { \
-    if (!(expr)) { \
-        std::cerr << "\nFAIL: " << #expr << " is false\n"; \
-        assert(false); \
-    } \
-} while(0)
+#define ASSERT_TRUE(expr)                                                                                              \
+    do {                                                                                                               \
+        if (!(expr)) {                                                                                                 \
+            std::cerr << "\nFAIL: " << #expr << " is false\n";                                                         \
+            assert(false);                                                                                             \
+        }                                                                                                              \
+    } while (0)
 
-#define ASSERT_GT(a, b) do { \
-    if (!((a) > (b))) { \
-        std::cerr << "\nFAIL: " << #a << " (" << (a) << ") not > " << #b << " (" << (b) << ")\n"; \
-        assert(false); \
-    } \
-} while(0)
+#define ASSERT_GT(a, b)                                                                                                \
+    do {                                                                                                               \
+        if (!((a) > (b))) {                                                                                            \
+            std::cerr << "\nFAIL: " << #a << " (" << (a) << ") not > " << #b << " (" << (b) << ")\n";                  \
+            assert(false);                                                                                             \
+        }                                                                                                              \
+    } while (0)
 
-#define ASSERT_LT(a, b) do { \
-    if (!((a) < (b))) { \
-        std::cerr << "\nFAIL: " << #a << " (" << (a) << ") not < " << #b << " (" << (b) << ")\n"; \
-        assert(false); \
-    } \
-} while(0)
+#define ASSERT_LT(a, b)                                                                                                \
+    do {                                                                                                               \
+        if (!((a) < (b))) {                                                                                            \
+            std::cerr << "\nFAIL: " << #a << " (" << (a) << ") not < " << #b << " (" << (b) << ")\n";                  \
+            assert(false);                                                                                             \
+        }                                                                                                              \
+    } while (0)
 
 // =============================================================================
 // TEST 1: Buy reduces cash and creates position
@@ -126,7 +133,7 @@ TEST(trade_recorder_sell_tracks_realized_pnl_profit) {
     std::strcpy(buy_input.ticker, "BTCUSDT");
     recorder.record_buy(buy_input);
 
-    double cash_after_buy = recorder.cash();  // ~9899.90
+    double cash_after_buy = recorder.cash(); // ~9899.90
 
     // Sell 1 unit @ $110 (profit!)
     TradeInput sell_input{};
@@ -225,7 +232,7 @@ TEST(trade_recorder_pnl_reconciliation) {
     recorder.record_sell(input);
 
     // Now verify reconciliation
-    double equity_pnl = recorder.equity() - 10000.0;  // Equity change from initial
+    double equity_pnl = recorder.equity() - 10000.0; // Equity change from initial
     double component_pnl = recorder.realized_pnl() + recorder.unrealized_pnl() - recorder.total_commission();
     double difference = equity_pnl - component_pnl;
 
@@ -370,8 +377,8 @@ TEST(trade_recorder_multiple_symbols) {
     recorder.record_buy(eth_input);
 
     // Assert: Both positions exist
-    ASSERT_NEAR(recorder.position_quantity(0), 1.0, 0.0001);  // BTC
-    ASSERT_NEAR(recorder.position_quantity(1), 2.0, 0.0001);  // ETH
+    ASSERT_NEAR(recorder.position_quantity(0), 1.0, 0.0001); // BTC
+    ASSERT_NEAR(recorder.position_quantity(1), 2.0, 0.0001); // ETH
 
     // Sell ETH @ $55 (profit)
     TradeInput eth_sell{};
@@ -383,11 +390,11 @@ TEST(trade_recorder_multiple_symbols) {
     recorder.record_sell(eth_sell);
 
     // Assert: ETH closed, BTC still open
-    ASSERT_NEAR(recorder.position_quantity(0), 1.0, 0.0001);  // BTC unchanged
-    ASSERT_NEAR(recorder.position_quantity(1), 0.0, 0.0001);  // ETH closed
+    ASSERT_NEAR(recorder.position_quantity(0), 1.0, 0.0001); // BTC unchanged
+    ASSERT_NEAR(recorder.position_quantity(1), 0.0, 0.0001); // ETH closed
 
     // Assert: Realized P&L only from ETH
-    ASSERT_NEAR(recorder.realized_pnl(), 10.0, 0.01);  // (55-50)*2 = 10
+    ASSERT_NEAR(recorder.realized_pnl(), 10.0, 0.01); // (55-50)*2 = 10
 }
 
 // =============================================================================
@@ -402,8 +409,8 @@ TEST(trade_recorder_no_drift_100_trades) {
 
     // Do 100 round-trip trades
     for (int i = 0; i < 100; i++) {
-        double buy_price = 100.0 + (i % 10);   // Vary price slightly
-        double sell_price = buy_price + 1.0;   // Always $1 profit
+        double buy_price = 100.0 + (i % 10); // Vary price slightly
+        double sell_price = buy_price + 1.0; // Always $1 profit
 
         TradeInput buy_input{};
         buy_input.symbol = 0;
@@ -431,8 +438,8 @@ TEST(trade_recorder_no_drift_100_trades) {
     ASSERT_NEAR(difference, 0.0, 0.01);
 
     // Also verify basic sanity
-    ASSERT_EQ(recorder.total_fills(), 200u);  // 100 buys + 100 sells
-    ASSERT_NEAR(recorder.position_quantity(0), 0.0, 0.0001);  // All closed
+    ASSERT_EQ(recorder.total_fills(), 200u);                 // 100 buys + 100 sells
+    ASSERT_NEAR(recorder.position_quantity(0), 0.0, 0.0001); // All closed
 }
 
 // =============================================================================
@@ -489,7 +496,7 @@ TEST(ledger_records_buy_entry) {
     ASSERT_EQ(e->is_buy, 1u);
     ASSERT_NEAR(e->cash_before, 10000.0, 0.01);
     ASSERT_NEAR(e->cash_after, 9899.90, 0.01);
-    ASSERT_NEAR(e->realized_pnl, 0.0, 0.01);  // BUY has no P&L
+    ASSERT_NEAR(e->realized_pnl, 0.0, 0.01); // BUY has no P&L
     ASSERT_EQ(e->balance_ok, 1u);
 }
 
@@ -522,7 +529,7 @@ TEST(ledger_records_sell_gain) {
     auto* e = r.ledger_last();
     ASSERT_TRUE(e != nullptr);
     ASSERT_EQ(e->is_buy, 0u);
-    ASSERT_NEAR(e->realized_pnl, 15.0, 0.01);  // Gain: positive
+    ASSERT_NEAR(e->realized_pnl, 15.0, 0.01); // Gain: positive
     ASSERT_GT(e->realized_pnl, 0.0);
 }
 
@@ -554,7 +561,7 @@ TEST(ledger_records_sell_loss) {
 
     auto* e = r.ledger_last();
     ASSERT_TRUE(e != nullptr);
-    ASSERT_NEAR(e->realized_pnl, -10.0, 0.01);  // Loss: negative
+    ASSERT_NEAR(e->realized_pnl, -10.0, 0.01); // Loss: negative
     ASSERT_LT(e->realized_pnl, 0.0);
 }
 
@@ -586,7 +593,7 @@ TEST(ledger_gains_losses_tracking) {
 
     // Running totals
     ASSERT_NEAR(r.total_gains(), 15.0, 0.01);
-    ASSERT_NEAR(r.total_losses(), 10.0, 0.01);  // Absolute value
+    ASSERT_NEAR(r.total_losses(), 10.0, 0.01); // Absolute value
 
     // Verify: gains - losses = realized_pnl
     ASSERT_NEAR(r.total_gains() - r.total_losses(), r.realized_pnl(), 0.01);
@@ -657,9 +664,9 @@ TEST(ledger_calculation_breakdown) {
     r.record_buy(buy);
 
     auto* e1 = r.ledger_last();
-    ASSERT_NEAR(e1->trade_value, 200.0, 0.01);           // price × qty
+    ASSERT_NEAR(e1->trade_value, 200.0, 0.01);            // price × qty
     ASSERT_NEAR(e1->expected_cash_change, -200.20, 0.01); // -(trade_value + commission)
-    ASSERT_EQ(e1->pnl_ok, 1u);  // BUY has no P&L, always OK
+    ASSERT_EQ(e1->pnl_ok, 1u);                            // BUY has no P&L, always OK
 
     // Sell @ 105 (profit)
     TradeInput sell{};
@@ -671,12 +678,12 @@ TEST(ledger_calculation_breakdown) {
     r.record_sell(sell);
 
     auto* e2 = r.ledger_last();
-    ASSERT_NEAR(e2->trade_value, 210.0, 0.01);            // price × qty
-    ASSERT_NEAR(e2->expected_cash_change, 209.79, 0.01);  // +(trade_value - commission)
-    ASSERT_NEAR(e2->pnl_per_unit, 5.0, 0.01);             // sell_price - avg_entry
-    ASSERT_NEAR(e2->expected_pnl, 10.0, 0.01);            // pnl_per_unit × qty
-    ASSERT_NEAR(e2->realized_pnl, 10.0, 0.01);            // Should match
-    ASSERT_EQ(e2->pnl_ok, 1u);  // P&L matches expected
+    ASSERT_NEAR(e2->trade_value, 210.0, 0.01);           // price × qty
+    ASSERT_NEAR(e2->expected_cash_change, 209.79, 0.01); // +(trade_value - commission)
+    ASSERT_NEAR(e2->pnl_per_unit, 5.0, 0.01);            // sell_price - avg_entry
+    ASSERT_NEAR(e2->expected_pnl, 10.0, 0.01);           // pnl_per_unit × qty
+    ASSERT_NEAR(e2->realized_pnl, 10.0, 0.01);           // Should match
+    ASSERT_EQ(e2->pnl_ok, 1u);                           // P&L matches expected
 }
 
 // TEST 18: Verify consistency (running totals == ledger sum)
@@ -698,7 +705,7 @@ TEST(ledger_verify_consistency) {
         input.commission = 0.10;
         r.record_buy(input);
 
-        input.price = 100.0 + (i % 3 == 0 ? 5.0 : -3.0);  // Mix gains and losses
+        input.price = 100.0 + (i % 3 == 0 ? 5.0 : -3.0); // Mix gains and losses
         r.record_sell(input);
     }
 
@@ -758,7 +765,7 @@ TEST(shared_ledger_ipc_integration) {
     auto* e1 = shared->entry(1);
     ASSERT_TRUE(e1 != nullptr);
     ASSERT_NEAR(e1->price(), 2600.0, 0.01);
-    ASSERT_NEAR(e1->realized_pnl(), 100.0, 0.01);  // +100 profit
+    ASSERT_NEAR(e1->realized_pnl(), 100.0, 0.01); // +100 profit
     ASSERT_EQ(e1->is_buy.load(), 0u);
 
     // Verify SharedLedger readable from "another process" (simulated)

@@ -1,11 +1,12 @@
 #pragma once
 
 #include "../types.hpp"
-#include <vector>
-#include <string>
+
 #include <fstream>
 #include <sstream>
 #include <stdexcept>
+#include <string>
+#include <vector>
 
 namespace hft {
 namespace exchange {
@@ -18,16 +19,16 @@ namespace exchange {
  *  quote_volume, trades, taker_buy_base, taker_buy_quote, ignore]
  */
 struct Kline {
-    Timestamp open_time;      // Candle open time (ms)
-    Timestamp close_time;     // Candle close time (ms)
+    Timestamp open_time;  // Candle open time (ms)
+    Timestamp close_time; // Candle close time (ms)
     Price open;
     Price high;
     Price low;
     Price close;
-    double volume;            // Base asset volume
-    double quote_volume;      // Quote asset volume
-    uint32_t trades;          // Number of trades
-    double taker_buy_volume;  // Taker buy base volume
+    double volume;           // Base asset volume
+    double quote_volume;     // Quote asset volume
+    uint32_t trades;         // Number of trades
+    double taker_buy_volume; // Taker buy base volume
 
     // Helpers
     Price mid() const { return (high + low) / 2; }
@@ -35,7 +36,8 @@ struct Kline {
     bool is_bullish() const { return close > open; }
     bool is_bearish() const { return close < open; }
     double body_ratio() const {
-        if (range() == 0) return 0;
+        if (range() == 0)
+            return 0;
         Price body = (close > open) ? (close - open) : (open - close);
         return static_cast<double>(body) / range();
     }
@@ -48,7 +50,7 @@ struct MarketTrade {
     Timestamp time;
     Price price;
     double quantity;
-    bool is_buyer_maker;  // true = sell (taker sold), false = buy (taker bought)
+    bool is_buyer_maker; // true = sell (taker sold), false = buy (taker bought)
 };
 
 /**
@@ -56,8 +58,8 @@ struct MarketTrade {
  */
 struct BookSnapshot {
     Timestamp time;
-    std::vector<std::pair<Price, double>> bids;  // price, qty
-    std::vector<std::pair<Price, double>> asks;  // price, qty
+    std::vector<std::pair<Price, double>> bids; // price, qty
+    std::vector<std::pair<Price, double>> asks; // price, qty
 };
 
 /**
@@ -85,7 +87,8 @@ inline std::vector<Kline> load_klines_csv(const std::string& filename) {
         }
         first_line = false;
 
-        if (line.empty()) continue;
+        if (line.empty())
+            continue;
 
         std::stringstream ss(line);
         std::string token;
@@ -95,11 +98,12 @@ inline std::vector<Kline> load_klines_csv(const std::string& filename) {
             tokens.push_back(token);
         }
 
-        if (tokens.size() < 10) continue;  // Need at least 10 columns
+        if (tokens.size() < 10)
+            continue; // Need at least 10 columns
 
         Kline k;
         k.open_time = std::stoull(tokens[0]);
-        k.open = static_cast<Price>(std::stod(tokens[1]) * 10000);  // 4 decimals
+        k.open = static_cast<Price>(std::stod(tokens[1]) * 10000); // 4 decimals
         k.high = static_cast<Price>(std::stod(tokens[2]) * 10000);
         k.low = static_cast<Price>(std::stod(tokens[3]) * 10000);
         k.close = static_cast<Price>(std::stod(tokens[4]) * 10000);
@@ -129,16 +133,9 @@ inline void save_klines_csv(const std::string& filename, const std::vector<Kline
     file << "open_time,open,high,low,close,volume,close_time,quote_volume,trades,taker_buy_volume\n";
 
     for (const auto& k : klines) {
-        file << k.open_time << ","
-             << (k.open / 10000.0) << ","
-             << (k.high / 10000.0) << ","
-             << (k.low / 10000.0) << ","
-             << (k.close / 10000.0) << ","
-             << k.volume << ","
-             << k.close_time << ","
-             << k.quote_volume << ","
-             << k.trades << ","
-             << k.taker_buy_volume << "\n";
+        file << k.open_time << "," << (k.open / 10000.0) << "," << (k.high / 10000.0) << "," << (k.low / 10000.0) << ","
+             << (k.close / 10000.0) << "," << k.volume << "," << k.close_time << "," << k.quote_volume << ","
+             << k.trades << "," << k.taker_buy_volume << "\n";
     }
 }
 
@@ -165,7 +162,8 @@ inline std::vector<MarketTrade> load_trades_csv(const std::string& filename) {
         }
         first_line = false;
 
-        if (line.empty()) continue;
+        if (line.empty())
+            continue;
 
         std::stringstream ss(line);
         std::string token;
@@ -175,7 +173,8 @@ inline std::vector<MarketTrade> load_trades_csv(const std::string& filename) {
             tokens.push_back(token);
         }
 
-        if (tokens.size() < 4) continue;
+        if (tokens.size() < 4)
+            continue;
 
         MarketTrade t;
         t.time = std::stoull(tokens[0]);
@@ -189,5 +188,5 @@ inline std::vector<MarketTrade> load_trades_csv(const std::string& filename) {
     return trades;
 }
 
-}  // namespace exchange
-}  // namespace hft
+} // namespace exchange
+} // namespace hft

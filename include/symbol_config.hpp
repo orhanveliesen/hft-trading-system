@@ -1,28 +1,28 @@
 #pragma once
 
-#include <string>
 #include <cstdint>
 #include <limits>
+#include <string>
 
 namespace hft {
 
 // Configuration for a tradeable symbol
 struct SymbolConfig {
     // Identity
-    std::string symbol;      // e.g., "AAPL", "TSLA"
+    std::string symbol; // e.g., "AAPL", "TSLA"
 
     // Order book configuration
-    uint32_t base_price;     // Base price for O(1) lookup array
-    uint32_t price_range;    // Number of price ticks to cover
+    uint32_t base_price;  // Base price for O(1) lookup array
+    uint32_t price_range; // Number of price ticks to cover
 
     // Market making configuration
     bool enable_market_making = false;
-    int spread_bps = 10;           // Spread in basis points
-    uint32_t quote_size = 100;     // Size per quote
-    int32_t max_position = 1000;   // Maximum position size
+    int spread_bps = 10;         // Spread in basis points
+    uint32_t quote_size = 100;   // Size per quote
+    int32_t max_position = 1000; // Maximum position size
 
     // Risk configuration
-    int64_t max_loss = std::numeric_limits<int64_t>::max();  // Max loss before halt
+    int64_t max_loss = std::numeric_limits<int64_t>::max(); // Max loss before halt
 
     SymbolConfig() = default;
 
@@ -53,4 +53,4 @@ inline std::string trim_symbol(const char* data, size_t len) {
     return std::string(data, end);
 }
 
-}  // namespace hft
+} // namespace hft

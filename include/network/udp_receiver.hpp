@@ -1,15 +1,15 @@
 #pragma once
 
+#include <arpa/inet.h>
 #include <cstdint>
 #include <cstring>
-#include <string>
-#include <functional>
-#include <sys/socket.h>
-#include <sys/epoll.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-#include <unistd.h>
 #include <fcntl.h>
+#include <functional>
+#include <netinet/in.h>
+#include <string>
+#include <sys/epoll.h>
+#include <sys/socket.h>
+#include <unistd.h>
 
 namespace hft {
 namespace network {
@@ -27,15 +27,10 @@ inline MoldUDP64Header parse_moldudp_header(const uint8_t* data) {
     std::memcpy(header.session, data, 10);
 
     // Sequence number: big-endian uint64 at offset 10
-    header.sequence_number =
-        (static_cast<uint64_t>(data[10]) << 56) |
-        (static_cast<uint64_t>(data[11]) << 48) |
-        (static_cast<uint64_t>(data[12]) << 40) |
-        (static_cast<uint64_t>(data[13]) << 32) |
-        (static_cast<uint64_t>(data[14]) << 24) |
-        (static_cast<uint64_t>(data[15]) << 16) |
-        (static_cast<uint64_t>(data[16]) << 8) |
-        data[17];
+    header.sequence_number = (static_cast<uint64_t>(data[10]) << 56) | (static_cast<uint64_t>(data[11]) << 48) |
+                             (static_cast<uint64_t>(data[12]) << 40) | (static_cast<uint64_t>(data[13]) << 32) |
+                             (static_cast<uint64_t>(data[14]) << 24) | (static_cast<uint64_t>(data[15]) << 16) |
+                             (static_cast<uint64_t>(data[16]) << 8) | data[17];
 
     // Message count: big-endian uint16 at offset 18
     header.message_count = (static_cast<uint16_t>(data[18]) << 8) | data[19];
@@ -45,10 +40,10 @@ inline MoldUDP64Header parse_moldudp_header(const uint8_t* data) {
 
 // UDP receiver configuration
 struct UdpConfig {
-    std::string interface;        // Local interface IP
-    std::string multicast_group;  // Multicast group IP
+    std::string interface;       // Local interface IP
+    std::string multicast_group; // Multicast group IP
     uint16_t port;
-    int recv_buffer_size;         // SO_RCVBUF size
+    int recv_buffer_size; // SO_RCVBUF size
 };
 
 // High-performance UDP multicast receiver using epoll
@@ -59,9 +54,7 @@ public:
 
     UdpReceiver() : socket_fd_(-1), epoll_fd_(-1), running_(false) {}
 
-    ~UdpReceiver() {
-        stop();
-    }
+    ~UdpReceiver() { stop(); }
 
     // Initialize socket and join multicast group
     bool init(const UdpConfig& config) {
@@ -69,15 +62,15 @@ public:
 
         // Create UDP socket
         socket_fd_ = socket(AF_INET, SOCK_DGRAM, 0);
-        if (socket_fd_ < 0) return false;
+        if (socket_fd_ < 0)
+            return false;
 
         // Set non-blocking
         int flags = fcntl(socket_fd_, F_GETFL, 0);
         fcntl(socket_fd_, F_SETFL, flags | O_NONBLOCK);
 
         // Set receive buffer size
-        setsockopt(socket_fd_, SOL_SOCKET, SO_RCVBUF,
-                   &config.recv_buffer_size, sizeof(config.recv_buffer_size));
+        setsockopt(socket_fd_, SOL_SOCKET, SO_RCVBUF, &config.recv_buffer_size, sizeof(config.recv_buffer_size));
 
         // Allow address reuse
         int reuse = 1;
@@ -100,8 +93,7 @@ public:
         mreq.imr_multiaddr.s_addr = inet_addr(config.multicast_group.c_str());
         mreq.imr_interface.s_addr = inet_addr(config.interface.c_str());
 
-        if (setsockopt(socket_fd_, IPPROTO_IP, IP_ADD_MEMBERSHIP,
-                       &mreq, sizeof(mreq)) < 0) {
+        if (setsockopt(socket_fd_, IPPROTO_IP, IP_ADD_MEMBERSHIP, &mreq, sizeof(mreq)) < 0) {
             close(socket_fd_);
             socket_fd_ = -1;
             return false;
@@ -117,7 +109,7 @@ public:
 
         // Add socket to epoll
         epoll_event ev{};
-        ev.events = EPOLLIN | EPOLLET;  // Edge-triggered
+        ev.events = EPOLLIN | EPOLLET; // Edge-triggered
         ev.data.fd = socket_fd_;
 
         if (epoll_ctl(epoll_fd_, EPOLL_CTL_ADD, socket_fd_, &ev) < 0) {
@@ -135,7 +127,8 @@ public:
     // Calls callback for each received packet
     template <typename Callback>
     int poll(Callback&& callback, int timeout_us = 0) {
-        if (socket_fd_ < 0) return -1;
+        if (socket_fd_ < 0)
+            return -1;
 
         epoll_event events[MAX_EVENTS];
         int timeout_ms = timeout_us / 1000;
@@ -149,7 +142,8 @@ public:
                 // Read all available packets (edge-triggered)
                 while (true) {
                     ssize_t len = recv(socket_fd_, recv_buffer_, MAX_PACKET_SIZE, 0);
-                    if (len <= 0) break;
+                    if (len <= 0)
+                        break;
 
                     callback(recv_buffer_, static_cast<size_t>(len));
                     ++packets_received;
@@ -182,5 +176,5 @@ private:
     uint8_t recv_buffer_[MAX_PACKET_SIZE];
 };
 
-}  // namespace network
-}  // namespace hft
+} // namespace network
+} // namespace hft

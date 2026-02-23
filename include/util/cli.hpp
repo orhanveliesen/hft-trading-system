@@ -22,10 +22,10 @@ struct CLIArgs {
     bool paper_mode = false;
     bool help = false;
     bool verbose = false;
-    bool unified_strategy = false;  // Use unified strategy architecture
-    int cpu_affinity = -1;          // CPU core to pin to (-1 = no pinning)
+    bool unified_strategy = false; // Use unified strategy architecture
+    int cpu_affinity = -1;         // CPU core to pin to (-1 = no pinning)
     std::vector<std::string> symbols;
-    int duration = 0;               // 0 = unlimited
+    int duration = 0; // 0 = unlimited
     double capital = 100000.0;
     int max_position = 10;
 };
@@ -103,32 +103,23 @@ inline bool parse_args(int argc, char* argv[], CLIArgs& args) {
 
         if (arg == "--paper" || arg == "-p") {
             args.paper_mode = true;
-        }
-        else if (arg == "--help" || arg == "-h") {
+        } else if (arg == "--help" || arg == "-h") {
             args.help = true;
-        }
-        else if (arg == "--verbose" || arg == "-v") {
+        } else if (arg == "--verbose" || arg == "-v") {
             args.verbose = true;
-        }
-        else if ((arg == "--symbols" || arg == "-s") && i + 1 < argc) {
+        } else if ((arg == "--symbols" || arg == "-s") && i + 1 < argc) {
             args.symbols = split_symbols(argv[++i]);
-        }
-        else if ((arg == "--duration" || arg == "-d") && i + 1 < argc) {
+        } else if ((arg == "--duration" || arg == "-d") && i + 1 < argc) {
             args.duration = std::stoi(argv[++i]);
-        }
-        else if ((arg == "--capital" || arg == "-c") && i + 1 < argc) {
+        } else if ((arg == "--capital" || arg == "-c") && i + 1 < argc) {
             args.capital = std::stod(argv[++i]);
-        }
-        else if ((arg == "--max-pos" || arg == "-m") && i + 1 < argc) {
+        } else if ((arg == "--max-pos" || arg == "-m") && i + 1 < argc) {
             args.max_position = std::stoi(argv[++i]);
-        }
-        else if (arg == "--cpu" && i + 1 < argc) {
+        } else if (arg == "--cpu" && i + 1 < argc) {
             args.cpu_affinity = std::stoi(argv[++i]);
-        }
-        else if (arg == "--unified") {
+        } else if (arg == "--unified") {
             args.unified_strategy = true;
-        }
-        else {
+        } else {
             std::cerr << "Unknown option: " << arg << "\n";
             std::cerr << "Use --help for usage information.\n";
             return false;
@@ -137,5 +128,5 @@ inline bool parse_args(int argc, char* argv[], CLIArgs& args) {
     return true;
 }
 
-}  // namespace util
-}  // namespace hft
+} // namespace util
+} // namespace hft

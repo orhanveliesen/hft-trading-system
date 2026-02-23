@@ -49,6 +49,12 @@ make -j$(nproc)
 # Test
 ctest --output-on-failure
 
+# Format code (before commit)
+find include tools tests benchmarks -type f \( -name "*.cpp" -o -name "*.hpp" \) -exec clang-format -i {} +
+
+# Setup pre-commit hook (auto-format on commit)
+git config core.hooksPath .githooks
+
 # Benchmark (mandatory for hot path changes)
 ./bench_orderbook
 
@@ -69,7 +75,81 @@ ctest --output-on-failure
 
 # Optimize strategy params
 ./optimize_strategies --symbol BTCUSDT --metric sharpe
+
+# Format code (before commit)
+find include tools tests benchmarks -type f \( -name "*.cpp" -o -name "*.hpp" \) -exec clang-format -i {} +
 ```
+
+## CI/CD & Code Coverage
+
+### GitHub Actions Workflows
+- **build-test.yml**: Build (Release) + run all 56 tests on every push/PR
+- **lint.yml**: Enforce clang-format on all .cpp/.hpp files
+- **codecov.yml**: Generate coverage report with 100% threshold
+
+### Code Coverage Requirements
+- **Target**: 100% line coverage (strict)
+- **Tool**: lcov + gcov
+- **Exclusions**: `/usr/*`, `*/external/*`, `*/tests/*`
+- **Unreachable error paths**: Mark with `LCOV_EXCL_LINE` comment
+  ```cpp
+  if (unlikely_error_condition) { // LCOV_EXCL_LINE
+      handle_unreachable_error(); // LCOV_EXCL_LINE
+  } // LCOV_EXCL_LINE
+  ```
+
+### Formatting (clang-format)
+- **Style**: LLVM-based, HFT-aware (120 col limit, compact hot path)
+- **Enforcement**: CI fails on formatting violations
+- **Local check**: `clang-format --dry-run --Werror <file>`
+- **Auto-fix**: See format command above
+
+## Docker Build Image
+
+### Builder Image
+- **Image**: `ghcr.io/orhanveliesen/hft-builder:latest`
+- **Base**: Ubuntu 22.04
+- **Pre-installed**: libwebsockets, glfw, curl, cmake, build-essential, clang-format, lcov
+- **Source**: `docker/Dockerfile`
+- **Purpose**: Speed up CI/CD by pre-installing dependencies (20-30x faster than apt install)
+
+### Local Usage
+```bash
+# Pull latest image
+docker pull ghcr.io/orhanveliesen/hft-builder:latest
+
+# Build project in container
+docker run --rm -v $(pwd):/workspace ghcr.io/orhanveliesen/hft-builder:latest \
+  bash -c "mkdir -p build && cd build && cmake -DCMAKE_BUILD_TYPE=Release .. && make -j$(nproc)"
+
+# Run tests
+docker run --rm -v $(pwd):/workspace ghcr.io/orhanveliesen/hft-builder:latest \
+  bash -c "cd build && ctest --output-on-failure"
+
+# Format code
+docker run --rm -v $(pwd):/workspace ghcr.io/orhanveliesen/hft-builder:latest \
+  bash -c "find include tools tests benchmarks -type f \( -name '*.cpp' -o -name '*.hpp' \) -exec clang-format -i {} +"
+```
+
+### Rebuilding Image
+```bash
+# Manually trigger rebuild via GitHub Actions
+gh workflow run docker-build.yml
+
+# Or build locally and push
+docker build -t ghcr.io/orhanveliesen/hft-builder:latest -f docker/Dockerfile .
+docker push ghcr.io/orhanveliesen/hft-builder:latest
+```
+
+**Note**: Docker build workflow (`.github/workflows/docker-build.yml`) automatically rebuilds and pushes the image when `docker/Dockerfile` changes.
+
+### CI/CD Integration
+All GitHub Actions workflows use the builder image:
+- **build-test.yml**: Compiles and runs 53 test suites
+- **lint.yml**: Enforces clang-format-16 (C++23 support)
+- **codecov.yml**: Generates coverage reports with lcov
+
+Dependencies are pre-installed in the image, reducing workflow runtime from ~60s to ~5s for dependency setup.
 
 ## Project-Specific Constraints
 

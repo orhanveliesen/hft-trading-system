@@ -7,15 +7,15 @@
  * 3. No double-counting
  */
 
-#include <iostream>
 #include <cassert>
 #include <cmath>
+#include <iostream>
 
 // Minimal LocalPortfolio for testing
 class TestPortfolio {
 public:
     static constexpr size_t MAX_SYMBOLS = 100;
-    static constexpr double COMMISSION_RATE = 0.001;  // 0.1%
+    static constexpr double COMMISSION_RATE = 0.001; // 0.1%
 
     double cash = 0;
     double holdings[MAX_SYMBOLS] = {0};
@@ -59,17 +59,16 @@ public:
         }
     }
 
-    double total_value(double current_price, size_t symbol) const {
-        return cash + holdings[symbol] * current_price;
-    }
+    double total_value(double current_price, size_t symbol) const { return cash + holdings[symbol] * current_price; }
 };
 
-#define ASSERT_NEAR(a, b, tol) do { \
-    if (std::abs((a) - (b)) > (tol)) { \
-        std::cerr << "FAIL: " << #a << " = " << (a) << ", expected " << (b) << "\n"; \
-        assert(false); \
-    } \
-} while(0)
+#define ASSERT_NEAR(a, b, tol)                                                                                         \
+    do {                                                                                                               \
+        if (std::abs((a) - (b)) > (tol)) {                                                                             \
+            std::cerr << "FAIL: " << #a << " = " << (a) << ", expected " << (b) << "\n";                               \
+            assert(false);                                                                                             \
+        }                                                                                                              \
+    } while (0)
 
 void test_basic_buy() {
     std::cout << "  test_basic_buy... ";
@@ -217,16 +216,16 @@ void test_no_double_counting() {
     std::cout << "  test_no_double_counting... ";
 
     TestPortfolio p;
-    p.init(20000.0);  // Same as our test setup
+    p.init(20000.0); // Same as our test setup
 
     // Simulate 100 round-trip trades
     double total_commission = 0;
     for (int i = 0; i < 100; i++) {
-        double price = 1000.0 + (i % 10);  // Slight price variation
+        double price = 1000.0 + (i % 10); // Slight price variation
         p.buy(0, price, 0.1);
         total_commission += price * 0.1 * 0.001;
 
-        p.sell(0, price * 1.01, 0.1);  // 1% profit
+        p.sell(0, price * 1.01, 0.1); // 1% profit
         total_commission += price * 1.01 * 0.1 * 0.001;
     }
 
@@ -240,7 +239,7 @@ void test_no_double_counting() {
     // Cash should be close to initial + profits - commissions
     // Should definitely be < $25000 (not $94000!)
     assert(p.cash < 25000.0);
-    assert(p.cash > 18000.0);  // Some profit expected
+    assert(p.cash > 18000.0); // Some profit expected
 
     std::cout << "PASSED\n";
 }

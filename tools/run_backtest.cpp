@@ -24,10 +24,11 @@
 #include "../include/backtest/strategies.hpp"
 #include "../include/backtest/strategy_adapter.hpp"
 #include "../include/strategy/simple_adaptive.hpp"
-#include <iostream>
-#include <iomanip>
-#include <memory>
+
 #include <ctime>
+#include <iomanip>
+#include <iostream>
+#include <memory>
 
 using namespace hft;
 using namespace hft::backtest;
@@ -68,8 +69,8 @@ std::string format_time(Timestamp ts) {
     return buf;
 }
 
-void run_strategy(const std::string& name, IStrategy& strategy,
-                  const std::vector<Kline>& klines, const BacktestConfig& config) {
+void run_strategy(const std::string& name, IStrategy& strategy, const std::vector<Kline>& klines,
+                  const BacktestConfig& config) {
     std::cout << "\n========================================\n";
     std::cout << "Strategy: " << name << "\n";
     std::cout << "========================================\n";
@@ -87,11 +88,10 @@ void run_strategy(const std::string& name, IStrategy& strategy,
         int count = std::min(5, static_cast<int>(trades.size()));
         for (int i = 0; i < count; ++i) {
             const auto& t = trades[i];
-            std::cout << (t.side == Side::Buy ? "LONG " : "SHORT ")
-                      << format_time(t.entry_time) << " -> " << format_time(t.exit_time)
-                      << " | Entry: $" << std::fixed << std::setprecision(2) << (t.entry_price / 10000.0)
-                      << " Exit: $" << (t.exit_price / 10000.0)
-                      << " | P&L: $" << t.pnl << "\n";
+            std::cout << (t.side == Side::Buy ? "LONG " : "SHORT ") << format_time(t.entry_time) << " -> "
+                      << format_time(t.exit_time) << " | Entry: $" << std::fixed << std::setprecision(2)
+                      << (t.entry_price / 10000.0) << " Exit: $" << (t.exit_price / 10000.0) << " | P&L: $" << t.pnl
+                      << "\n";
         }
         if (trades.size() > 5) {
             std::cout << "... and " << (trades.size() - 5) << " more trades\n";
@@ -118,18 +118,20 @@ int main(int argc, char* argv[]) {
     }
 
     std::cout << "Loaded " << klines.size() << " klines\n";
-    std::cout << "Period: " << format_time(klines.front().open_time)
-              << " to " << format_time(klines.back().open_time) << "\n";
+    std::cout << "Period: " << format_time(klines.front().open_time) << " to " << format_time(klines.back().open_time)
+              << "\n";
 
     // Price range
     Price min_price = klines[0].low;
     Price max_price = klines[0].high;
     for (const auto& k : klines) {
-        if (k.low < min_price) min_price = k.low;
-        if (k.high > max_price) max_price = k.high;
+        if (k.low < min_price)
+            min_price = k.low;
+        if (k.high > max_price)
+            max_price = k.high;
     }
-    std::cout << "Price range: $" << std::fixed << std::setprecision(2)
-              << (min_price / 10000.0) << " - $" << (max_price / 10000.0) << "\n";
+    std::cout << "Price range: $" << std::fixed << std::setprecision(2) << (min_price / 10000.0) << " - $"
+              << (max_price / 10000.0) << "\n";
 
     // Backtest config
     BacktestConfig config;
@@ -176,53 +178,41 @@ int main(int argc, char* argv[]) {
             MomentumAdapter momentum(cfg);
             run_strategy("Momentum (HFT)", momentum, klines, config);
         }
-    }
-    else if (strategy_name == "sma") {
+    } else if (strategy_name == "sma") {
         int fast = (argc >= 4) ? std::stoi(argv[3]) : 10;
         int slow = (argc >= 5) ? std::stoi(argv[4]) : 30;
         SMACrossover sma(fast, slow);
-        run_strategy("SMA Crossover (" + std::to_string(fast) + "/" + std::to_string(slow) + ")",
-                     sma, klines, config);
-    }
-    else if (strategy_name == "rsi") {
+        run_strategy("SMA Crossover (" + std::to_string(fast) + "/" + std::to_string(slow) + ")", sma, klines, config);
+    } else if (strategy_name == "rsi") {
         int period = (argc >= 4) ? std::stoi(argv[3]) : 14;
         double os = (argc >= 5) ? std::stod(argv[4]) : 30;
         double ob = (argc >= 6) ? std::stod(argv[5]) : 70;
         RSIStrategy rsi(period, os, ob);
-        run_strategy("RSI (" + std::to_string(period) + ", " +
-                     std::to_string(static_cast<int>(os)) + "/" +
-                     std::to_string(static_cast<int>(ob)) + ")",
+        run_strategy("RSI (" + std::to_string(period) + ", " + std::to_string(static_cast<int>(os)) + "/" +
+                         std::to_string(static_cast<int>(ob)) + ")",
                      rsi, klines, config);
-    }
-    else if (strategy_name == "mr") {
+    } else if (strategy_name == "mr") {
         int lookback = (argc >= 4) ? std::stoi(argv[3]) : 20;
         double std_mult = (argc >= 5) ? std::stod(argv[4]) : 2.0;
         MeanReversion mr(lookback, std_mult);
-        run_strategy("Mean Reversion (" + std::to_string(lookback) + ", " +
-                     std::to_string(std_mult) + ")",
-                     mr, klines, config);
-    }
-    else if (strategy_name == "breakout") {
+        run_strategy("Mean Reversion (" + std::to_string(lookback) + ", " + std::to_string(std_mult) + ")", mr, klines,
+                     config);
+    } else if (strategy_name == "breakout") {
         int lookback = (argc >= 4) ? std::stoi(argv[3]) : 20;
         BreakoutStrategy bo(lookback);
-        run_strategy("Breakout (" + std::to_string(lookback) + ")",
-                     bo, klines, config);
-    }
-    else if (strategy_name == "macd") {
+        run_strategy("Breakout (" + std::to_string(lookback) + ")", bo, klines, config);
+    } else if (strategy_name == "macd") {
         int fast = (argc >= 4) ? std::stoi(argv[3]) : 12;
         int slow = (argc >= 5) ? std::stoi(argv[4]) : 26;
         int signal = (argc >= 6) ? std::stoi(argv[5]) : 9;
         MACDStrategy macd(fast, slow, signal);
-        run_strategy("MACD (" + std::to_string(fast) + "/" +
-                     std::to_string(slow) + "/" + std::to_string(signal) + ")",
+        run_strategy("MACD (" + std::to_string(fast) + "/" + std::to_string(slow) + "/" + std::to_string(signal) + ")",
                      macd, klines, config);
-    }
-    else if (strategy_name == "simple_mr") {
+    } else if (strategy_name == "simple_mr") {
         // HFT Simple Mean Reversion strategy
         SimpleMRAdapter simple_mr;
         run_strategy("Simple Mean Reversion (HFT)", simple_mr, klines, config);
-    }
-    else if (strategy_name == "momentum") {
+    } else if (strategy_name == "momentum") {
         // HFT Momentum strategy
         int lookback = (argc >= 4) ? std::stoi(argv[3]) : 10;
         int threshold_bps = (argc >= 5) ? std::stoi(argv[4]) : 10;
@@ -230,14 +220,13 @@ int main(int argc, char* argv[]) {
         cfg.lookback_ticks = lookback;
         cfg.threshold_bps = threshold_bps;
         MomentumAdapter momentum(cfg);
-        run_strategy("Momentum (HFT, lookback=" + std::to_string(lookback) +
-                     ", bps=" + std::to_string(threshold_bps) + ")",
+        run_strategy("Momentum (HFT, lookback=" + std::to_string(lookback) + ", bps=" + std::to_string(threshold_bps) +
+                         ")",
                      momentum, klines, config);
-    }
-    else if (strategy_name == "adaptive") {
+    } else if (strategy_name == "adaptive") {
         // Simple adaptive strategy - switches between MeanReversion and Breakout
         strategy::SimpleAdaptive::Config adaptive_config;
-        adaptive_config.verbose = true;  // Show regime changes
+        adaptive_config.verbose = true; // Show regime changes
         adaptive_config.min_bars_before_switch = 10;
         adaptive_config.regime_lookback = 20;
 
@@ -248,8 +237,7 @@ int main(int argc, char* argv[]) {
         std::cout << "Final Regime: " << strategy::regime_to_string(adaptive.current_regime()) << "\n";
         std::cout << "Total Switches: " << adaptive.switch_count() << "\n";
         std::cout << "Active Strategy: " << adaptive.active_strategy_name() << "\n";
-    }
-    else {
+    } else {
         std::cerr << "Unknown strategy: " << strategy_name << "\n";
         print_usage(argv[0]);
         return 1;

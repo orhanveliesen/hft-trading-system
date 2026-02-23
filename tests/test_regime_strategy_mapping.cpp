@@ -9,38 +9,44 @@
  * - Preset configurations
  */
 
-#include <cassert>
-#include <iostream>
-#include <thread>
-#include <chrono>
 #include "../include/ipc/shared_config.hpp"
 #include "../include/strategy/regime_detector.hpp"
+
+#include <cassert>
+#include <chrono>
+#include <iostream>
+#include <thread>
 
 using namespace hft::ipc;
 using namespace hft::strategy;
 
 #define TEST(name) void name()
-#define RUN_TEST(name) do { \
-    std::cout << "  " << #name << "... "; \
-    name(); \
-    std::cout << "PASSED\n"; \
-} while(0)
+#define RUN_TEST(name)                                                                                                 \
+    do {                                                                                                               \
+        std::cout << "  " << #name << "... ";                                                                          \
+        name();                                                                                                        \
+        std::cout << "PASSED\n";                                                                                       \
+    } while (0)
 
-#define ASSERT_EQ(a, b) do { \
-    auto _a = (a); auto _b = (b); \
-    if (_a != _b) { \
-        std::cerr << "FAILED: " << #a << " != " << #b << "\n"; \
-        assert(false); \
-    } \
-} while(0)
+#define ASSERT_EQ(a, b)                                                                                                \
+    do {                                                                                                               \
+        auto _a = (a);                                                                                                 \
+        auto _b = (b);                                                                                                 \
+        if (_a != _b) {                                                                                                \
+            std::cerr << "FAILED: " << #a << " != " << #b << "\n";                                                     \
+            assert(false);                                                                                             \
+        }                                                                                                              \
+    } while (0)
 
-#define ASSERT_STR_EQ(a, b) do { \
-    std::string _a = (a); std::string _b = (b); \
-    if (_a != _b) { \
-        std::cerr << "FAILED: " << #a << " (" << _a << ") != " << #b << " (" << _b << ")\n"; \
-        assert(false); \
-    } \
-} while(0)
+#define ASSERT_STR_EQ(a, b)                                                                                            \
+    do {                                                                                                               \
+        std::string _a = (a);                                                                                          \
+        std::string _b = (b);                                                                                          \
+        if (_a != _b) {                                                                                                \
+            std::cerr << "FAILED: " << #a << " (" << _a << ") != " << #b << " (" << _b << ")\n";                       \
+            assert(false);                                                                                             \
+        }                                                                                                              \
+    } while (0)
 
 #define ASSERT_TRUE(x) assert(x)
 #define ASSERT_FALSE(x) assert(!(x))
@@ -194,13 +200,13 @@ TEST(test_conservative_preset) {
 
     // Apply conservative preset
     // Conservative: Low risk, defensive in most regimes
-    config->set_strategy_for_regime(0, static_cast<uint8_t>(StrategyType::NONE));       // Unknown
-    config->set_strategy_for_regime(1, static_cast<uint8_t>(StrategyType::CAUTIOUS));   // TrendingUp
-    config->set_strategy_for_regime(2, static_cast<uint8_t>(StrategyType::NONE));       // TrendingDown
-    config->set_strategy_for_regime(3, static_cast<uint8_t>(StrategyType::MEAN_REV));   // Ranging
-    config->set_strategy_for_regime(4, static_cast<uint8_t>(StrategyType::NONE));       // HighVol
-    config->set_strategy_for_regime(5, static_cast<uint8_t>(StrategyType::CAUTIOUS));   // LowVol
-    config->set_strategy_for_regime(6, static_cast<uint8_t>(StrategyType::NONE));       // Spike
+    config->set_strategy_for_regime(0, static_cast<uint8_t>(StrategyType::NONE));     // Unknown
+    config->set_strategy_for_regime(1, static_cast<uint8_t>(StrategyType::CAUTIOUS)); // TrendingUp
+    config->set_strategy_for_regime(2, static_cast<uint8_t>(StrategyType::NONE));     // TrendingDown
+    config->set_strategy_for_regime(3, static_cast<uint8_t>(StrategyType::MEAN_REV)); // Ranging
+    config->set_strategy_for_regime(4, static_cast<uint8_t>(StrategyType::NONE));     // HighVol
+    config->set_strategy_for_regime(5, static_cast<uint8_t>(StrategyType::CAUTIOUS)); // LowVol
+    config->set_strategy_for_regime(6, static_cast<uint8_t>(StrategyType::NONE));     // Spike
 
     // Verify conservative mapping
     ASSERT_EQ(config->get_strategy_for_regime(0), static_cast<uint8_t>(StrategyType::NONE));
@@ -224,13 +230,13 @@ TEST(test_aggressive_preset) {
 
     // Apply aggressive preset
     // Aggressive: Higher risk, active in all market conditions
-    config->set_strategy_for_regime(0, static_cast<uint8_t>(StrategyType::MOMENTUM));   // Unknown
-    config->set_strategy_for_regime(1, static_cast<uint8_t>(StrategyType::MOMENTUM));   // TrendingUp
-    config->set_strategy_for_regime(2, static_cast<uint8_t>(StrategyType::MOMENTUM));   // TrendingDown
-    config->set_strategy_for_regime(3, static_cast<uint8_t>(StrategyType::MKT_MAKER));  // Ranging
-    config->set_strategy_for_regime(4, static_cast<uint8_t>(StrategyType::CAUTIOUS));   // HighVol
-    config->set_strategy_for_regime(5, static_cast<uint8_t>(StrategyType::MKT_MAKER));  // LowVol
-    config->set_strategy_for_regime(6, static_cast<uint8_t>(StrategyType::DEFENSIVE));  // Spike
+    config->set_strategy_for_regime(0, static_cast<uint8_t>(StrategyType::MOMENTUM));  // Unknown
+    config->set_strategy_for_regime(1, static_cast<uint8_t>(StrategyType::MOMENTUM));  // TrendingUp
+    config->set_strategy_for_regime(2, static_cast<uint8_t>(StrategyType::MOMENTUM));  // TrendingDown
+    config->set_strategy_for_regime(3, static_cast<uint8_t>(StrategyType::MKT_MAKER)); // Ranging
+    config->set_strategy_for_regime(4, static_cast<uint8_t>(StrategyType::CAUTIOUS));  // HighVol
+    config->set_strategy_for_regime(5, static_cast<uint8_t>(StrategyType::MKT_MAKER)); // LowVol
+    config->set_strategy_for_regime(6, static_cast<uint8_t>(StrategyType::DEFENSIVE)); // Spike
 
     // Verify aggressive mapping
     ASSERT_EQ(config->get_strategy_for_regime(0), static_cast<uint8_t>(StrategyType::MOMENTUM));
@@ -291,7 +297,7 @@ TEST(test_cross_thread_visibility) {
         ready.store(true);
 
         while (!done.load()) {
-            observed_strategy = cfg->get_strategy_for_regime(3);  // Ranging
+            observed_strategy = cfg->get_strategy_for_regime(3); // Ranging
             std::this_thread::yield();
         }
     });

@@ -1,0 +1,38 @@
+name: Lint
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  # Wait for Docker image to be ready before running lint
+  wait-for-image:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Wait for Docker build
+        run: sleep 30
+
+  clang-format:
+    runs-on: ubuntu-22.04
+    needs: [wait-for-image]
+    if: always()  # Run even if wait-for-image is skipped (e.g., on push to main)
+    container: ghcr.io/orhanveliesen/hft-builder:latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check formatting
+        run: |
+          find include tools tests benchmarks -type f \( -name "*.cpp" -o -name "*.hpp" \) \
+            -exec clang-format --dry-run --Werror {} +
+
+      - name: Format check failed
+        if: failure()
+        run: |
+          echo "Formatting issues detected. Run the following to fix:"
+          echo "  find include tools tests benchmarks -type f \( -name \"*.cpp\" -o -name \"*.hpp\" \) -exec clang-format -i {} +"
+          exit 1

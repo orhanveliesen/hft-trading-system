@@ -1,14 +1,15 @@
 #pragma once
 
 #include "market_data.hpp"
-#include <string>
-#include <vector>
+
+#include <curl/curl.h>
+#include <iostream>
+#include <nlohmann/json.hpp>
 #include <sstream>
 #include <stdexcept>
+#include <string>
 #include <unistd.h>
-#include <curl/curl.h>
-#include <nlohmann/json.hpp>
-#include <iostream>
+#include <vector>
 
 namespace hft {
 namespace exchange {
@@ -35,9 +36,7 @@ public:
     static constexpr const char* INTERVAL_4h = "4h";
     static constexpr const char* INTERVAL_1d = "1d";
 
-    explicit BinanceRest(bool use_testnet = false)
-        : base_url_(use_testnet ? TESTNET : MAINNET)
-        , curl_(nullptr) {
+    explicit BinanceRest(bool use_testnet = false) : base_url_(use_testnet ? TESTNET : MAINNET), curl_(nullptr) {
         curl_global_init(CURL_GLOBAL_DEFAULT);
         curl_ = curl_easy_init();
         if (!curl_) {
@@ -66,18 +65,11 @@ public:
      * @param limit Max klines to fetch (default 500, max 1000)
      * @return Vector of Kline structs
      */
-    std::vector<Kline> fetch_klines(
-        const std::string& symbol,
-        const std::string& interval,
-        Timestamp start_time = 0,
-        Timestamp end_time = 0,
-        int limit = 500
-    ) {
+    std::vector<Kline> fetch_klines(const std::string& symbol, const std::string& interval, Timestamp start_time = 0,
+                                    Timestamp end_time = 0, int limit = 500) {
         // Build URL
         std::stringstream url;
-        url << base_url_ << "/api/v3/klines?symbol=" << symbol
-            << "&interval=" << interval
-            << "&limit=" << limit;
+        url << base_url_ << "/api/v3/klines?symbol=" << symbol << "&interval=" << interval << "&limit=" << limit;
 
         if (start_time > 0) {
             url << "&startTime=" << start_time;
@@ -102,21 +94,17 @@ public:
      * @param end_time End time in ms
      * @return Vector of all Kline structs in range
      */
-    std::vector<Kline> fetch_klines_range(
-        const std::string& symbol,
-        const std::string& interval,
-        Timestamp start_time,
-        Timestamp end_time
-    ) {
+    std::vector<Kline> fetch_klines_range(const std::string& symbol, const std::string& interval, Timestamp start_time,
+                                          Timestamp end_time) {
         std::vector<Kline> all_klines;
         Timestamp current_start = start_time;
-        const int limit = 1000;  // Max per request
+        const int limit = 1000; // Max per request
 
         while (current_start < end_time) {
             auto batch = fetch_klines(symbol, interval, current_start, end_time, limit);
 
             if (batch.empty()) {
-                break;  // No more data
+                break; // No more data
             }
 
             all_klines.insert(all_klines.end(), batch.begin(), batch.end());
@@ -164,9 +152,7 @@ public:
      * @param quote_asset Filter by quote asset (default "USDT")
      * @return Vector of symbol strings (e.g., "BTCUSDT", "ETHUSDT")
      */
-    std::vector<std::string> fetch_trading_symbols(
-        const std::string& quote_asset = "USDT"
-    ) {
+    std::vector<std::string> fetch_trading_symbols(const std::string& quote_asset = "USDT") {
         std::vector<std::string> symbols;
 
         try {
@@ -203,7 +189,8 @@ public:
                                 break;
                             }
                         }
-                        if (is_spot) break;
+                        if (is_spot)
+                            break;
                     }
                 }
 
@@ -271,8 +258,7 @@ private:
         CURLcode res = curl_easy_perform(curl_);
 
         if (res != CURLE_OK) {
-            throw std::runtime_error(
-                std::string("CURL error: ") + curl_easy_strerror(res));
+            throw std::runtime_error(std::string("CURL error: ") + curl_easy_strerror(res));
         }
 
         // Check HTTP status
@@ -280,8 +266,7 @@ private:
         curl_easy_getinfo(curl_, CURLINFO_RESPONSE_CODE, &http_code);
 
         if (http_code != 200) {
-            throw std::runtime_error(
-                "HTTP error " + std::to_string(http_code) + ": " + response);
+            throw std::runtime_error("HTTP error " + std::to_string(http_code) + ": " + response);
         }
 
         return response;
@@ -335,10 +320,8 @@ constexpr size_t DEFAULT_SYMBOL_LIMIT = 8;
  * These are checked first when selecting symbols from Binance.
  */
 inline const std::vector<std::string>& get_priority_symbols() {
-    static const std::vector<std::string> priority = {
-        "BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT",
-        "XRPUSDT", "ADAUSDT", "DOGEUSDT", "MATICUSDT"
-    };
+    static const std::vector<std::string> priority = {"BTCUSDT", "ETHUSDT", "BNBUSDT",  "SOLUSDT",
+                                                      "XRPUSDT", "ADAUSDT", "DOGEUSDT", "MATICUSDT"};
     return priority;
 }
 
@@ -354,7 +337,7 @@ inline const std::vector<std::string>& get_priority_symbols() {
  * @throws std::runtime_error if API returns empty response
  */
 inline std::vector<std::string> fetch_default_symbols(size_t limit = DEFAULT_SYMBOL_LIMIT) {
-    BinanceRest rest(false);  // Use mainnet
+    BinanceRest rest(false); // Use mainnet
     auto all_symbols = rest.fetch_trading_symbols("USDT");
 
     if (all_symbols.empty()) {
@@ -368,7 +351,8 @@ inline std::vector<std::string> fetch_default_symbols(size_t limit = DEFAULT_SYM
     // Add priority symbols that are available
     const auto& priority = get_priority_symbols();
     for (const auto& sym : priority) {
-        if (result.size() >= limit) break;
+        if (result.size() >= limit)
+            break;
         auto it = std::find(all_symbols.begin(), all_symbols.end(), sym);
         if (it != all_symbols.end()) {
             result.push_back(sym);
@@ -377,17 +361,17 @@ inline std::vector<std::string> fetch_default_symbols(size_t limit = DEFAULT_SYM
 
     // Fill remaining slots with other symbols
     for (const auto& sym : all_symbols) {
-        if (result.size() >= limit) break;
+        if (result.size() >= limit)
+            break;
         if (std::find(result.begin(), result.end(), sym) == result.end()) {
             result.push_back(sym);
         }
     }
 
-    std::cout << "[SYMBOLS] Selected " << result.size()
-              << " symbols from " << all_symbols.size()
+    std::cout << "[SYMBOLS] Selected " << result.size() << " symbols from " << all_symbols.size()
               << " available USDT trading pairs\n";
     return result;
 }
 
-}  // namespace exchange
-}  // namespace hft
+} // namespace exchange
+} // namespace hft

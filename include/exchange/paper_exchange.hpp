@@ -1,12 +1,13 @@
 #pragma once
 
+#include "../ipc/execution_report.hpp"
+#include "../ipc/shared_config.hpp"
+#include "../ipc/shared_paper_config.hpp"
+
 #include <array>
 #include <cstdint>
 #include <cstring>
 #include <functional>
-#include "../ipc/execution_report.hpp"
-#include "../ipc/shared_config.hpp"
-#include "../ipc/shared_paper_config.hpp"
 
 namespace hft {
 namespace exchange {
@@ -33,7 +34,7 @@ class PaperExchange {
 public:
     static constexpr size_t MAX_PENDING_ORDERS = 256;
     static constexpr size_t MAX_SYMBOL_LEN = 16;
-    static constexpr double DEFAULT_SLIPPAGE_BPS = 5.0;  // 5 bps = 0.05% (pessimistic default)
+    static constexpr double DEFAULT_SLIPPAGE_BPS = 5.0; // 5 bps = 0.05% (pessimistic default)
 
     using ExecutionCallback = std::function<void(const ipc::ExecutionReport&)>;
     using SlippageCallback = std::function<void(double)>;
@@ -54,36 +55,23 @@ public:
     };
 
     PaperExchange()
-        : next_order_id_(1)
-        , pending_count_(0)
-        , config_(nullptr)
-        , paper_config_(nullptr)
-        , total_slippage_(0)
-    {
+        : next_order_id_(1), pending_count_(0), config_(nullptr), paper_config_(nullptr), total_slippage_(0) {
         for (auto& order : pending_orders_) {
             order.clear();
         }
     }
 
     // Set config pointer for reading commission rate
-    void set_config(const ipc::SharedConfig* config) {
-        config_ = config;
-    }
+    void set_config(const ipc::SharedConfig* config) { config_ = config; }
 
     // Set paper config pointer for paper-trading specific settings (slippage, etc.)
-    void set_paper_config(const ipc::SharedPaperConfig* paper_config) {
-        paper_config_ = paper_config;
-    }
+    void set_paper_config(const ipc::SharedPaperConfig* paper_config) { paper_config_ = paper_config; }
 
     // Set callback for execution reports
-    void set_execution_callback(ExecutionCallback callback) {
-        on_execution_ = std::move(callback);
-    }
+    void set_execution_callback(ExecutionCallback callback) { on_execution_ = std::move(callback); }
 
     // Set callback for slippage events (for tracking in portfolio state)
-    void set_slippage_callback(SlippageCallback callback) {
-        on_slippage_ = std::move(callback);
-    }
+    void set_slippage_callback(SlippageCallback callback) { on_slippage_ = std::move(callback); }
 
     /**
      * Send a market order - fills immediately
@@ -96,14 +84,8 @@ public:
      * @param timestamp Current timestamp
      * @return ExecutionReport with fill details
      */
-    ipc::ExecutionReport send_market_order(
-        const char* symbol,
-        hft::Side side,
-        double quantity,
-        double bid,
-        double ask,
-        uint64_t timestamp
-    ) {
+    ipc::ExecutionReport send_market_order(const char* symbol, hft::Side side, double quantity, double bid, double ask,
+                                           uint64_t timestamp) {
         uint64_t order_id = next_order_id_++;
 
         // Market order fills at: ask for buy, bid for sell
@@ -114,21 +96,21 @@ public:
         double slippage_amount = base_price * slippage_rate;
         double fill_price;
         if (side == hft::Side::Buy) {
-            fill_price = base_price + slippage_amount;  // BUY: pay MORE
+            fill_price = base_price + slippage_amount; // BUY: pay MORE
         } else {
-            fill_price = base_price - slippage_amount;  // SELL: receive LESS
+            fill_price = base_price - slippage_amount; // SELL: receive LESS
         }
 
         // Track slippage cost
         double slippage_cost = slippage_amount * quantity;
         total_slippage_ += slippage_cost;
-        if (on_slippage_) on_slippage_(slippage_cost);
+        if (on_slippage_)
+            on_slippage_(slippage_cost);
 
         double commission = calculate_commission(quantity * fill_price);
 
-        auto report = ipc::ExecutionReport::market_fill(
-            symbol, order_id, side, quantity, fill_price, commission, timestamp
-        );
+        auto report =
+            ipc::ExecutionReport::market_fill(symbol, order_id, side, quantity, fill_price, commission, timestamp);
 
         // Notify callback
         if (on_execution_) {
@@ -148,23 +130,16 @@ public:
      * @param timestamp Current timestamp
      * @return ExecutionReport with order accepted status (or rejected if full)
      */
-    ipc::ExecutionReport send_limit_order(
-        const char* symbol,
-        hft::Side side,
-        double quantity,
-        double limit_price,
-        uint64_t timestamp
-    ) {
+    ipc::ExecutionReport send_limit_order(const char* symbol, hft::Side side, double quantity, double limit_price,
+                                          uint64_t timestamp) {
         uint64_t order_id = next_order_id_++;
 
         // Find free slot
         int slot = find_free_slot();
         if (slot < 0) {
             // No room for more pending orders
-            auto report = ipc::ExecutionReport::rejected(
-                symbol, order_id, side, ipc::OrderType::Limit,
-                "MAX_PENDING_EXCEEDED", timestamp
-            );
+            auto report = ipc::ExecutionReport::rejected(symbol, order_id, side, ipc::OrderType::Limit,
+                                                         "MAX_PENDING_EXCEEDED", timestamp);
             if (on_execution_) {
                 on_execution_(report);
             }
@@ -184,9 +159,7 @@ public:
         pending_count_++;
 
         // Return "New" report
-        auto report = ipc::ExecutionReport::limit_accepted(
-            symbol, order_id, side, timestamp
-        );
+        auto report = ipc::ExecutionReport::limit_accepted(symbol, order_id, side, timestamp);
         if (on_execution_) {
             on_execution_(report);
         }
@@ -238,17 +211,15 @@ public:
      * @param ask Current ask price
      * @param timestamp Current timestamp
      */
-    void on_price_update(
-        const char* symbol,
-        double bid,
-        double ask,
-        uint64_t timestamp
-    ) {
-        if (pending_count_ == 0) return;
+    void on_price_update(const char* symbol, double bid, double ask, uint64_t timestamp) {
+        if (pending_count_ == 0)
+            return;
 
         for (auto& order : pending_orders_) {
-            if (!order.active) continue;
-            if (std::strcmp(order.symbol, symbol) != 0) continue;
+            if (!order.active)
+                continue;
+            if (std::strcmp(order.symbol, symbol) != 0)
+                continue;
 
             bool should_fill = false;
             double fill_price = 0;
@@ -257,13 +228,13 @@ public:
                 // Buy limit: fill when ask drops BELOW our limit (pessimistic)
                 if (ask < order.limit_price) {
                     should_fill = true;
-                    fill_price = ask;  // Fill at current ask, not our limit
+                    fill_price = ask; // Fill at current ask, not our limit
                 }
             } else {
                 // Sell limit: fill when bid rises ABOVE our limit (pessimistic)
                 if (bid > order.limit_price) {
                     should_fill = true;
-                    fill_price = bid;  // Fill at current bid, not our limit
+                    fill_price = bid; // Fill at current bid, not our limit
                 }
             }
 
@@ -272,28 +243,21 @@ public:
                 double slippage_rate = get_slippage_bps() / 10000.0;
                 double slippage_amount = fill_price * slippage_rate;
                 if (order.side == hft::Side::Buy) {
-                    fill_price += slippage_amount;  // BUY: pay MORE
+                    fill_price += slippage_amount; // BUY: pay MORE
                 } else {
-                    fill_price -= slippage_amount;  // SELL: receive LESS
+                    fill_price -= slippage_amount; // SELL: receive LESS
                 }
 
                 // Track slippage cost
                 double slippage_cost = slippage_amount * order.quantity;
                 total_slippage_ += slippage_cost;
-                if (on_slippage_) on_slippage_(slippage_cost);
+                if (on_slippage_)
+                    on_slippage_(slippage_cost);
 
                 double commission = calculate_commission(order.quantity * fill_price);
 
-                auto report = ipc::ExecutionReport::limit_fill(
-                    order.symbol,
-                    order.order_id,
-                    order.side,
-                    order.quantity,
-                    fill_price,
-                    commission,
-                    order.submit_time_ns,
-                    timestamp
-                );
+                auto report = ipc::ExecutionReport::limit_fill(order.symbol, order.order_id, order.side, order.quantity,
+                                                               fill_price, commission, order.submit_time_ns, timestamp);
 
                 if (on_execution_) {
                     on_execution_(report);
@@ -320,7 +284,7 @@ public:
         if (config_) {
             return config_->slippage_bps();
         }
-        return DEFAULT_SLIPPAGE_BPS;  // Fallback only if no config attached
+        return DEFAULT_SLIPPAGE_BPS; // Fallback only if no config attached
     }
 
     // Get pending order by ID (for inspection)
@@ -340,11 +304,11 @@ private:
                 return static_cast<int>(i);
             }
         }
-        return -1;  // No free slot
+        return -1; // No free slot
     }
 
     double calculate_commission(double notional) const {
-        double rate = 0.001;  // Default 0.1%
+        double rate = 0.001; // Default 0.1%
         if (config_) {
             rate = config_->commission_rate();
         }
@@ -361,5 +325,5 @@ private:
     SlippageCallback on_slippage_;
 };
 
-}  // namespace exchange
-}  // namespace hft
+} // namespace exchange
+} // namespace hft

@@ -29,9 +29,9 @@
 #include <atomic>
 #include <cstring>
 #include <ctime>
+#include <fcntl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
-#include <fcntl.h>
 #include <unistd.h>
 
 namespace hft {
@@ -41,7 +41,7 @@ namespace ipc {
 static constexpr double LEDGER_FIXED_SCALE = 1e8;
 
 // Maximum entries in shared ledger
-static constexpr size_t MAX_SHARED_LEDGER_ENTRIES = 1000;  // ~160KB total
+static constexpr size_t MAX_SHARED_LEDGER_ENTRIES = 1000; // ~160KB total
 
 /**
  * SharedLedgerEntry - Single transaction record for IPC
@@ -89,7 +89,7 @@ struct SharedLedgerEntry {
     std::atomic<uint8_t> exit_reason;
     std::atomic<uint8_t> balance_ok;
     std::atomic<uint8_t> pnl_ok;
-    std::atomic<uint8_t> valid;  // 1 = entry is valid and populated
+    std::atomic<uint8_t> valid; // 1 = entry is valid and populated
     uint8_t padding[2];
 
     // Conversion helpers
@@ -149,7 +149,7 @@ struct SharedLedgerEntry {
  */
 struct SharedLedger {
     // Magic number for validation
-    static constexpr uint64_t MAGIC = 0x4846544C45444752ULL;  // "HFTLEDGR"
+    static constexpr uint64_t MAGIC = 0x4846544C45444752ULL; // "HFTLEDGR"
 #ifdef TRADER_BUILD_HASH
     static constexpr uint32_t VERSION = util::hex_to_u32(TRADER_BUILD_HASH);
 #else
@@ -162,29 +162,28 @@ struct SharedLedger {
     uint32_t session_id;
 
     // Circular buffer state
-    std::atomic<size_t> entry_count;    // Total entries (up to MAX)
-    std::atomic<size_t> head;           // Index of oldest entry
-    std::atomic<uint32_t> next_seq;     // Next sequence number
-    std::atomic<uint32_t> write_lock;   // Simple spinlock for writes
+    std::atomic<size_t> entry_count;  // Total entries (up to MAX)
+    std::atomic<size_t> head;         // Index of oldest entry
+    std::atomic<uint32_t> next_seq;   // Next sequence number
+    std::atomic<uint32_t> write_lock; // Simple spinlock for writes
 
     // Statistics
     std::atomic<size_t> total_entries;  // Total entries ever written
     std::atomic<size_t> mismatch_count; // Total mismatches detected
 
-    uint8_t padding[32];  // Alignment
+    uint8_t padding[32]; // Alignment
 
     // Circular buffer of entries
     SharedLedgerEntry entries[MAX_SHARED_LEDGER_ENTRIES];
 
     // === Accessors (for readers) ===
 
-    size_t count() const {
-        return entry_count.load();
-    }
+    size_t count() const { return entry_count.load(); }
 
     const SharedLedgerEntry* entry(size_t index) const {
         size_t cnt = entry_count.load();
-        if (index >= cnt) return nullptr;
+        if (index >= cnt)
+            return nullptr;
         size_t h = head.load();
         size_t actual_idx = (h + index) % MAX_SHARED_LEDGER_ENTRIES;
         return &entries[actual_idx];
@@ -192,12 +191,14 @@ struct SharedLedger {
 
     const SharedLedgerEntry* last() const {
         size_t cnt = entry_count.load();
-        if (cnt == 0) return nullptr;
+        if (cnt == 0)
+            return nullptr;
         return entry(cnt - 1);
     }
 
     const SharedLedgerEntry* first() const {
-        if (entry_count.load() == 0) return nullptr;
+        if (entry_count.load() == 0)
+            return nullptr;
         return entry(0);
     }
 
@@ -205,7 +206,8 @@ struct SharedLedger {
         size_t cnt = 0;
         for (size_t i = 0; i < entry_count.load(); i++) {
             auto* e = entry(i);
-            if (e && e->has_mismatch()) cnt++;
+            if (e && e->has_mismatch())
+                cnt++;
         }
         return cnt;
     }
@@ -236,14 +238,12 @@ struct SharedLedger {
 
         total_entries.fetch_add(1);
 
-        write_lock.store(0);  // Release lock
+        write_lock.store(0); // Release lock
 
         return &e;
     }
 
-    void record_mismatch() {
-        mismatch_count.fetch_add(1);
-    }
+    void record_mismatch() { mismatch_count.fetch_add(1); }
 
     // === Initialization ===
 
@@ -264,26 +264,25 @@ struct SharedLedger {
         }
     }
 
-    bool is_valid() const {
-        return magic == MAGIC && version == VERSION;
-    }
+    bool is_valid() const { return magic == MAGIC && version == VERSION; }
 
     // === Shared Memory Factory ===
 
     static SharedLedger* create(const char* name) {
         int fd = shm_open(name, O_CREAT | O_RDWR, 0666);
-        if (fd < 0) return nullptr;
+        if (fd < 0)
+            return nullptr;
 
         if (ftruncate(fd, sizeof(SharedLedger)) < 0) {
             close(fd);
             return nullptr;
         }
 
-        void* ptr = mmap(nullptr, sizeof(SharedLedger),
-                         PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+        void* ptr = mmap(nullptr, sizeof(SharedLedger), PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
         close(fd);
 
-        if (ptr == MAP_FAILED) return nullptr;
+        if (ptr == MAP_FAILED)
+            return nullptr;
 
         auto* ledger = static_cast<SharedLedger*>(ptr);
         ledger->init();
@@ -292,13 +291,14 @@ struct SharedLedger {
 
     static SharedLedger* open(const char* name) {
         int fd = shm_open(name, O_RDONLY, 0666);
-        if (fd < 0) return nullptr;
+        if (fd < 0)
+            return nullptr;
 
-        void* ptr = mmap(nullptr, sizeof(SharedLedger),
-                         PROT_READ, MAP_SHARED, fd, 0);
+        void* ptr = mmap(nullptr, sizeof(SharedLedger), PROT_READ, MAP_SHARED, fd, 0);
         close(fd);
 
-        if (ptr == MAP_FAILED) return nullptr;
+        if (ptr == MAP_FAILED)
+            return nullptr;
 
         auto* ledger = static_cast<SharedLedger*>(ptr);
         if (!ledger->is_valid()) {
@@ -310,13 +310,14 @@ struct SharedLedger {
 
     static SharedLedger* open_rw(const char* name) {
         int fd = shm_open(name, O_RDWR, 0666);
-        if (fd < 0) return nullptr;
+        if (fd < 0)
+            return nullptr;
 
-        void* ptr = mmap(nullptr, sizeof(SharedLedger),
-                         PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+        void* ptr = mmap(nullptr, sizeof(SharedLedger), PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
         close(fd);
 
-        if (ptr == MAP_FAILED) return nullptr;
+        if (ptr == MAP_FAILED)
+            return nullptr;
 
         auto* ledger = static_cast<SharedLedger*>(ptr);
         if (!ledger->is_valid()) {
@@ -326,9 +327,7 @@ struct SharedLedger {
         return ledger;
     }
 
-    static void destroy(const char* name) {
-        shm_unlink(name);
-    }
+    static void destroy(const char* name) { shm_unlink(name); }
 
     static void unmap(SharedLedger* ledger) {
         if (ledger) {
@@ -340,5 +339,5 @@ struct SharedLedger {
 // Size verification
 static_assert(sizeof(SharedLedgerEntry) % 8 == 0, "SharedLedgerEntry must be 8-byte aligned");
 
-}  // namespace ipc
-}  // namespace hft
+} // namespace ipc
+} // namespace hft

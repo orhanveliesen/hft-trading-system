@@ -7,22 +7,18 @@
  * 3. Guard condition correctly evaluates shared_config state
  */
 
-#include <iostream>
-#include <cassert>
 #include <atomic>
+#include <cassert>
+#include <iostream>
 
 // Mock SharedConfig for testing
 class MockSharedConfig {
 public:
     std::atomic<uint8_t> tuner_mode_{0};
 
-    bool is_tuner_mode() const {
-        return tuner_mode_.load() == 1;
-    }
+    bool is_tuner_mode() const { return tuner_mode_.load() == 1; }
 
-    void set_tuner_mode(uint8_t mode) {
-        tuner_mode_.store(mode);
-    }
+    void set_tuner_mode(uint8_t mode) { tuner_mode_.store(mode); }
 };
 
 // Test the guard condition logic
@@ -47,7 +43,7 @@ void test_guard_tuner_mode_off() {
     std::cout << "  test_guard_tuner_mode_off... ";
 
     MockSharedConfig config;
-    config.set_tuner_mode(0);  // OFF
+    config.set_tuner_mode(0); // OFF
 
     // When tuner_mode is OFF, legacy exits should be allowed
     bool result = should_use_legacy_exits(&config);
@@ -60,7 +56,7 @@ void test_guard_tuner_mode_on() {
     std::cout << "  test_guard_tuner_mode_on... ";
 
     MockSharedConfig config;
-    config.set_tuner_mode(1);  // ON
+    config.set_tuner_mode(1); // ON
 
     // When tuner_mode is ON, legacy exits should be BLOCKED
     bool result = should_use_legacy_exits(&config);
@@ -105,7 +101,7 @@ void test_single_exit_path_legacy() {
     std::cout << "  test_single_exit_path_legacy... ";
 
     MockSharedConfig config;
-    config.set_tuner_mode(0);  // OFF - legacy mode
+    config.set_tuner_mode(0); // OFF - legacy mode
 
     MockPortfolio portfolio;
     double exit_value = 100.0;
@@ -130,7 +126,7 @@ void test_single_exit_path_unified() {
     std::cout << "  test_single_exit_path_unified... ";
 
     MockSharedConfig config;
-    config.set_tuner_mode(1);  // ON - unified mode
+    config.set_tuner_mode(1); // ON - unified mode
 
     MockPortfolio portfolio;
     double exit_value = 100.0;
@@ -158,7 +154,7 @@ void test_double_counting_prevention() {
     std::cout << "  test_double_counting_prevention... ";
 
     MockSharedConfig config;
-    config.set_tuner_mode(1);  // ON - unified mode
+    config.set_tuner_mode(1); // ON - unified mode
 
     MockPortfolio portfolio;
     double exit_value = 100.0;
@@ -212,7 +208,7 @@ void test_check_and_close_guard() {
     if (use_legacy && symbol_active) {
         check_and_close_calls++;
     }
-    assert(check_and_close_calls == 1);  // Still 1, not incremented
+    assert(check_and_close_calls == 1); // Still 1, not incremented
 
     std::cout << "PASSED\n";
 }
@@ -226,7 +222,7 @@ void test_trend_exit_guard() {
     MockSharedConfig config;
     MockPortfolio portfolio;
 
-    double holding = 1.0;  // Have a position
+    double holding = 1.0; // Have a position
     int trend_exit_calls = 0;
 
     // Scenario 1: Tuner OFF - trend exit should run
@@ -243,7 +239,7 @@ void test_trend_exit_guard() {
     if (use_legacy && holding > 0) {
         trend_exit_calls++;
     }
-    assert(trend_exit_calls == 1);  // Still 1, not incremented
+    assert(trend_exit_calls == 1); // Still 1, not incremented
 
     std::cout << "PASSED\n";
 }

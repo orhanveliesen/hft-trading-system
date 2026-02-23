@@ -9,8 +9,8 @@
  * See concepts.hpp for the full concept definition.
  */
 
-#include "types.hpp"
 #include "concepts.hpp"
+#include "types.hpp"
 
 namespace hft {
 
@@ -21,17 +21,12 @@ namespace hft {
  * All operations succeed but do nothing.
  */
 struct NullOrderSender {
-    bool send_order(Symbol /*symbol*/, Side /*side*/, Quantity /*qty*/, bool /*is_market*/) {
-        return true;
-    }
+    bool send_order(Symbol /*symbol*/, Side /*side*/, Quantity /*qty*/, bool /*is_market*/) { return true; }
 
-    bool cancel_order(Symbol /*symbol*/, OrderId /*order_id*/) {
-        return true;
-    }
+    bool cancel_order(Symbol /*symbol*/, OrderId /*order_id*/) { return true; }
 };
 
 // Static assertion to verify NullOrderSender satisfies the concept
-static_assert(concepts::OrderSender<NullOrderSender>,
-              "NullOrderSender must satisfy OrderSender concept");
+static_assert(concepts::OrderSender<NullOrderSender>, "NullOrderSender must satisfy OrderSender concept");
 
-}  // namespace hft
+} // namespace hft

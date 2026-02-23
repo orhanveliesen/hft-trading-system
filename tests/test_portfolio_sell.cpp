@@ -12,10 +12,10 @@
  * Run with: ./test_portfolio_sell
  */
 
-#include <iostream>
 #include <cassert>
 #include <cmath>
 #include <cstring>
+#include <iostream>
 
 // Include the Portfolio class directly from trader.cpp structure
 // We'll recreate a minimal version for testing
@@ -46,14 +46,16 @@ struct SymbolPosition {
     int count = 0;
 
     void clear_all() {
-        for (auto& s : slots) s.clear();
+        for (auto& s : slots)
+            s.clear();
         count = 0;
     }
 
     double total_quantity() const {
         double total = 0;
         for (const auto& s : slots) {
-            if (s.active) total += s.quantity;
+            if (s.active)
+                total += s.quantity;
         }
         return total;
     }
@@ -81,7 +83,7 @@ struct SymbolPosition {
                 return true;
             }
         }
-        return false;  // No free slot
+        return false; // No free slot
     }
 };
 
@@ -95,7 +97,7 @@ public:
     SymbolPosition positions[MAX_SYMBOLS];
     bool symbol_active[MAX_SYMBOLS] = {false};
 
-    double commission_rate() const { return 0.001; }  // 0.1%
+    double commission_rate() const { return 0.001; } // 0.1%
 
     void reset() {
         cash = initial_cash;
@@ -109,7 +111,8 @@ public:
     }
 
     void buy(size_t s, double price, double qty) {
-        if (s >= MAX_SYMBOLS) return;
+        if (s >= MAX_SYMBOLS)
+            return;
         double cost = price * qty;
         double commission = cost * commission_rate();
         cash -= (cost + commission);
@@ -121,8 +124,10 @@ public:
 
     // FIXED VERSION: Uses actual_sold instead of requested qty
     double sell(size_t s, double price, double qty, double spread_cost = 0, double commission = 0) {
-        if (qty <= 0 || price <= 0) return 0;
-        if (s >= MAX_SYMBOLS) return 0;
+        if (qty <= 0 || price <= 0)
+            return 0;
+        if (s >= MAX_SYMBOLS)
+            return 0;
 
         double remaining = qty;
         auto& sym_pos = positions[s];
@@ -131,7 +136,8 @@ public:
         double actual_sold = 0;
 
         for (auto& slot : sym_pos.slots) {
-            if (!slot.active || remaining <= 0) continue;
+            if (!slot.active || remaining <= 0)
+                continue;
 
             double sell_qty = std::min(remaining, slot.quantity);
             slot.quantity -= sell_qty;
@@ -168,44 +174,48 @@ public:
     }
 
     double get_holding(size_t s) const {
-        if (s >= MAX_SYMBOLS) return 0;
+        if (s >= MAX_SYMBOLS)
+            return 0;
         return positions[s].total_quantity();
     }
 };
 
-}  // namespace test
+} // namespace test
 
 using namespace test;
 
 // Test macros
 #define TEST(name) void test_##name()
-#define RUN_TEST(name) do { \
-    std::cout << "  Running " #name "... "; \
-    test_##name(); \
-    std::cout << "PASSED\n"; \
-} while(0)
+#define RUN_TEST(name)                                                                                                 \
+    do {                                                                                                               \
+        std::cout << "  Running " #name "... ";                                                                        \
+        test_##name();                                                                                                 \
+        std::cout << "PASSED\n";                                                                                       \
+    } while (0)
 
-#define ASSERT_DOUBLE_NEAR(a, b, tol) do { \
-    if (std::abs((a) - (b)) > (tol)) { \
-        std::cerr << "\nFAILED: " << #a << " != " << #b \
-                  << " (" << (a) << " != " << (b) << ")\n"; \
-        assert(false); \
-    } \
-} while(0)
+#define ASSERT_DOUBLE_NEAR(a, b, tol)                                                                                  \
+    do {                                                                                                               \
+        if (std::abs((a) - (b)) > (tol)) {                                                                             \
+            std::cerr << "\nFAILED: " << #a << " != " << #b << " (" << (a) << " != " << (b) << ")\n";                  \
+            assert(false);                                                                                             \
+        }                                                                                                              \
+    } while (0)
 
-#define ASSERT_EQ(a, b) do { \
-    if ((a) != (b)) { \
-        std::cerr << "\nFAILED: " << #a << " != " << #b << "\n"; \
-        assert(false); \
-    } \
-} while(0)
+#define ASSERT_EQ(a, b)                                                                                                \
+    do {                                                                                                               \
+        if ((a) != (b)) {                                                                                              \
+            std::cerr << "\nFAILED: " << #a << " != " << #b << "\n";                                                   \
+            assert(false);                                                                                             \
+        }                                                                                                              \
+    } while (0)
 
-#define ASSERT_TRUE(expr) do { \
-    if (!(expr)) { \
-        std::cerr << "\nFAILED: " << #expr << " is false\n"; \
-        assert(false); \
-    } \
-} while(0)
+#define ASSERT_TRUE(expr)                                                                                              \
+    do {                                                                                                               \
+        if (!(expr)) {                                                                                                 \
+            std::cerr << "\nFAILED: " << #expr << " is false\n";                                                       \
+            assert(false);                                                                                             \
+        }                                                                                                              \
+    } while (0)
 
 // =============================================================================
 // CRITICAL BUG TEST: Overselling should not credit extra cash
@@ -217,7 +227,7 @@ TEST(overselling_does_not_credit_extra_cash) {
 
     // Buy 3 units at $100 each
     p.buy(0, 100.0, 3.0);
-    double cash_after_buy = p.cash;  // ~$99,699.70 (100k - 300 - 0.30 commission)
+    double cash_after_buy = p.cash; // ~$99,699.70 (100k - 300 - 0.30 commission)
 
     // Try to sell 10 units (but only have 3)
     double actual_sold = p.sell(0, 100.0, 10.0);
@@ -235,7 +245,7 @@ TEST(overselling_does_not_credit_extra_cash) {
 
     // CRITICAL: Cash should NOT exceed initial cash (minus round-trip commissions)
     // Initial: $100,000, Round-trip commission: ~$0.60
-    ASSERT_TRUE(p.cash < p.initial_cash);  // Should be slightly less due to commissions
+    ASSERT_TRUE(p.cash < p.initial_cash); // Should be slightly less due to commissions
 }
 
 TEST(overselling_with_zero_position_does_nothing) {
@@ -281,7 +291,7 @@ TEST(sell_partial_position) {
 
     ASSERT_DOUBLE_NEAR(actual_sold, 3.0, 0.001);
     ASSERT_DOUBLE_NEAR(p.get_holding(0), 7.0, 0.001);
-    ASSERT_EQ(p.symbol_active[0], true);  // Still has position
+    ASSERT_EQ(p.symbol_active[0], true); // Still has position
 }
 
 TEST(sell_across_multiple_slots) {
@@ -289,9 +299,9 @@ TEST(sell_across_multiple_slots) {
     p.reset();
 
     // Buy in multiple tranches (creates multiple slots)
-    p.buy(0, 100.0, 2.0);  // Slot 1: 2 units
-    p.buy(0, 105.0, 3.0);  // Slot 2: 3 units
-    p.buy(0, 110.0, 1.0);  // Slot 3: 1 unit
+    p.buy(0, 100.0, 2.0); // Slot 1: 2 units
+    p.buy(0, 105.0, 3.0); // Slot 2: 3 units
+    p.buy(0, 110.0, 1.0); // Slot 3: 1 unit
     // Total: 6 units
 
     ASSERT_DOUBLE_NEAR(p.get_holding(0), 6.0, 0.001);
@@ -300,7 +310,7 @@ TEST(sell_across_multiple_slots) {
     double actual_sold = p.sell(0, 120.0, 4.0);
 
     ASSERT_DOUBLE_NEAR(actual_sold, 4.0, 0.001);
-    ASSERT_DOUBLE_NEAR(p.get_holding(0), 2.0, 0.001);  // 6 - 4 = 2 remaining
+    ASSERT_DOUBLE_NEAR(p.get_holding(0), 2.0, 0.001); // 6 - 4 = 2 remaining
 }
 
 TEST(sell_fractional_crypto_quantities) {
@@ -347,7 +357,7 @@ TEST(sell_negative_quantity_rejected) {
     double actual_sold = p.sell(0, 100.0, -5.0);
 
     ASSERT_DOUBLE_NEAR(actual_sold, 0.0, 0.0001);
-    ASSERT_DOUBLE_NEAR(p.cash, cash_before, 0.01);  // No change
+    ASSERT_DOUBLE_NEAR(p.cash, cash_before, 0.01); // No change
 }
 
 TEST(sell_negative_price_rejected) {
@@ -361,7 +371,7 @@ TEST(sell_negative_price_rejected) {
     double actual_sold = p.sell(0, -100.0, 5.0);
 
     ASSERT_DOUBLE_NEAR(actual_sold, 0.0, 0.0001);
-    ASSERT_DOUBLE_NEAR(p.cash, cash_before, 0.01);  // No change
+    ASSERT_DOUBLE_NEAR(p.cash, cash_before, 0.01); // No change
 }
 
 TEST(sell_invalid_symbol_rejected) {
@@ -384,7 +394,7 @@ TEST(massive_oversell_attack) {
 
     // Buy 0.01 BTC
     p.buy(0, 100000.0, 0.01);
-    double cash_after_buy = p.cash;  // ~$98,999
+    double cash_after_buy = p.cash; // ~$98,999
 
     // Try to sell 1000 BTC (100,000x what we have)
     double actual_sold = p.sell(0, 100000.0, 1000.0);
@@ -395,7 +405,7 @@ TEST(massive_oversell_attack) {
     // Cash should NOT be $100,000,000 (1000 * 100000)!
     // Should be approximately initial - round trip commission
     ASSERT_TRUE(p.cash < p.initial_cash);
-    ASSERT_TRUE(p.cash > p.initial_cash * 0.99);  // Within 1% of initial
+    ASSERT_TRUE(p.cash > p.initial_cash * 0.99); // Within 1% of initial
 }
 
 TEST(repeated_overselling_attempts) {
@@ -407,12 +417,12 @@ TEST(repeated_overselling_attempts) {
 
     // Try to oversell multiple times
     for (int i = 0; i < 100; i++) {
-        p.sell(0, 1000.0, 10.0);  // Try to sell 10 each time
+        p.sell(0, 1000.0, 10.0); // Try to sell 10 each time
     }
 
     // Position should be 0 after first sell, cash should not balloon
     ASSERT_DOUBLE_NEAR(p.get_holding(0), 0.0, 0.0001);
-    ASSERT_TRUE(p.cash < p.initial_cash);  // Still lost money on commissions
+    ASSERT_TRUE(p.cash < p.initial_cash); // Still lost money on commissions
 }
 
 TEST(commission_scaled_for_partial_sell) {

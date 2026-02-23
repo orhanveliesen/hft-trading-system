@@ -1,15 +1,16 @@
 #pragma once
 
-#include "types.hpp"
-#include "orderbook.hpp"
-#include "matching_engine.hpp"
 #include "feed_handler.hpp"
-#include "network/udp_receiver.hpp"
+#include "matching_engine.hpp"
 #include "network/packet_buffer.hpp"
-#include <unordered_map>
-#include <thread>
+#include "network/udp_receiver.hpp"
+#include "orderbook.hpp"
+#include "types.hpp"
+
 #include <atomic>
 #include <functional>
+#include <thread>
+#include <unordered_map>
 
 namespace hft {
 
@@ -35,48 +36,35 @@ public:
     static constexpr size_t MAX_SYMBOLS = 10000;
     static constexpr size_t PACKET_BUFFER_SIZE = 65536;
 
-    MarketDataService()
-        : running_(false)
-        , packets_received_(0)
-        , messages_processed_(0)
-    {}
+    MarketDataService() : running_(false), packets_received_(0), messages_processed_(0) {}
 
-    ~MarketDataService() {
-        stop();
-    }
+    ~MarketDataService() { stop(); }
 
     // Add symbol to track
-    void add_symbol(Symbol symbol_id, const std::string& ticker,
-                    Price base_price = 90000, size_t price_range = 200000) {
+    void add_symbol(Symbol symbol_id, const std::string& ticker, Price base_price = 90000,
+                    size_t price_range = 200000) {
         auto book = std::make_unique<OrderBook>(base_price, price_range);
         order_books_[symbol_id] = std::move(book);
         ticker_to_symbol_[ticker] = symbol_id;
     }
 
     // Set callback for market updates
-    void set_update_callback(MarketUpdateCallback callback) {
-        update_callback_ = std::move(callback);
-    }
+    void set_update_callback(MarketUpdateCallback callback) { update_callback_ = std::move(callback); }
 
     // Initialize UDP receiver
-    bool init(const network::UdpConfig& config) {
-        return receiver_.init(config);
-    }
+    bool init(const network::UdpConfig& config) { return receiver_.init(config); }
 
     // Start processing (non-blocking, starts threads)
     void start() {
-        if (running_) return;
+        if (running_)
+            return;
         running_ = true;
 
         // Start receiver thread
-        receiver_thread_ = std::thread([this]() {
-            run_receiver();
-        });
+        receiver_thread_ = std::thread([this]() { run_receiver(); });
 
         // Start processor thread
-        processor_thread_ = std::thread([this]() {
-            run_processor();
-        });
+        processor_thread_ = std::thread([this]() { run_processor(); });
     }
 
     // Stop processing
@@ -108,7 +96,8 @@ public:
     void on_add_order(OrderId order_id, Side side, Price price, Quantity qty) {
         // For multi-symbol support, we'd need symbol info passed here
         // For now, using first registered symbol (single-symbol mode)
-        if (order_books_.empty()) return;
+        if (order_books_.empty())
+            return;
 
         auto& book = order_books_.begin()->second;
         Symbol symbol = order_books_.begin()->first;
@@ -122,10 +111,12 @@ public:
 
     void on_order_executed(OrderId order_id, Quantity qty) {
         Symbol symbol = lookup_order_symbol(order_id);
-        if (symbol == 0) return;
+        if (symbol == 0)
+            return;
 
         auto* book = get_order_book(symbol);
-        if (!book) return;
+        if (!book)
+            return;
 
         book->execute_order(order_id, qty);
         notify_update(symbol, book);
@@ -134,10 +125,12 @@ public:
 
     void on_order_cancelled(OrderId order_id, Quantity qty) {
         Symbol symbol = lookup_order_symbol(order_id);
-        if (symbol == 0) return;
+        if (symbol == 0)
+            return;
 
         auto* book = get_order_book(symbol);
-        if (!book) return;
+        if (!book)
+            return;
 
         book->execute_order(order_id, qty);
         notify_update(symbol, book);
@@ -146,10 +139,12 @@ public:
 
     void on_order_deleted(OrderId order_id) {
         Symbol symbol = lookup_order_symbol(order_id);
-        if (symbol == 0) return;
+        if (symbol == 0)
+            return;
 
         auto* book = get_order_book(symbol);
-        if (!book) return;
+        if (!book)
+            return;
 
         book->cancel_order(order_id);
         order_to_symbol_.erase(order_id);
@@ -184,10 +179,12 @@ private:
     // Receiver thread - pulls packets from network
     void run_receiver() {
         while (running_) {
-            receiver_.poll([this](const uint8_t* data, size_t len) {
-                packet_buffer_.push(data, len);
-                ++packets_received_;
-            }, 1000);  // 1ms timeout
+            receiver_.poll(
+                [this](const uint8_t* data, size_t len) {
+                    packet_buffer_.push(data, len);
+                    ++packets_received_;
+                },
+                1000); // 1ms timeout
         }
     }
 
@@ -209,7 +206,8 @@ private:
                         // Actually message length is in first 2 bytes
                         msg_len = (static_cast<uint16_t>(msg_data[0]) << 8) | msg_data[1];
 
-                        if (msg_len > remaining - 2) break;
+                        if (msg_len > remaining - 2)
+                            break;
 
                         handler.process_message(msg_data + 2, msg_len);
 
@@ -240,7 +238,8 @@ private:
     }
 
     void notify_update(Symbol symbol, OrderBook* book) {
-        if (!update_callback_) return;
+        if (!update_callback_)
+            return;
 
         MarketUpdate update;
         update.symbol = symbol;
@@ -248,10 +247,10 @@ private:
         update.best_ask = book->best_ask();
         update.bid_size = book->bid_quantity_at(update.best_bid);
         update.ask_size = book->ask_quantity_at(update.best_ask);
-        update.timestamp = 0;  // TODO: Add timestamp
+        update.timestamp = 0; // TODO: Add timestamp
 
         update_callback_(update);
     }
 };
 
-}  // namespace hft
+} // namespace hft

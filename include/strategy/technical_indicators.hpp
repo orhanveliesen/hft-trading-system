@@ -1,7 +1,7 @@
 #pragma once
 
-#include <cmath>
 #include <algorithm>
+#include <cmath>
 
 namespace hft {
 namespace strategy {
@@ -41,7 +41,7 @@ struct TechnicalIndicatorsConfig {
     // Bollinger Bands (John Bollinger, 1980s)
     int bb_period = 20;
     double bb_std_dev = 2.0;
-    double bb_near_band_margin = 0.1;  // 10% from band edge
+    double bb_near_band_margin = 0.1; // 10% from band edge
 
     // Signal scoring thresholds
     int signal_strong_threshold = 5;
@@ -57,12 +57,8 @@ public:
     using Config = TechnicalIndicatorsConfig;
 
     explicit TechnicalIndicators(const Config& config = Config())
-        : config_(config)
-        , fast_alpha_(2.0 / (config.fast_period + 1))
-        , slow_alpha_(2.0 / (config.slow_period + 1))
-        , rsi_alpha_(1.0 / config.rsi_period)
-        , bb_alpha_(2.0 / (config.bb_period + 1))
-    {
+        : config_(config), fast_alpha_(2.0 / (config.fast_period + 1)), slow_alpha_(2.0 / (config.slow_period + 1)),
+          rsi_alpha_(1.0 / config.rsi_period), bb_alpha_(2.0 / (config.bb_period + 1)) {
         reset();
     }
 
@@ -70,7 +66,8 @@ public:
      * Update all indicators with new price - O(1), zero allocation
      */
     void update(double price) {
-        if (price <= 0) return;
+        if (price <= 0)
+            return;
 
         count_++;
 
@@ -79,7 +76,7 @@ public:
             last_price_ = price;
             ema_fast_ = price;
             ema_slow_ = price;
-            ema_price_ = price;  // For Bollinger
+            ema_price_ = price; // For Bollinger
             return;
         }
 
@@ -117,7 +114,8 @@ public:
 
     // EMA trend strength: how far apart are the EMAs (as %)
     double ema_spread() const {
-        if (ema_slow_ == 0) return 0;
+        if (ema_slow_ == 0)
+            return 0;
         return (ema_fast_ - ema_slow_) / ema_slow_;
     }
 
@@ -150,48 +148,49 @@ public:
     // Position relative to bands (-1 = at lower, 0 = at middle, +1 = at upper)
     double bb_position() const {
         double width = bb_width();
-        if (width == 0) return 0;
+        if (width == 0)
+            return 0;
         return (last_price_ - bb_lower_) / width * 2 - 1;
     }
 
     bool below_lower_band() const { return last_price_ < bb_lower_; }
     bool above_upper_band() const { return last_price_ > bb_upper_; }
-    bool near_lower_band() const {
-        return bb_position() < (-1 + config_.bb_near_band_margin * 2);
-    }
-    bool near_upper_band() const {
-        return bb_position() > (1 - config_.bb_near_band_margin * 2);
-    }
+    bool near_lower_band() const { return bb_position() < (-1 + config_.bb_near_band_margin * 2); }
+    bool near_upper_band() const { return bb_position() > (1 - config_.bb_near_band_margin * 2); }
 
     // ========================================
     // Composite Signals (combine indicators)
     // ========================================
 
-    enum class SignalStrength {
-        None = 0,
-        Weak = 1,
-        Medium = 2,
-        Strong = 3
-    };
+    enum class SignalStrength { None = 0, Weak = 1, Medium = 2, Strong = 3 };
 
     SignalStrength buy_signal() const {
         int score = 0;
 
         // EMA bullish or crossed up
-        if (ema_crossed_up()) score += 2;
-        else if (ema_bullish()) score += 1;
+        if (ema_crossed_up())
+            score += 2;
+        else if (ema_bullish())
+            score += 1;
 
         // RSI oversold
-        if (is_extremely_oversold()) score += 2;
-        else if (rsi_ < config_.rsi_mild_oversold) score += 1;
+        if (is_extremely_oversold())
+            score += 2;
+        else if (rsi_ < config_.rsi_mild_oversold)
+            score += 1;
 
         // Below or near lower Bollinger band
-        if (below_lower_band()) score += 2;
-        else if (near_lower_band()) score += 1;
+        if (below_lower_band())
+            score += 2;
+        else if (near_lower_band())
+            score += 1;
 
-        if (score >= config_.signal_strong_threshold) return SignalStrength::Strong;
-        if (score >= config_.signal_medium_threshold) return SignalStrength::Medium;
-        if (score >= config_.signal_weak_threshold) return SignalStrength::Weak;
+        if (score >= config_.signal_strong_threshold)
+            return SignalStrength::Strong;
+        if (score >= config_.signal_medium_threshold)
+            return SignalStrength::Medium;
+        if (score >= config_.signal_weak_threshold)
+            return SignalStrength::Weak;
         return SignalStrength::None;
     }
 
@@ -199,20 +198,29 @@ public:
         int score = 0;
 
         // EMA bearish or crossed down
-        if (ema_crossed_down()) score += 2;
-        else if (ema_bearish()) score += 1;
+        if (ema_crossed_down())
+            score += 2;
+        else if (ema_bearish())
+            score += 1;
 
         // RSI overbought
-        if (is_extremely_overbought()) score += 2;
-        else if (rsi_ > config_.rsi_mild_overbought) score += 1;
+        if (is_extremely_overbought())
+            score += 2;
+        else if (rsi_ > config_.rsi_mild_overbought)
+            score += 1;
 
         // Above or near upper Bollinger band
-        if (above_upper_band()) score += 2;
-        else if (near_upper_band()) score += 1;
+        if (above_upper_band())
+            score += 2;
+        else if (near_upper_band())
+            score += 1;
 
-        if (score >= config_.signal_strong_threshold) return SignalStrength::Strong;
-        if (score >= config_.signal_medium_threshold) return SignalStrength::Medium;
-        if (score >= config_.signal_weak_threshold) return SignalStrength::Weak;
+        if (score >= config_.signal_strong_threshold)
+            return SignalStrength::Strong;
+        if (score >= config_.signal_medium_threshold)
+            return SignalStrength::Medium;
+        if (score >= config_.signal_weak_threshold)
+            return SignalStrength::Weak;
         return SignalStrength::None;
     }
 
@@ -264,8 +272,8 @@ private:
     double rsi_ = 50;
 
     // Bollinger state
-    double ema_price_ = 0;      // Middle band (EMA of price)
-    double ema_price_sq_ = 0;   // EMA of price squared (for std dev)
+    double ema_price_ = 0;    // Middle band (EMA of price)
+    double ema_price_sq_ = 0; // EMA of price squared (for std dev)
     double bb_upper_ = 0;
     double bb_lower_ = 0;
 
@@ -299,7 +307,8 @@ private:
 
         // Standard deviation: sqrt(E[X^2] - E[X]^2)
         double variance = ema_price_sq_ - (ema_price_ * ema_price_);
-        if (variance < 0) variance = 0;
+        if (variance < 0)
+            variance = 0;
         double std_dev = std::sqrt(variance);
 
         // Bands
@@ -308,5 +317,5 @@ private:
     }
 };
 
-}  // namespace strategy
-}  // namespace hft
+} // namespace strategy
+} // namespace hft

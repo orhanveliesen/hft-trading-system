@@ -14,12 +14,12 @@
  *   CRYPTOPANIC_API_KEY - Optional API key for CryptoPanic
  */
 
-#include <string>
-#include <vector>
 #include <cstdint>
 #include <cstring>
 #include <ctime>
 #include <curl/curl.h>
+#include <string>
+#include <vector>
 
 namespace hft {
 namespace tuner {
@@ -29,10 +29,10 @@ struct NewsItem {
     char title[256];
     char source[32];
     char url[256];
-    char currencies[64];      // Comma-separated: "BTC,ETH,SOL"
-    int64_t published_at;     // Unix timestamp
-    int8_t sentiment;         // -1=bearish, 0=neutral, 1=bullish
-    uint8_t importance;       // 0-100 score
+    char currencies[64];  // Comma-separated: "BTC,ETH,SOL"
+    int64_t published_at; // Unix timestamp
+    int8_t sentiment;     // -1=bearish, 0=neutral, 1=bullish
+    uint8_t importance;   // 0-100 score
 
     bool affects_symbol(const char* symbol) const {
         // Check if symbol matches any currency in the news
@@ -52,13 +52,9 @@ struct NewsItem {
     }
 
     // Age in seconds
-    int64_t age_seconds() const {
-        return std::time(nullptr) - published_at;
-    }
+    int64_t age_seconds() const { return std::time(nullptr) - published_at; }
 
-    bool is_recent(int max_age_seconds = 3600) const {
-        return age_seconds() <= max_age_seconds;
-    }
+    bool is_recent(int max_age_seconds = 3600) const { return age_seconds() <= max_age_seconds; }
 };
 
 // News feed result
@@ -68,9 +64,7 @@ struct NewsFeed {
     bool success;
     char error[128];
 
-    NewsFeed() : fetched_at(0), success(false) {
-        error[0] = '\0';
-    }
+    NewsFeed() : fetched_at(0), success(false) { error[0] = '\0'; }
 
     // Filter news for a specific symbol
     std::vector<const NewsItem*> for_symbol(const char* symbol) const {
@@ -100,12 +94,13 @@ struct NewsFeed {
         std::string result;
         int count = 0;
         for (const auto& item : items) {
-            if (count >= max_items) break;
-            if (!item.is_recent(7200)) continue;  // Last 2 hours only
+            if (count >= max_items)
+                break;
+            if (!item.is_recent(7200))
+                continue; // Last 2 hours only
 
             result += "- [";
-            result += item.sentiment < 0 ? "BEARISH" :
-                      item.sentiment > 0 ? "BULLISH" : "NEUTRAL";
+            result += item.sentiment < 0 ? "BEARISH" : item.sentiment > 0 ? "BULLISH" : "NEUTRAL";
             result += "] ";
             result += item.title;
             result += " (";
@@ -184,8 +179,7 @@ public:
         CURLcode res = curl_easy_perform(curl_);
 
         if (res != CURLE_OK) {
-            std::snprintf(feed.error, sizeof(feed.error),
-                         "CURL error: %s", curl_easy_strerror(res));
+            std::snprintf(feed.error, sizeof(feed.error), "CURL error: %s", curl_easy_strerror(res));
             return feed;
         }
 
@@ -193,8 +187,7 @@ public:
         curl_easy_getinfo(curl_, CURLINFO_RESPONSE_CODE, &http_code);
 
         if (http_code != 200) {
-            std::snprintf(feed.error, sizeof(feed.error),
-                         "HTTP %ld", http_code);
+            std::snprintf(feed.error, sizeof(feed.error), "HTTP %ld", http_code);
             return feed;
         }
 
@@ -228,8 +221,7 @@ public:
         CURLcode res = curl_easy_perform(curl_);
 
         if (res != CURLE_OK) {
-            std::snprintf(feed.error, sizeof(feed.error),
-                         "CURL error: %s", curl_easy_strerror(res));
+            std::snprintf(feed.error, sizeof(feed.error), "CURL error: %s", curl_easy_strerror(res));
             return feed;
         }
 
@@ -237,8 +229,7 @@ public:
         curl_easy_getinfo(curl_, CURLINFO_RESPONSE_CODE, &http_code);
 
         if (http_code != 200) {
-            std::snprintf(feed.error, sizeof(feed.error),
-                         "HTTP %ld", http_code);
+            std::snprintf(feed.error, sizeof(feed.error), "HTTP %ld", http_code);
             return feed;
         }
 
@@ -274,9 +265,7 @@ public:
 
         // Sort by published_at descending
         std::sort(combined.items.begin(), combined.items.end(),
-                  [](const NewsItem& a, const NewsItem& b) {
-                      return a.published_at > b.published_at;
-                  });
+                  [](const NewsItem& a, const NewsItem& b) { return a.published_at > b.published_at; });
 
         combined.fetched_at = std::time(nullptr);
         return combined;
@@ -290,23 +279,28 @@ private:
     void parse_cryptopanic_response(const std::string& json, NewsFeed& feed) {
         // Simple JSON parsing for "results" array
         size_t results_pos = json.find("\"results\"");
-        if (results_pos == std::string::npos) return;
+        if (results_pos == std::string::npos)
+            return;
 
         size_t arr_start = json.find('[', results_pos);
-        if (arr_start == std::string::npos) return;
+        if (arr_start == std::string::npos)
+            return;
 
         // Parse each item
         size_t pos = arr_start;
         while (pos < json.size() && feed.items.size() < 20) {
             size_t item_start = json.find('{', pos);
-            if (item_start == std::string::npos) break;
+            if (item_start == std::string::npos)
+                break;
 
             // Find matching close brace (simple approach)
             int depth = 1;
             size_t item_end = item_start + 1;
             while (item_end < json.size() && depth > 0) {
-                if (json[item_end] == '{') depth++;
-                else if (json[item_end] == '}') depth--;
+                if (json[item_end] == '{')
+                    depth++;
+                else if (json[item_end] == '}')
+                    depth--;
                 item_end++;
             }
 
@@ -335,8 +329,8 @@ private:
         if (source_pos != std::string::npos) {
             size_t title_pos = json.find("\"title\"", source_pos);
             if (title_pos != std::string::npos) {
-                extract_string(json.substr(source_pos, title_pos - source_pos + 100),
-                              "\"title\"", item.source, sizeof(item.source));
+                extract_string(json.substr(source_pos, title_pos - source_pos + 100), "\"title\"", item.source,
+                               sizeof(item.source));
             }
         }
 
@@ -353,7 +347,8 @@ private:
                 while ((code_pos = arr.find("\"code\"", code_pos)) != std::string::npos) {
                     char code[16];
                     if (extract_string(arr.substr(code_pos), "\"code\"", code, sizeof(code))) {
-                        if (!currencies.empty()) currencies += ",";
+                        if (!currencies.empty())
+                            currencies += ",";
                         currencies += code;
                     }
                     code_pos++;
@@ -381,16 +376,22 @@ private:
             }
         }
 
-        if (positive > negative + 2) item.sentiment = 1;
-        else if (negative > positive + 2) item.sentiment = -1;
-        else item.sentiment = 0;
+        if (positive > negative + 2)
+            item.sentiment = 1;
+        else if (negative > positive + 2)
+            item.sentiment = -1;
+        else
+            item.sentiment = 0;
 
         // Importance based on kind
         char kind[32];
         if (extract_string(json, "\"kind\"", kind, sizeof(kind))) {
-            if (std::strcmp(kind, "news") == 0) item.importance = 70;
-            else if (std::strcmp(kind, "media") == 0) item.importance = 50;
-            else item.importance = 30;
+            if (std::strcmp(kind, "news") == 0)
+                item.importance = 70;
+            else if (std::strcmp(kind, "media") == 0)
+                item.importance = 50;
+            else
+                item.importance = 30;
         }
 
         std::strcpy(item.source, "CryptoPanic");
@@ -400,28 +401,35 @@ private:
     // Parse Binance announcements
     void parse_binance_response(const std::string& json, NewsFeed& feed) {
         size_t data_pos = json.find("\"data\"");
-        if (data_pos == std::string::npos) return;
+        if (data_pos == std::string::npos)
+            return;
 
         size_t catalogs_pos = json.find("\"catalogs\"", data_pos);
-        if (catalogs_pos == std::string::npos) return;
+        if (catalogs_pos == std::string::npos)
+            return;
 
         size_t articles_pos = json.find("\"articles\"", catalogs_pos);
-        if (articles_pos == std::string::npos) return;
+        if (articles_pos == std::string::npos)
+            return;
 
         size_t arr_start = json.find('[', articles_pos);
-        if (arr_start == std::string::npos) return;
+        if (arr_start == std::string::npos)
+            return;
 
         // Parse each article
         size_t pos = arr_start;
         while (pos < json.size() && feed.items.size() < 10) {
             size_t item_start = json.find('{', pos);
-            if (item_start == std::string::npos) break;
+            if (item_start == std::string::npos)
+                break;
 
             int depth = 1;
             size_t item_end = item_start + 1;
             while (item_end < json.size() && depth > 0) {
-                if (json[item_end] == '{') depth++;
-                else if (json[item_end] == '}') depth--;
+                if (json[item_end] == '{')
+                    depth++;
+                else if (json[item_end] == '}')
+                    depth--;
                 item_end++;
             }
 
@@ -447,16 +455,16 @@ private:
         // Extract releaseDate (milliseconds)
         char date_str[32];
         if (extract_string(json, "\"releaseDate\"", date_str, sizeof(date_str))) {
-            item.published_at = std::atoll(date_str) / 1000;  // ms to seconds
+            item.published_at = std::atoll(date_str) / 1000; // ms to seconds
         }
 
         // Detect sentiment from title
         const char* title_lower = item.title;
         if (std::strstr(title_lower, "list") || std::strstr(title_lower, "List")) {
-            item.sentiment = 1;  // Listing is bullish
+            item.sentiment = 1; // Listing is bullish
             item.importance = 90;
         } else if (std::strstr(title_lower, "delist") || std::strstr(title_lower, "Delist")) {
-            item.sentiment = -1;  // Delisting is bearish
+            item.sentiment = -1; // Delisting is bearish
             item.importance = 90;
         } else {
             item.sentiment = 0;
@@ -469,7 +477,8 @@ private:
         std::string currencies;
         for (const char* coin : coins) {
             if (std::strstr(item.title, coin)) {
-                if (!currencies.empty()) currencies += ",";
+                if (!currencies.empty())
+                    currencies += ",";
                 currencies += coin;
             }
         }
@@ -482,20 +491,24 @@ private:
     // Helper: extract string value from JSON
     bool extract_string(const std::string& json, const char* key, char* out, size_t out_size) {
         size_t key_pos = json.find(key);
-        if (key_pos == std::string::npos) return false;
+        if (key_pos == std::string::npos)
+            return false;
 
         size_t colon = json.find(':', key_pos);
-        if (colon == std::string::npos) return false;
+        if (colon == std::string::npos)
+            return false;
 
         // Find opening quote
         size_t start = json.find('"', colon + 1);
-        if (start == std::string::npos) return false;
+        if (start == std::string::npos)
+            return false;
         start++;
 
         // Find closing quote
         size_t end = start;
         while (end < json.size()) {
-            if (json[end] == '"' && json[end-1] != '\\') break;
+            if (json[end] == '"' && json[end - 1] != '\\')
+                break;
             end++;
         }
 
@@ -509,9 +522,8 @@ private:
     int64_t parse_iso_time(const char* str) {
         struct tm tm = {};
         // Format: 2024-01-15T10:30:00Z
-        if (sscanf(str, "%d-%d-%dT%d:%d:%d",
-                   &tm.tm_year, &tm.tm_mon, &tm.tm_mday,
-                   &tm.tm_hour, &tm.tm_min, &tm.tm_sec) >= 3) {
+        if (sscanf(str, "%d-%d-%dT%d:%d:%d", &tm.tm_year, &tm.tm_mon, &tm.tm_mday, &tm.tm_hour, &tm.tm_min,
+                   &tm.tm_sec) >= 3) {
             tm.tm_year -= 1900;
             tm.tm_mon -= 1;
             return timegm(&tm);
@@ -520,5 +532,5 @@ private:
     }
 };
 
-}  // namespace tuner
-}  // namespace hft
+} // namespace tuner
+} // namespace hft

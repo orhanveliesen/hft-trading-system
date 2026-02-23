@@ -24,7 +24,7 @@ struct AddOrder {
     uint64_t order_ref;
     char side;
     uint32_t shares;
-    char stock[9];  // 8 chars + null terminator
+    char stock[9]; // 8 chars + null terminator
     uint32_t price;
 };
 
@@ -60,31 +60,22 @@ inline uint16_t read_be16(const uint8_t* buf) {
 }
 
 inline uint32_t read_be32(const uint8_t* buf) {
-    return (static_cast<uint32_t>(buf[0]) << 24) |
-           (static_cast<uint32_t>(buf[1]) << 16) |
-           (static_cast<uint32_t>(buf[2]) << 8) |
-           buf[3];
+    return (static_cast<uint32_t>(buf[0]) << 24) | (static_cast<uint32_t>(buf[1]) << 16) |
+           (static_cast<uint32_t>(buf[2]) << 8) | buf[3];
 }
 
 inline uint64_t read_be48(const uint8_t* buf) {
-    return (static_cast<uint64_t>(buf[0]) << 40) |
-           (static_cast<uint64_t>(buf[1]) << 32) |
-           (static_cast<uint64_t>(buf[2]) << 24) |
-           (static_cast<uint64_t>(buf[3]) << 16) |
-           (static_cast<uint64_t>(buf[4]) << 8) |
-           buf[5];
+    return (static_cast<uint64_t>(buf[0]) << 40) | (static_cast<uint64_t>(buf[1]) << 32) |
+           (static_cast<uint64_t>(buf[2]) << 24) | (static_cast<uint64_t>(buf[3]) << 16) |
+           (static_cast<uint64_t>(buf[4]) << 8) | buf[5];
 }
 
 inline uint64_t read_be64(const uint8_t* buf) {
-    return (static_cast<uint64_t>(buf[0]) << 56) |
-           (static_cast<uint64_t>(buf[1]) << 48) |
-           (static_cast<uint64_t>(buf[2]) << 40) |
-           (static_cast<uint64_t>(buf[3]) << 32) |
-           (static_cast<uint64_t>(buf[4]) << 24) |
-           (static_cast<uint64_t>(buf[5]) << 16) |
-           (static_cast<uint64_t>(buf[6]) << 8) |
-           buf[7];
+    return (static_cast<uint64_t>(buf[0]) << 56) | (static_cast<uint64_t>(buf[1]) << 48) |
+           (static_cast<uint64_t>(buf[2]) << 40) | (static_cast<uint64_t>(buf[3]) << 32) |
+           (static_cast<uint64_t>(buf[4]) << 24) | (static_cast<uint64_t>(buf[5]) << 16) |
+           (static_cast<uint64_t>(buf[6]) << 8) | buf[7];
 }
 
-}  // namespace itch
-}  // namespace hft
+} // namespace itch
+} // namespace hft

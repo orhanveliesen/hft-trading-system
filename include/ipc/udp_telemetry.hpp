@@ -20,14 +20,14 @@
  *   sub.start();  // Background thread
  */
 
+#include <arpa/inet.h>
+#include <atomic>
 #include <cstdint>
 #include <cstring>
 #include <functional>
-#include <thread>
-#include <atomic>
-#include <arpa/inet.h>
-#include <sys/socket.h>
 #include <netinet/in.h>
+#include <sys/socket.h>
+#include <thread>
 #include <unistd.h>
 
 namespace hft {
@@ -48,11 +48,11 @@ enum class TelemetryType : uint8_t {
 
 // Fixed-size packet for network efficiency (64 bytes, fits in one UDP packet)
 struct alignas(8) TelemetryPacket {
-    uint64_t timestamp_ns;      // 8 bytes - nanosecond timestamp
-    uint32_t sequence;          // 4 bytes - packet sequence number
-    uint16_t symbol_id;         // 2 bytes - symbol identifier
-    TelemetryType type;         // 1 byte  - packet type
-    uint8_t flags;              // 1 byte  - additional flags
+    uint64_t timestamp_ns; // 8 bytes - nanosecond timestamp
+    uint32_t sequence;     // 4 bytes - packet sequence number
+    uint16_t symbol_id;    // 2 bytes - symbol identifier
+    TelemetryType type;    // 1 byte  - packet type
+    uint8_t flags;         // 1 byte  - additional flags
 
     union {
         // Quote data (type = Quote)
@@ -67,15 +67,15 @@ struct alignas(8) TelemetryPacket {
         struct {
             int64_t price;
             uint32_t quantity;
-            uint8_t side;       // 0 = Buy, 1 = Sell
-            uint8_t fill_type;  // 0 = Full, 1 = Partial
+            uint8_t side;      // 0 = Buy, 1 = Sell
+            uint8_t fill_type; // 0 = Full, 1 = Partial
             uint8_t padding[18];
         } fill;
 
         // Position data (type = Position)
         struct {
-            int64_t quantity;   // Scaled by 1e8
-            int64_t avg_price;  // Scaled by 1e8
+            int64_t quantity;  // Scaled by 1e8
+            int64_t avg_price; // Scaled by 1e8
             int64_t market_value;
             int64_t unrealized_pnl;
         } position;
@@ -123,13 +123,10 @@ static_assert(sizeof(TelemetryPacket) == 64, "TelemetryPacket must be 64 bytes")
  */
 class TelemetryPublisher {
 public:
-    TelemetryPublisher(const char* multicast_addr = "239.255.0.1",
-                       uint16_t port = 5555)
-        : sequence_(0)
-        , socket_(-1)
-    {
+    TelemetryPublisher(const char* multicast_addr = "239.255.0.1", uint16_t port = 5555) : sequence_(0), socket_(-1) {
         socket_ = socket(AF_INET, SOCK_DGRAM, 0);
-        if (socket_ < 0) return;
+        if (socket_ < 0)
+            return;
 
         // Set multicast TTL (1 = local network only)
         int ttl = 1;
@@ -146,7 +143,8 @@ public:
     }
 
     ~TelemetryPublisher() {
-        if (socket_ >= 0) close(socket_);
+        if (socket_ >= 0)
+            close(socket_);
     }
 
     // Non-copyable
@@ -168,8 +166,7 @@ public:
         pkt.sequence = sequence_++;
 
         // Fire and forget - don't check return value
-        sendto(socket_, &pkt, sizeof(pkt), MSG_DONTWAIT,
-               reinterpret_cast<sockaddr*>(&dest_addr_), sizeof(dest_addr_));
+        sendto(socket_, &pkt, sizeof(pkt), MSG_DONTWAIT, reinterpret_cast<sockaddr*>(&dest_addr_), sizeof(dest_addr_));
     }
 
     // Convenience methods
@@ -179,8 +176,7 @@ public:
         publish(pkt);
     }
 
-    void publish_quote(uint16_t symbol_id, int64_t bid, int64_t ask,
-                       uint32_t bid_size = 0, uint32_t ask_size = 0) {
+    void publish_quote(uint16_t symbol_id, int64_t bid, int64_t ask, uint32_t bid_size = 0, uint32_t ask_size = 0) {
         TelemetryPacket pkt{};
         pkt.type = TelemetryType::Quote;
         pkt.symbol_id = symbol_id;
@@ -201,8 +197,8 @@ public:
         publish(pkt);
     }
 
-    void publish_position(uint16_t symbol_id, int64_t qty, int64_t avg_price,
-                          int64_t market_value, int64_t unrealized_pnl) {
+    void publish_position(uint16_t symbol_id, int64_t qty, int64_t avg_price, int64_t market_value,
+                          int64_t unrealized_pnl) {
         TelemetryPacket pkt{};
         pkt.type = TelemetryType::Position;
         pkt.symbol_id = symbol_id;
@@ -213,8 +209,7 @@ public:
         publish(pkt);
     }
 
-    void publish_pnl(int64_t realized, int64_t unrealized, int64_t equity,
-                     uint32_t wins, uint32_t losses) {
+    void publish_pnl(int64_t realized, int64_t unrealized, int64_t equity, uint32_t wins, uint32_t losses) {
         TelemetryPacket pkt{};
         pkt.type = TelemetryType::PnL;
         pkt.data.pnl.realized_pnl = realized;
@@ -234,8 +229,7 @@ public:
         publish(pkt);
     }
 
-    void publish_latency(uint32_t tick_to_decision, uint32_t decision_to_order,
-                         uint32_t order_to_ack, uint32_t total) {
+    void publish_latency(uint32_t tick_to_decision, uint32_t decision_to_order, uint32_t order_to_ack, uint32_t total) {
         TelemetryPacket pkt{};
         pkt.type = TelemetryType::Latency;
         pkt.data.latency.tick_to_decision_ns = tick_to_decision;
@@ -260,13 +254,11 @@ class TelemetrySubscriber {
 public:
     using Callback = std::function<void(const TelemetryPacket&)>;
 
-    TelemetrySubscriber(const char* multicast_addr = "239.255.0.1",
-                        uint16_t port = 5555)
-        : running_(false)
-        , socket_(-1)
-    {
+    TelemetrySubscriber(const char* multicast_addr = "239.255.0.1", uint16_t port = 5555)
+        : running_(false), socket_(-1) {
         socket_ = socket(AF_INET, SOCK_DGRAM, 0);
-        if (socket_ < 0) return;
+        if (socket_ < 0)
+            return;
 
         // Allow multiple subscribers on same port
         int reuse = 1;
@@ -289,8 +281,7 @@ public:
         inet_pton(AF_INET, multicast_addr, &mreq.imr_multiaddr);
         mreq.imr_interface.s_addr = INADDR_ANY;
 
-        if (setsockopt(socket_, IPPROTO_IP, IP_ADD_MEMBERSHIP,
-                       &mreq, sizeof(mreq)) < 0) {
+        if (setsockopt(socket_, IPPROTO_IP, IP_ADD_MEMBERSHIP, &mreq, sizeof(mreq)) < 0) {
             close(socket_);
             socket_ = -1;
             return;
@@ -305,7 +296,8 @@ public:
 
     ~TelemetrySubscriber() {
         stop();
-        if (socket_ >= 0) close(socket_);
+        if (socket_ >= 0)
+            close(socket_);
     }
 
     bool is_valid() const { return socket_ >= 0; }
@@ -313,14 +305,16 @@ public:
     void set_callback(Callback cb) { callback_ = std::move(cb); }
 
     void start() {
-        if (!is_valid() || running_) return;
+        if (!is_valid() || running_)
+            return;
         running_ = true;
         thread_ = std::thread(&TelemetrySubscriber::run, this);
     }
 
     void stop() {
         running_ = false;
-        if (thread_.joinable()) thread_.join();
+        if (thread_.joinable())
+            thread_.join();
     }
 
     // Statistics
@@ -347,7 +341,8 @@ private:
                 last_seq = pkt.sequence;
                 first_packet = false;
 
-                if (callback_) callback_(pkt);
+                if (callback_)
+                    callback_(pkt);
             }
         }
     }
@@ -360,5 +355,5 @@ private:
     std::atomic<uint64_t> packets_dropped_{0};
 };
 
-}  // namespace ipc
-}  // namespace hft
+} // namespace ipc
+} // namespace hft

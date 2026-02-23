@@ -1,9 +1,9 @@
 #pragma once
 
-#include <cstdint>
-#include <cstddef>
-#include <cstring>
 #include <array>
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
 
 namespace hft {
 namespace network {
@@ -28,13 +28,14 @@ public:
     // Producer: Push packet into buffer
     // Returns false if buffer is full
     bool push(const uint8_t* data, size_t len) {
-        if (len > MaxPacketSize) return false;
+        if (len > MaxPacketSize)
+            return false;
 
         size_t head = head_;
         size_t next_head = (head + 1) & (Capacity - 1);
 
         if (next_head == tail_) {
-            return false;  // Buffer full
+            return false; // Buffer full
         }
 
         packets_[head].len = len;
@@ -46,7 +47,8 @@ public:
 
     // Consumer: Get front packet (does not remove)
     const Packet<MaxPacketSize>* front() const {
-        if (empty()) return nullptr;
+        if (empty())
+            return nullptr;
         return &packets_[tail_];
     }
 
@@ -59,9 +61,7 @@ public:
 
     bool empty() const { return head_ == tail_; }
 
-    bool full() const {
-        return ((head_ + 1) & (Capacity - 1)) == tail_;
-    }
+    bool full() const { return ((head_ + 1) & (Capacity - 1)) == tail_; }
 
     size_t size() const {
         size_t h = head_;
@@ -72,10 +72,10 @@ public:
     size_t capacity() const { return Capacity - 1; }
 
 private:
-    alignas(64) size_t head_;  // Cache-line aligned
-    alignas(64) size_t tail_;  // Separate cache line to avoid false sharing
+    alignas(64) size_t head_; // Cache-line aligned
+    alignas(64) size_t tail_; // Separate cache line to avoid false sharing
     std::array<Packet<MaxPacketSize>, Capacity> packets_;
 };
 
-}  // namespace network
-}  // namespace hft
+} // namespace network
+} // namespace hft

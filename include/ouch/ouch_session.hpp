@@ -1,18 +1,19 @@
 #pragma once
 
-#include "ouch_messages.hpp"
 #include "../types.hpp"
-#include <cstdint>
-#include <cstring>
-#include <functional>
+#include "ouch_messages.hpp"
+
+#include <arpa/inet.h>
 #include <array>
 #include <atomic>
-#include <sys/socket.h>
+#include <cstdint>
+#include <cstring>
+#include <fcntl.h>
+#include <functional>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
-#include <arpa/inet.h>
+#include <sys/socket.h>
 #include <unistd.h>
-#include <fcntl.h>
 
 namespace hft {
 namespace ouch {
@@ -57,11 +58,11 @@ constexpr char LOGIN_REJECT_SESSION_UNAVAILABLE = 'S';
  */
 #pragma pack(push, 1)
 struct LoginRequest {
-    char packet_type;             // 1:  'L'
-    char username[6];             // 6:  Username (space-padded)
-    char password[10];            // 10: Password (space-padded)
-    char requested_session[10];   // 10: Session ID (space-padded, blank for any)
-    char requested_sequence[20];  // 20: Sequence number (space-padded, 0 or blank for next)
+    char packet_type;            // 1:  'L'
+    char username[6];            // 6:  Username (space-padded)
+    char password[10];           // 10: Password (space-padded)
+    char requested_session[10];  // 10: Session ID (space-padded, blank for any)
+    char requested_sequence[20]; // 20: Sequence number (space-padded, 0 or blank for next)
     // Total: 47 bytes
 
     void init() {
@@ -90,9 +91,9 @@ static_assert(sizeof(LoginRequest) == 47, "LoginRequest must be 47 bytes");
  */
 #pragma pack(push, 1)
 struct LoginAccepted {
-    char packet_type;             // 1:  'A'
-    char session[10];             // 10: Session ID
-    char sequence_number[20];     // 20: Next sequence number
+    char packet_type;         // 1:  'A'
+    char session[10];         // 10: Session ID
+    char sequence_number[20]; // 20: Next sequence number
     // Total: 31 bytes
 };
 static_assert(sizeof(LoginAccepted) == 31, "LoginAccepted must be 31 bytes");
@@ -103,8 +104,8 @@ static_assert(sizeof(LoginAccepted) == 31, "LoginAccepted must be 31 bytes");
  */
 #pragma pack(push, 1)
 struct LoginRejected {
-    char packet_type;             // 1:  'J'
-    char reason;                  // 1:  Reject reason
+    char packet_type; // 1:  'J'
+    char reason;      // 1:  Reject reason
     // Total: 2 bytes
 };
 static_assert(sizeof(LoginRejected) == 2, "LoginRejected must be 2 bytes");
@@ -127,13 +128,7 @@ struct OuchSessionConfig {
 /**
  * Session state
  */
-enum class SessionState : uint8_t {
-    Disconnected = 0,
-    Connecting,
-    LoggingIn,
-    LoggedIn,
-    Disconnecting
-};
+enum class SessionState : uint8_t { Disconnected = 0, Connecting, LoggingIn, LoggedIn, Disconnecting };
 
 /**
  * OUCH Session Handler
@@ -158,22 +153,13 @@ public:
     using ReplacedCallback = std::function<void(const Replaced&)>;
 
     explicit OuchSession(const OuchSessionConfig& config)
-        : config_(config)
-        , socket_fd_(-1)
-        , state_(SessionState::Disconnected)
-        , next_token_id_(1)
-        , bytes_sent_(0)
-        , bytes_received_(0)
-        , messages_sent_(0)
-        , messages_received_(0)
-    {
+        : config_(config), socket_fd_(-1), state_(SessionState::Disconnected), next_token_id_(1), bytes_sent_(0),
+          bytes_received_(0), messages_sent_(0), messages_received_(0) {
         std::memset(recv_buffer_.data(), 0, recv_buffer_.size());
         recv_pos_ = 0;
     }
 
-    ~OuchSession() {
-        disconnect();
-    }
+    ~OuchSession() { disconnect(); }
 
     // Non-copyable
     OuchSession(const OuchSession&) = delete;
@@ -269,9 +255,7 @@ public:
     }
 
     // Send heartbeat (should be called periodically)
-    bool send_heartbeat() {
-        return send_packet(SOUP_CLIENT_HEARTBEAT, nullptr, 0);
-    }
+    bool send_heartbeat() { return send_packet(SOUP_CLIENT_HEARTBEAT, nullptr, 0); }
 
     // Process incoming data (call in event loop)
     // Returns number of messages processed
@@ -281,14 +265,14 @@ public:
         }
 
         // Read available data
-        ssize_t bytes = recv(socket_fd_, recv_buffer_.data() + recv_pos_,
-                            recv_buffer_.size() - recv_pos_, MSG_DONTWAIT);
+        ssize_t bytes =
+            recv(socket_fd_, recv_buffer_.data() + recv_pos_, recv_buffer_.size() - recv_pos_, MSG_DONTWAIT);
 
         if (bytes < 0) {
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                return 0;  // No data available
+                return 0; // No data available
             }
-            return -1;  // Error
+            return -1; // Error
         }
 
         if (bytes == 0) {
@@ -310,7 +294,7 @@ public:
 
             // Check if we have complete message
             if (offset + 2 + msg_len > recv_pos_) {
-                break;  // Need more data
+                break; // Need more data
             }
 
             // Process message
@@ -362,7 +346,7 @@ private:
     bool send_packet(char packet_type, const void* data, size_t len) {
         // Build packet: 2-byte length + packet type + data
         uint8_t header[3];
-        uint16_t total_len = static_cast<uint16_t>(1 + len);  // packet type + data
+        uint16_t total_len = static_cast<uint16_t>(1 + len); // packet type + data
         write_be16(header, total_len);
         header[2] = static_cast<uint8_t>(packet_type);
 
@@ -384,85 +368,84 @@ private:
     }
 
     // Send OUCH message (wrapped in Unsequenced Data packet)
-    bool send_ouch_message(const void* msg, size_t len) {
-        return send_packet(SOUP_UNSEQUENCED_DATA, msg, len);
-    }
+    bool send_ouch_message(const void* msg, size_t len) { return send_packet(SOUP_UNSEQUENCED_DATA, msg, len); }
 
     // Process received SoupBinTCP packet
     void process_soup_packet(char packet_type, const char* data, size_t len) {
         switch (packet_type) {
-            case SOUP_LOGIN_ACCEPTED:
-                state_ = SessionState::LoggedIn;
-                break;
+        case SOUP_LOGIN_ACCEPTED:
+            state_ = SessionState::LoggedIn;
+            break;
 
-            case SOUP_LOGIN_REJECTED:
-                state_ = SessionState::Disconnected;
-                break;
+        case SOUP_LOGIN_REJECTED:
+            state_ = SessionState::Disconnected;
+            break;
 
-            case SOUP_SERVER_HEARTBEAT:
-                // Nothing to do
-                break;
+        case SOUP_SERVER_HEARTBEAT:
+            // Nothing to do
+            break;
 
-            case SOUP_END_OF_SESSION:
-                disconnect();
-                break;
+        case SOUP_END_OF_SESSION:
+            disconnect();
+            break;
 
-            case SOUP_SEQUENCED_DATA:
-                if (len > 0) {
-                    process_ouch_message(data, len);
-                }
-                break;
+        case SOUP_SEQUENCED_DATA:
+            if (len > 0) {
+                process_ouch_message(data, len);
+            }
+            break;
 
-            default:
-                // Unknown packet type
-                break;
+        default:
+            // Unknown packet type
+            break;
         }
     }
 
     // Process OUCH message
     void process_ouch_message(const char* data, size_t len) {
-        if (len == 0) return;
+        if (len == 0)
+            return;
 
         char msg_type = data[0];
 
         switch (msg_type) {
-            case MSG_ACCEPTED:
-                if (len >= sizeof(Accepted) && on_accepted_) {
-                    on_accepted_(*reinterpret_cast<const Accepted*>(data));
-                }
-                break;
+        case MSG_ACCEPTED:
+            if (len >= sizeof(Accepted) && on_accepted_) {
+                on_accepted_(*reinterpret_cast<const Accepted*>(data));
+            }
+            break;
 
-            case MSG_EXECUTED:
-                if (len >= sizeof(Executed) && on_executed_) {
-                    on_executed_(*reinterpret_cast<const Executed*>(data));
-                }
-                break;
+        case MSG_EXECUTED:
+            if (len >= sizeof(Executed) && on_executed_) {
+                on_executed_(*reinterpret_cast<const Executed*>(data));
+            }
+            break;
 
-            case MSG_CANCELED:
-                if (len >= sizeof(Canceled) && on_canceled_) {
-                    on_canceled_(*reinterpret_cast<const Canceled*>(data));
-                }
-                break;
+        case MSG_CANCELED:
+            if (len >= sizeof(Canceled) && on_canceled_) {
+                on_canceled_(*reinterpret_cast<const Canceled*>(data));
+            }
+            break;
 
-            case MSG_REJECTED:
-                if (len >= sizeof(Rejected) && on_rejected_) {
-                    on_rejected_(*reinterpret_cast<const Rejected*>(data));
-                }
-                break;
+        case MSG_REJECTED:
+            if (len >= sizeof(Rejected) && on_rejected_) {
+                on_rejected_(*reinterpret_cast<const Rejected*>(data));
+            }
+            break;
 
-            case MSG_REPLACED:
-                if (len >= sizeof(Replaced) && on_replaced_) {
-                    on_replaced_(*reinterpret_cast<const Replaced*>(data));
-                }
-                break;
+        case MSG_REPLACED:
+            if (len >= sizeof(Replaced) && on_replaced_) {
+                on_replaced_(*reinterpret_cast<const Replaced*>(data));
+            }
+            break;
 
-            case MSG_SYSTEM_EVENT:
-                // Handle system events if needed
-                break;
+        case MSG_SYSTEM_EVENT:
+            // Handle system events if needed
+            break;
 
-            default:
-                // Unknown message type
-                break;
+        default:
+            // Unknown message type
+            break;
         }
     }
 
@@ -491,5 +474,5 @@ private:
     uint64_t messages_received_;
 };
 
-}  // namespace ouch
-}  // namespace hft
+} // namespace ouch
+} // namespace hft

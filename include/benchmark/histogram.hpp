@@ -1,10 +1,10 @@
 #pragma once
 
-#include <cstdint>
-#include <cstddef>
-#include <array>
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <cstddef>
+#include <cstdint>
 #include <limits>
 
 namespace hft {
@@ -43,13 +43,12 @@ public:
     uint64_t min() const { return count_ > 0 ? min_ : 0; }
     uint64_t max() const { return max_; }
 
-    double mean() const {
-        return count_ > 0 ? static_cast<double>(sum_) / count_ : 0.0;
-    }
+    double mean() const { return count_ > 0 ? static_cast<double>(sum_) / count_ : 0.0; }
 
     // Get percentile (0-100)
     uint64_t percentile(double p) const {
-        if (count_ == 0) return 0;
+        if (count_ == 0)
+            return 0;
 
         uint64_t target = static_cast<uint64_t>(count_ * p / 100.0);
         uint64_t cumulative = 0;
@@ -57,7 +56,7 @@ public:
         for (size_t i = 0; i < NumBuckets; ++i) {
             cumulative += buckets_[i];
             if (cumulative >= target) {
-                return i * BUCKET_SIZE + BUCKET_SIZE / 2;  // Bucket midpoint
+                return i * BUCKET_SIZE + BUCKET_SIZE / 2; // Bucket midpoint
             }
         }
         return MaxValue;
@@ -103,5 +102,5 @@ private:
     uint64_t start_cycles_;
 };
 
-}  // namespace benchmark
-}  // namespace hft
+} // namespace benchmark
+} // namespace hft

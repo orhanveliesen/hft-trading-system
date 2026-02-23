@@ -1,17 +1,19 @@
+#include "../include/matching_engine.hpp"
+#include "../include/types.hpp"
+
 #include <cassert>
 #include <iostream>
 #include <vector>
-#include "../include/types.hpp"
-#include "../include/matching_engine.hpp"
 
 using namespace hft;
 
 #define TEST(name) void name()
-#define RUN_TEST(name) do { \
-    std::cout << "Running " << #name << "... "; \
-    name(); \
-    std::cout << "PASSED\n"; \
-} while(0)
+#define RUN_TEST(name)                                                                                                 \
+    do {                                                                                                               \
+        std::cout << "Running " << #name << "... ";                                                                    \
+        name();                                                                                                        \
+        std::cout << "PASSED\n";                                                                                       \
+    } while (0)
 
 #define ASSERT_EQ(a, b) assert((a) == (b))
 #define ASSERT_TRUE(x) assert(x)
@@ -21,9 +23,7 @@ using namespace hft;
 struct TradeCollector {
     std::vector<Trade> trades;
 
-    void on_trade(const Trade& trade) {
-        trades.push_back(trade);
-    }
+    void on_trade(const Trade& trade) { trades.push_back(trade); }
 
     void clear() { trades.clear(); }
 };
@@ -122,14 +122,14 @@ TEST(test_price_time_priority) {
     engine.set_trade_callback([&](const Trade& t) { collector.on_trade(t); });
 
     // Add two sell orders at same price
-    engine.add_order(1, Side::Sell, 10100, 50);   // First
-    engine.add_order(2, Side::Sell, 10100, 50);   // Second
+    engine.add_order(1, Side::Sell, 10100, 50); // First
+    engine.add_order(2, Side::Sell, 10100, 50); // Second
 
     // Buy 50 - should match order 1 first
     engine.add_order(3, Side::Buy, 10100, 50);
 
     ASSERT_EQ(collector.trades.size(), 1);
-    ASSERT_EQ(collector.trades[0].passive_order_id, 1);  // First order matched
+    ASSERT_EQ(collector.trades[0].passive_order_id, 1); // First order matched
     ASSERT_EQ(collector.trades[0].quantity, 50);
 
     // Order 2 should still be resting
@@ -143,9 +143,9 @@ TEST(test_walk_the_book) {
     engine.set_trade_callback([&](const Trade& t) { collector.on_trade(t); });
 
     // Add asks at multiple prices
-    engine.add_order(1, Side::Sell, 10100, 50);   // Best ask
-    engine.add_order(2, Side::Sell, 10200, 50);   // Next level
-    engine.add_order(3, Side::Sell, 10300, 50);   // Third level
+    engine.add_order(1, Side::Sell, 10100, 50); // Best ask
+    engine.add_order(2, Side::Sell, 10200, 50); // Next level
+    engine.add_order(3, Side::Sell, 10300, 50); // Third level
 
     // Buy 120 at 10300 (should walk through levels)
     engine.add_order(4, Side::Buy, 10300, 120);
@@ -163,7 +163,7 @@ TEST(test_walk_the_book) {
 
     // Third trade partial at 10300
     ASSERT_EQ(collector.trades[2].price, 10300);
-    ASSERT_EQ(collector.trades[2].quantity, 20);  // Only needed 20 more
+    ASSERT_EQ(collector.trades[2].quantity, 20); // Only needed 20 more
 
     // Remaining 30 at 10300 should stay
     ASSERT_EQ(engine.best_ask(), 10300);
@@ -205,7 +205,7 @@ TEST(test_price_improvement) {
 
     // Trade should execute at resting order's price (10100)
     ASSERT_EQ(collector.trades.size(), 1);
-    ASSERT_EQ(collector.trades[0].price, 10100);  // Passive price
+    ASSERT_EQ(collector.trades[0].price, 10100); // Passive price
 }
 
 // Test: Cancel order
@@ -226,10 +226,10 @@ TEST(test_self_trade_prevention) {
     engine.set_trade_callback([&](const Trade& t) { collector.on_trade(t); });
 
     // Trader A adds sell
-    engine.add_order(1, Side::Sell, 10100, 100, 1001);  // trader_id = 1001
+    engine.add_order(1, Side::Sell, 10100, 100, 1001); // trader_id = 1001
 
     // Same trader tries to buy
-    engine.add_order(2, Side::Buy, 10100, 100, 1001);   // trader_id = 1001
+    engine.add_order(2, Side::Buy, 10100, 100, 1001); // trader_id = 1001
 
     // No trade - self-trade prevented
     ASSERT_EQ(collector.trades.size(), 0);
@@ -237,7 +237,7 @@ TEST(test_self_trade_prevention) {
     // Both orders should be resting (or one cancelled based on policy)
     // For now, we'll use "cancel aggressive" policy
     ASSERT_EQ(engine.best_ask(), 10100);
-    ASSERT_EQ(engine.best_bid(), INVALID_PRICE);  // Aggressive order cancelled
+    ASSERT_EQ(engine.best_bid(), INVALID_PRICE); // Aggressive order cancelled
 }
 
 int main() {

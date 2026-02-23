@@ -24,15 +24,15 @@ struct OrderAdd {
 // Order fully or partially executed (trade occurred)
 struct OrderExecute {
     OrderId order_id;
-    Quantity quantity;      // Quantity executed
-    Price exec_price;       // Execution price (may differ from order price)
+    Quantity quantity; // Quantity executed
+    Price exec_price;  // Execution price (may differ from order price)
     Timestamp timestamp;
 };
 
 // Order quantity reduced (partial cancel)
 struct OrderReduce {
     OrderId order_id;
-    Quantity reduce_by;     // Amount to reduce
+    Quantity reduce_by; // Amount to reduce
     Timestamp timestamp;
 };
 
@@ -47,7 +47,7 @@ struct Trade {
     SymbolId symbol_id;
     Price price;
     Quantity quantity;
-    Side aggressor_side;    // Which side initiated the trade
+    Side aggressor_side; // Which side initiated the trade
     Timestamp timestamp;
 };
 
@@ -66,7 +66,7 @@ struct BookLevelUpdate {
     SymbolId symbol_id;
     Side side;
     Price price;
-    Quantity quantity;      // New total quantity at this level (0 = level removed)
+    Quantity quantity; // New total quantity at this level (0 = level removed)
     Timestamp timestamp;
 };
 
@@ -85,4 +85,4 @@ struct BookLevelUpdate {
  *   void on_book_level(const BookLevelUpdate&)
  */
 
-}  // namespace hft
+} // namespace hft
