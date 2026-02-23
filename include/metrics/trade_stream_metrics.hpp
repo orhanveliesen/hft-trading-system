@@ -210,16 +210,17 @@ private:
         acc.first_price_d = static_cast<double>(t.price);
         acc.first_time = t.timestamp_us;
 
-        // Branchless using ternary (compiles to CMOV):
-        // if (is_buy) { buy_vol += qty; buy_count++; ... } else { sell_vol += qty; ... }
-        acc.buy_vol += t.is_buy ? qty : 0.0;
-        acc.sell_vol += t.is_buy ? 0.0 : qty;
-        acc.buy_count += t.is_buy ? 1 : 0;
-        acc.sell_count += t.is_buy ? 0 : 1;
-        acc.current_buy_streak = t.is_buy ? 1 : 0;
-        acc.current_sell_streak = t.is_buy ? 0 : 1;
-        acc.max_buy_s = t.is_buy ? 1 : 0;
-        acc.max_sell_s = t.is_buy ? 0 : 1;
+        // Branchless: if (is_buy) { buy_vol += qty; buy_count++; ... } else { sell_vol += qty; ... }
+        int is_buy = t.is_buy;
+        int is_sell = !t.is_buy;
+        acc.buy_vol += is_buy * qty;
+        acc.sell_vol += is_sell * qty;
+        acc.buy_count += is_buy;
+        acc.sell_count += is_sell;
+        acc.current_buy_streak = is_buy;
+        acc.current_sell_streak = is_sell;
+        acc.max_buy_s = is_buy;
+        acc.max_sell_s = is_sell;
         acc.total_vol += qty;
 
         // Branchless: if (quantity >= large_trade_threshold_) { large_count++; }
@@ -243,15 +244,16 @@ private:
         Price price = t.price;
         double price_d = static_cast<double>(price);
 
-        // Branchless using ternary (compiles to CMOV):
-        // if (is_buy) { buy_vol += qty; current_buy_streak++; ... }
-        // else { sell_vol += qty; current_sell_streak++; ... }
-        acc.buy_vol += t.is_buy ? qty : 0.0;
-        acc.sell_vol += t.is_buy ? 0.0 : qty;
-        acc.buy_count += t.is_buy ? 1 : 0;
-        acc.sell_count += t.is_buy ? 0 : 1;
-        acc.current_buy_streak = t.is_buy ? (acc.current_buy_streak + 1) : 0;
-        acc.current_sell_streak = t.is_buy ? 0 : (acc.current_sell_streak + 1);
+        // Branchless: if (is_buy) { buy_vol += qty; current_buy_streak++; ... }
+        //             else { sell_vol += qty; current_sell_streak++; ... }
+        int is_buy = t.is_buy;
+        int is_sell = !t.is_buy;
+        acc.buy_vol += is_buy * qty;
+        acc.sell_vol += is_sell * qty;
+        acc.buy_count += is_buy;
+        acc.sell_count += is_sell;
+        acc.current_buy_streak = is_buy * (acc.current_buy_streak + 1);
+        acc.current_sell_streak = is_sell * (acc.current_sell_streak + 1);
         acc.max_buy_s = std::max(acc.max_buy_s, acc.current_buy_streak);
         acc.max_sell_s = std::max(acc.max_sell_s, acc.current_sell_streak);
         acc.total_vol += qty;
@@ -266,11 +268,11 @@ private:
         acc.min_price = std::min(acc.min_price, price);
         acc.max_price = std::max(acc.max_price, price);
 
-        // Branchless using ternary (compiles to CMOV):
-        // if (price > prev) upticks++; else if (price < prev) downticks++; else zeroticks++;
-        acc.upticks += (price > acc.prev_price) ? 1 : 0;
-        acc.downticks += (price < acc.prev_price) ? 1 : 0;
-        acc.zeroticks += (price == acc.prev_price) ? 1 : 0;
+        // Branchless: if (price > prev) upticks++; else if (price < prev) downticks++; else zeroticks++;
+        int price_cmp = (price > acc.prev_price) - (price < acc.prev_price);
+        acc.upticks += (price_cmp == 1);
+        acc.downticks += (price_cmp == -1);
+        acc.zeroticks += (price_cmp == 0);
 
         // Welford's online variance for price changes
         double price_change = price_d - static_cast<double>(acc.prev_price);
