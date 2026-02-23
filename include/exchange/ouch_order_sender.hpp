@@ -1,11 +1,12 @@
 #pragma once
 
 #include "../order_sender.hpp"
-#include "../ouch/ouch_session.hpp"
 #include "../ouch/ouch_messages.hpp"
-#include <unordered_map>
-#include <string>
+#include "../ouch/ouch_session.hpp"
+
 #include <cstring>
+#include <string>
+#include <unordered_map>
 
 namespace hft {
 namespace exchange {
@@ -47,38 +48,23 @@ public:
         Side side;
         Quantity quantity;
         Price price;
-        uint64_t exchange_ref;  // Exchange order reference (from Accepted)
+        uint64_t exchange_ref; // Exchange order reference (from Accepted)
         bool is_live;
     };
 
     explicit OuchOrderSender(ouch::OuchSession& session)
-        : session_(session)
-        , default_tif_(ouch::TIF_IOC)
-        , orders_sent_(0)
-        , orders_filled_(0)
-        , orders_canceled_(0)
-        , orders_rejected_(0)
-    {
+        : session_(session), default_tif_(ouch::TIF_IOC), orders_sent_(0), orders_filled_(0), orders_canceled_(0),
+          orders_rejected_(0) {
         // Set up response callbacks
-        session_.set_accepted_callback([this](const ouch::Accepted& msg) {
-            on_accepted(msg);
-        });
+        session_.set_accepted_callback([this](const ouch::Accepted& msg) { on_accepted(msg); });
 
-        session_.set_executed_callback([this](const ouch::Executed& msg) {
-            on_executed(msg);
-        });
+        session_.set_executed_callback([this](const ouch::Executed& msg) { on_executed(msg); });
 
-        session_.set_canceled_callback([this](const ouch::Canceled& msg) {
-            on_canceled(msg);
-        });
+        session_.set_canceled_callback([this](const ouch::Canceled& msg) { on_canceled(msg); });
 
-        session_.set_rejected_callback([this](const ouch::Rejected& msg) {
-            on_rejected(msg);
-        });
+        session_.set_rejected_callback([this](const ouch::Rejected& msg) { on_rejected(msg); });
 
-        session_.set_replaced_callback([this](const ouch::Replaced& msg) {
-            on_replaced(msg);
-        });
+        session_.set_replaced_callback([this](const ouch::Replaced& msg) { on_replaced(msg); });
     }
 
     // Register symbol mapping (Symbol ID -> stock ticker)
@@ -88,29 +74,19 @@ public:
     }
 
     // Connect to exchange
-    bool connect() {
-        return session_.connect();
-    }
+    bool connect() { return session_.connect(); }
 
     // Disconnect from exchange
-    void disconnect() {
-        session_.disconnect();
-    }
+    void disconnect() { session_.disconnect(); }
 
     // Check if connected
-    bool is_connected() const {
-        return session_.is_connected();
-    }
+    bool is_connected() const { return session_.is_connected(); }
 
     // Process incoming messages (call in event loop)
-    int process() {
-        return session_.process_incoming();
-    }
+    int process() { return session_.process_incoming(); }
 
     // Set default Time-in-Force
-    void set_default_tif(uint32_t tif) {
-        default_tif_ = tif;
-    }
+    void set_default_tif(uint32_t tif) { default_tif_ = tif; }
 
     // ============================================
     // OrderSender Interface
@@ -141,7 +117,7 @@ public:
         // Look up ticker
         auto it = symbol_to_ticker_.find(symbol);
         if (it == symbol_to_ticker_.end()) {
-            return false;  // Unknown symbol
+            return false; // Unknown symbol
         }
 
         // Build order message
@@ -179,9 +155,7 @@ public:
 
         // Track pending order
         std::string token_str(token, 14);
-        pending_orders_[token_str] = OrderInfo{
-            symbol, side, qty, price, 0, false
-        };
+        pending_orders_[token_str] = OrderInfo{symbol, side, qty, price, 0, false};
 
         ++orders_sent_;
         return true;
@@ -202,14 +176,14 @@ public:
         // Look up order by ID
         auto it = order_id_to_token_.find(order_id);
         if (it == order_id_to_token_.end()) {
-            return false;  // Unknown order
+            return false; // Unknown order
         }
 
         // Build cancel message
         ouch::CancelOrder cancel;
         cancel.init();
         cancel.set_token(it->second.c_str());
-        cancel.set_quantity(0);  // Full cancel
+        cancel.set_quantity(0); // Full cancel
 
         return session_.send_cancel_order(cancel);
     }
@@ -417,8 +391,8 @@ private:
     std::unordered_map<std::string, Symbol> ticker_to_symbol_;
 
     // Order tracking
-    std::unordered_map<std::string, OrderInfo> pending_orders_;  // Token -> OrderInfo
-    std::unordered_map<std::string, OrderInfo> live_orders_;     // Token -> OrderInfo
+    std::unordered_map<std::string, OrderInfo> pending_orders_; // Token -> OrderInfo
+    std::unordered_map<std::string, OrderInfo> live_orders_;    // Token -> OrderInfo
     std::unordered_map<OrderId, std::string> order_id_to_token_;
     std::unordered_map<std::string, OrderId> token_to_order_id_;
 
@@ -436,8 +410,7 @@ private:
 };
 
 // Verify concept satisfaction
-static_assert(concepts::OrderSender<OuchOrderSender>,
-              "OuchOrderSender must satisfy OrderSender concept");
+static_assert(concepts::OrderSender<OuchOrderSender>, "OuchOrderSender must satisfy OrderSender concept");
 
-}  // namespace exchange
-}  // namespace hft
+} // namespace exchange
+} // namespace hft

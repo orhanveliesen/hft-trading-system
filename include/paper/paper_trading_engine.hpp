@@ -1,19 +1,20 @@
 #pragma once
 
-#include "../types.hpp"
-#include "../order_sender.hpp"
-#include "../strategy/regime_detector.hpp"
-#include "../strategy/adaptive_strategy.hpp"
-#include "../risk/enhanced_risk_manager.hpp"
 #include "../logging/async_logger.hpp"
-#include <vector>
-#include <unordered_map>
-#include <queue>
-#include <functional>
+#include "../order_sender.hpp"
+#include "../risk/enhanced_risk_manager.hpp"
+#include "../strategy/adaptive_strategy.hpp"
+#include "../strategy/regime_detector.hpp"
+#include "../types.hpp"
+
 #include <chrono>
-#include <random>
 #include <cmath>
+#include <functional>
+#include <queue>
+#include <random>
 #include <string>
+#include <unordered_map>
+#include <vector>
 
 namespace hft {
 namespace paper {
@@ -21,13 +22,7 @@ namespace paper {
 /**
  * Paper Trade Status
  */
-enum class FillStatus : uint8_t {
-    Pending,
-    PartialFill,
-    Filled,
-    Cancelled,
-    Rejected
-};
+enum class FillStatus : uint8_t { Pending, PartialFill, Filled, Cancelled, Rejected };
 
 /**
  * Paper Order
@@ -38,7 +33,7 @@ struct PaperOrder {
     Side side;
     Quantity quantity;
     Quantity filled_qty;
-    Price price;            // 0 for market orders
+    Price price; // 0 for market orders
     bool is_market;
     uint64_t submit_time_ns;
     uint64_t fill_time_ns;
@@ -56,7 +51,7 @@ struct FillEvent {
     Quantity quantity;
     Price price;
     uint64_t timestamp_ns;
-    bool is_maker;          // True if added liquidity
+    bool is_maker; // True if added liquidity
 };
 
 /**
@@ -64,7 +59,7 @@ struct FillEvent {
  */
 struct PaperPosition {
     Symbol symbol;
-    int64_t quantity;       // Signed: positive = long, negative = short
+    int64_t quantity; // Signed: positive = long, negative = short
     Price avg_entry_price;
     double unrealized_pnl;
     double realized_pnl;
@@ -76,23 +71,23 @@ struct PaperPosition {
  */
 struct FillSimConfig {
     // Latency simulation
-    uint64_t min_latency_ns = 500'000;      // 500us minimum
-    uint64_t max_latency_ns = 2'000'000;    // 2ms maximum
-    uint64_t jitter_ns = 100'000;           // 100us jitter
+    uint64_t min_latency_ns = 500'000;   // 500us minimum
+    uint64_t max_latency_ns = 2'000'000; // 2ms maximum
+    uint64_t jitter_ns = 100'000;        // 100us jitter
 
     // Slippage simulation
-    double slippage_bps = 0.5;              // 0.5 bps average slippage
-    double slippage_variance = 0.3;         // Variance factor
+    double slippage_bps = 0.5;      // 0.5 bps average slippage
+    double slippage_variance = 0.3; // Variance factor
 
     // Fill probability (for limit orders)
-    double fill_probability = 0.8;          // 80% chance of fill at price
+    double fill_probability = 0.8; // 80% chance of fill at price
 
     // Partial fill simulation
     bool enable_partial_fills = true;
-    double partial_fill_rate = 0.3;         // 30% chance of partial fill
+    double partial_fill_rate = 0.3; // 30% chance of partial fill
 
     // Market impact
-    double market_impact_bps = 1.0;         // 1 bps per 1000 shares
+    double market_impact_bps = 1.0; // 1 bps per 1000 shares
 
     // Random seed (0 = use time)
     uint64_t random_seed = 0;
@@ -112,13 +107,9 @@ public:
     using FillCallback = std::function<void(const FillEvent&)>;
 
     explicit PaperOrderSender(const FillSimConfig& config = FillSimConfig())
-        : config_(config)
-        , next_order_id_(1)
-        , total_orders_(0)
-        , total_fills_(0)
-        , rng_(config.random_seed != 0 ? config.random_seed :
-               std::chrono::high_resolution_clock::now().time_since_epoch().count())
-    {}
+        : config_(config), next_order_id_(1), total_orders_(0), total_fills_(0),
+          rng_(config.random_seed != 0 ? config.random_seed
+                                       : std::chrono::high_resolution_clock::now().time_since_epoch().count()) {}
 
     // OrderSender interface
     bool send_order(Symbol symbol, Side side, Quantity qty, bool is_market) {
@@ -169,12 +160,15 @@ public:
         std::vector<OrderId> to_remove;
 
         for (auto& [id, order] : pending_orders_) {
-            if (order.symbol != symbol) continue;
-            if (order.status != FillStatus::Pending) continue;
+            if (order.symbol != symbol)
+                continue;
+            if (order.status != FillStatus::Pending)
+                continue;
 
             // Check latency
             uint64_t latency = simulate_latency();
-            if (now - order.submit_time_ns < latency) continue;
+            if (now - order.submit_time_ns < latency)
+                continue;
 
             // Simulate fill
             Price fill_price = simulate_fill_price(order, bid, ask);
@@ -199,8 +193,8 @@ public:
                 order.avg_fill_price = fill_price;
             } else {
                 // Weighted average
-                order.avg_fill_price = (order.avg_fill_price * (order.filled_qty - fill_qty) +
-                                       fill_price * fill_qty) / order.filled_qty;
+                order.avg_fill_price =
+                    (order.avg_fill_price * (order.filled_qty - fill_qty) + fill_price * fill_qty) / order.filled_qty;
             }
 
             // Determine status
@@ -261,7 +255,8 @@ private:
 
     uint64_t now_ns() const {
         return std::chrono::duration_cast<std::chrono::nanoseconds>(
-            std::chrono::high_resolution_clock::now().time_since_epoch()).count();
+                   std::chrono::high_resolution_clock::now().time_since_epoch())
+            .count();
     }
 
     void schedule_fill_check(OrderId /*order_id*/) {
@@ -270,16 +265,14 @@ private:
     }
 
     uint64_t simulate_latency() {
-        std::uniform_int_distribution<uint64_t> dist(
-            config_.min_latency_ns, config_.max_latency_ns);
+        std::uniform_int_distribution<uint64_t> dist(config_.min_latency_ns, config_.max_latency_ns);
         std::normal_distribution<double> jitter(0, config_.jitter_ns);
 
         uint64_t base_latency = dist(rng_);
         int64_t jitter_val = static_cast<int64_t>(jitter(rng_));
 
-        return static_cast<uint64_t>(std::max(
-            static_cast<int64_t>(config_.min_latency_ns),
-            static_cast<int64_t>(base_latency) + jitter_val));
+        return static_cast<uint64_t>(
+            std::max(static_cast<int64_t>(config_.min_latency_ns), static_cast<int64_t>(base_latency) + jitter_val));
     }
 
     Price simulate_fill_price(const PaperOrder& order, Price bid, Price ask) {
@@ -300,15 +293,15 @@ private:
         // Not marketable - check if would fill based on probability
         std::uniform_real_distribution<double> dist(0, 1);
         if (dist(rng_) < config_.fill_probability) {
-            return order.price;  // Fill at limit price
+            return order.price; // Fill at limit price
         }
 
-        return 0;  // No fill
+        return 0; // No fill
     }
 
     Price apply_slippage(Price price, Side side) {
         std::normal_distribution<double> dist(config_.slippage_bps, config_.slippage_variance);
-        double slippage = std::abs(dist(rng_)) / 10000.0;  // Convert bps to decimal
+        double slippage = std::abs(dist(rng_)) / 10000.0; // Convert bps to decimal
 
         if (side == Side::Buy) {
             return static_cast<Price>(price * (1.0 + slippage));
@@ -342,21 +335,20 @@ private:
             return static_cast<Quantity>(remaining * pct(rng_));
         }
 
-        return remaining;  // Full fill
+        return remaining; // Full fill
     }
 };
 
 // Verify concept satisfaction
-static_assert(concepts::OrderSender<PaperOrderSender>,
-              "PaperOrderSender must satisfy OrderSender concept");
+static_assert(concepts::OrderSender<PaperOrderSender>, "PaperOrderSender must satisfy OrderSender concept");
 
 /**
  * Per-symbol risk configuration for paper trading
  */
 struct SymbolRiskConfig {
     std::string symbol;
-    Position max_position = 1000;      // Max shares per symbol
-    Notional max_notional = 10000000;  // Max notional per symbol (in scaled units)
+    Position max_position = 1000;     // Max shares per symbol
+    Notional max_notional = 10000000; // Max notional per symbol (in scaled units)
 };
 
 /**
@@ -364,17 +356,17 @@ struct SymbolRiskConfig {
  */
 struct PaperTradingConfig {
     // Capital
-    Capital initial_capital = 100000 * risk::PRICE_SCALE;  // Convert to scaled units
+    Capital initial_capital = 100000 * risk::PRICE_SCALE; // Convert to scaled units
 
     // Fill simulation
     FillSimConfig fill_config = {};
     strategy::RegimeConfig regime_config = {};
 
     // Risk limits (maps to EnhancedRiskConfig - all as percentages)
-    double daily_loss_limit_pct = 0.02;                      // 2% daily loss limit
-    double max_drawdown_pct = 0.10;                          // 10% max drawdown
-    Quantity max_order_size = 1000;                          // Max single order size
-    double max_notional_pct = 1.0;                           // 100% of capital max exposure
+    double daily_loss_limit_pct = 0.02; // 2% daily loss limit
+    double max_drawdown_pct = 0.10;     // 10% max drawdown
+    Quantity max_order_size = 1000;     // Max single order size
+    double max_notional_pct = 1.0;      // 100% of capital max exposure
 
     // Per-symbol defaults
     Position default_max_position = 1000;
@@ -404,22 +396,16 @@ public:
     using Config = PaperTradingConfig;
 
     explicit PaperTradingEngine(const Config& config = Config())
-        : config_(config)
-        , order_sender_(config.fill_config)
-        , regime_detector_(config.regime_config)
-        , risk_manager_(create_risk_config(config))
-        , capital_(config.initial_capital)
-        , peak_equity_(config.initial_capital)
-    {
+        : config_(config), order_sender_(config.fill_config), regime_detector_(config.regime_config),
+          risk_manager_(create_risk_config(config)), capital_(config.initial_capital),
+          peak_equity_(config.initial_capital) {
         // Register symbols from config
         for (const auto& sym_cfg : config.symbol_configs) {
             register_symbol(sym_cfg.symbol, sym_cfg.max_position, sym_cfg.max_notional);
         }
 
         // Set up fill callback
-        order_sender_.set_fill_callback([this](const FillEvent& event) {
-            on_fill(event);
-        });
+        order_sender_.set_fill_callback([this](const FillEvent& event) { on_fill(event); });
 
         // Start logger if enabled
         if (config_.enable_logging) {
@@ -440,7 +426,6 @@ private:
     }
 
 public:
-
     ~PaperTradingEngine() {
         if (config_.enable_logging) {
             logger_.stop();
@@ -451,12 +436,13 @@ public:
      * Register a symbol for trading (must be called before trading)
      * Returns SymbolIndex for hot path operations
      */
-    risk::SymbolIndex register_symbol(const std::string& symbol_name,
-                                           Position max_position = 0,
-                                           Notional max_notional = 0) {
+    risk::SymbolIndex register_symbol(const std::string& symbol_name, Position max_position = 0,
+                                      Notional max_notional = 0) {
         // Use defaults if not specified
-        if (max_position == 0) max_position = config_.default_max_position;
-        if (max_notional == 0) max_notional = config_.default_max_notional;
+        if (max_position == 0)
+            max_position = config_.default_max_position;
+        if (max_notional == 0)
+            max_notional = config_.default_max_notional;
 
         // Register with risk manager
         risk::SymbolIndex idx = risk_manager_.register_symbol(symbol_name, max_position, max_notional);
@@ -467,8 +453,7 @@ public:
         symbol_name_map_[symbol] = symbol_name;
 
         if (config_.enable_logging) {
-            LOGF_INFO(logger_, "Symbol %s idx=%u pos=%ld",
-                     symbol_name.c_str(), idx, max_position);
+            LOGF_INFO(logger_, "Symbol %s idx=%u pos=%ld", symbol_name.c_str(), idx, max_position);
         }
 
         return idx;
@@ -478,10 +463,11 @@ public:
      * Process market data update
      */
     void on_market_data(Symbol symbol, Price bid, Price ask, uint64_t timestamp_ns) {
-        if (!risk_manager_.can_trade()) return;
+        if (!risk_manager_.can_trade())
+            return;
 
         // Update regime
-        double mid = (bid + ask) / 2.0 / 10000.0;  // Convert to dollars
+        double mid = (bid + ask) / 2.0 / 10000.0; // Convert to dollars
         regime_detector_.update(mid);
 
         // Update positions with mark-to-market
@@ -522,8 +508,7 @@ public:
         // Pre-trade risk check
         if (!risk_manager_.check_order(idx, side, qty, price)) {
             if (config_.enable_logging) {
-                LOGF_WARN(logger_, "Risk reject: %s %u",
-                         side == Side::Buy ? "BUY" : "SELL", qty);
+                LOGF_WARN(logger_, "Risk reject: %s %u", side == Side::Buy ? "BUY" : "SELL", qty);
             }
             return false;
         }
@@ -531,8 +516,7 @@ public:
         bool result = order_sender_.send_order(symbol, side, qty, is_market);
 
         if (result && config_.enable_logging) {
-            LOGF_INFO(logger_, "Order: %s %u",
-                     side == Side::Buy ? "BUY" : "SELL", qty);
+            LOGF_INFO(logger_, "Order: %s %u", side == Side::Buy ? "BUY" : "SELL", qty);
         }
 
         return result;
@@ -541,9 +525,7 @@ public:
     /**
      * Get current position
      */
-    const PaperPosition& get_position(Symbol symbol) {
-        return positions_[symbol];
-    }
+    const PaperPosition& get_position(Symbol symbol) { return positions_[symbol]; }
 
     /**
      * Get total P&L
@@ -559,9 +541,7 @@ public:
     /**
      * Get current equity
      */
-    double equity() const {
-        return capital_ + total_pnl();
-    }
+    double equity() const { return capital_ + total_pnl(); }
 
     /**
      * Get current drawdown
@@ -667,17 +647,15 @@ private:
         risk_manager_.update_pnl(total_pnl_scaled);
 
         if (config_.enable_logging) {
-            LOGF_INFO(logger_, "Fill: %s %u @ %.4f pos=%ld",
-                     event.side == Side::Buy ? "BUY" : "SELL",
-                     event.quantity,
-                     static_cast<double>(event.price) / risk::PRICE_SCALE,
-                     pos.quantity);
+            LOGF_INFO(logger_, "Fill: %s %u @ %.4f pos=%ld", event.side == Side::Buy ? "BUY" : "SELL", event.quantity,
+                      static_cast<double>(event.price) / risk::PRICE_SCALE, pos.quantity);
         }
     }
 
     void update_position_pnl(Symbol symbol, Price bid, Price ask) {
         auto it = positions_.find(symbol);
-        if (it == positions_.end()) return;
+        if (it == positions_.end())
+            return;
 
         auto& pos = it->second;
         if (pos.quantity == 0) {
@@ -718,13 +696,13 @@ private:
 
         // Auto-register with default name and limits
         std::string name = "SYM" + std::to_string(symbol);
-        risk::SymbolIndex idx = risk_manager_.register_symbol(
-            name, config_.default_max_position, config_.default_max_notional);
+        risk::SymbolIndex idx =
+            risk_manager_.register_symbol(name, config_.default_max_position, config_.default_max_notional);
         symbol_index_map_[symbol] = idx;
         symbol_name_map_[symbol] = name;
         return idx;
     }
 };
 
-}  // namespace paper
-}  // namespace hft
+} // namespace paper
+} // namespace hft

@@ -10,23 +10,23 @@
  * Run with: ./test_paper_portfolio
  */
 
-#include <iostream>
-#include <iomanip>
-#include <cassert>
-#include <cmath>
-#include <chrono>
-#include <vector>
-#include <map>
-#include <string>
-#include <sstream>
-#include <limits>
-#include <functional>
-#include <random>
-
-#include "../include/types.hpp"
 #include "../include/risk/enhanced_risk_manager.hpp"
 #include "../include/strategy/regime_detector.hpp"
 #include "../include/strategy/regime_detector_fast.hpp"
+#include "../include/types.hpp"
+
+#include <cassert>
+#include <chrono>
+#include <cmath>
+#include <functional>
+#include <iomanip>
+#include <iostream>
+#include <limits>
+#include <map>
+#include <random>
+#include <sstream>
+#include <string>
+#include <vector>
 
 using namespace hft;
 using namespace hft::risk;
@@ -73,12 +73,10 @@ void run_test(const std::string& name, std::function<bool()> test_fn) {
     double duration_us = std::chrono::duration<double, std::micro>(end - start).count();
 
     if (passed) {
-        std::cout << "  \033[32m✓ PASSED\033[0m (" << std::fixed << std::setprecision(1)
-                  << duration_us << " µs)\n";
+        std::cout << "  \033[32m✓ PASSED\033[0m (" << std::fixed << std::setprecision(1) << duration_us << " µs)\n";
         g_pass_count++;
     } else {
-        std::cout << "  \033[31m✗ FAILED\033[0m (" << std::fixed << std::setprecision(1)
-                  << duration_us << " µs)\n";
+        std::cout << "  \033[31m✗ FAILED\033[0m (" << std::fixed << std::setprecision(1) << duration_us << " µs)\n";
         g_fail_count++;
     }
 
@@ -103,13 +101,9 @@ struct Portfolio {
         return it != holdings.end() ? it->second : 0;
     }
 
-    bool can_buy(double price, double qty) const {
-        return cash >= price * qty;
-    }
+    bool can_buy(double price, double qty) const { return cash >= price * qty; }
 
-    bool can_sell(Symbol s, double qty) const {
-        return get_holding(s) >= qty;
-    }
+    bool can_sell(Symbol s, double qty) const { return get_holding(s) >= qty; }
 
     void buy(Symbol s, double price, double qty) {
         cash -= price * qty;
@@ -119,7 +113,8 @@ struct Portfolio {
     void sell(Symbol s, double price, double qty) {
         cash += price * qty;
         holdings[s] -= qty;
-        if (holdings[s] <= 1e-9) holdings.erase(s);
+        if (holdings[s] <= 1e-9)
+            holdings.erase(s);
     }
 
     double total_value(const std::map<Symbol, double>& prices) const {
@@ -192,10 +187,10 @@ bool test_portfolio_buy_success() {
 
 bool test_portfolio_buy_insufficient_cash() {
     Portfolio p;
-    p.init(10000.0);  // Only $10k
+    p.init(10000.0); // Only $10k
 
     Symbol BTC = 1;
-    double price = 91000.0;  // BTC costs $91k
+    double price = 91000.0; // BTC costs $91k
     double qty = 1.0;
 
     TEST_LOG("Cash: $" << p.cash << ", trying to buy BTC @ $" << price);
@@ -296,7 +291,7 @@ bool test_portfolio_exact_boundary() {
 
     // Try to buy exactly what we can afford
     double price = 1000.0;
-    double qty = 10.0;  // 10 * 1000 = 10000 exactly
+    double qty = 10.0; // 10 * 1000 = 10000 exactly
 
     TEST_LOG("Cash: $" << p.cash << ", buying " << qty << " @ $" << price);
 
@@ -334,7 +329,7 @@ bool test_unsigned_underflow_fix() {
     Price last_mid = 913510000; // Previous price (higher)
 
     // WRONG way (causes underflow):
-    uint32_t wrong_diff = mid - last_mid;  // UNDERFLOW!
+    uint32_t wrong_diff = mid - last_mid; // UNDERFLOW!
     double change_wrong = static_cast<double>(wrong_diff) / last_mid;
 
     // CORRECT way:
@@ -356,7 +351,7 @@ bool test_unsigned_underflow_fix() {
         return false;
     }
 
-    double expected_change = -10000.0 / 913510000.0;  // -0.001095%
+    double expected_change = -10000.0 / 913510000.0; // -0.001095%
     if (std::abs(change_correct - expected_change) > 1e-10) {
         TEST_ERROR("Change calculation incorrect");
         return false;
@@ -379,7 +374,7 @@ bool test_price_precision() {
     constexpr int64_t PRICE_SCALE = 10000;
 
     // BTC at $91,234.5678
-    Price btc_price = 912345678;  // In scaled units
+    Price btc_price = 912345678; // In scaled units
     double btc_usd = static_cast<double>(btc_price) / PRICE_SCALE;
 
     TEST_LOG("BTC price in scaled units: " << btc_price);
@@ -412,7 +407,7 @@ bool test_extreme_prices() {
     Symbol EXTREME = 99;
 
     // Test very high price (can't afford)
-    double very_high = 1000000.0;  // $1M
+    double very_high = 1000000.0; // $1M
     TEST_LOG("Testing very high price: $" << very_high);
     if (p.can_buy(very_high, 1.0)) {
         TEST_ERROR("Should not afford $1M asset");
@@ -421,16 +416,16 @@ bool test_extreme_prices() {
     TEST_OK("Correctly rejected unaffordable asset");
 
     // Test very low price (many units)
-    double very_low = 0.001;  // $0.001
+    double very_low = 0.001; // $0.001
     double max_units = p.cash / very_low;
     TEST_LOG("At $0.001, could buy " << max_units << " units");
-    if (!p.can_buy(very_low, 1000000.0)) {  // Buy 1M units for $1000
+    if (!p.can_buy(very_low, 1000000.0)) { // Buy 1M units for $1000
         TEST_ERROR("Should be able to buy cheap assets");
         return false;
     }
 
     // Test boundary: exact cash amount
-    double exact_price = p.cash;  // $100,000 exactly
+    double exact_price = p.cash; // $100,000 exactly
     TEST_LOG("Testing exact cash boundary: $" << exact_price);
     if (!p.can_buy(exact_price, 1.0)) {
         TEST_ERROR("Should be able to buy at exact cash amount");
@@ -466,11 +461,11 @@ bool test_floating_point_accumulation() {
     TEST_LOG("Final cash: $" << std::setprecision(10) << p.cash);
     TEST_LOG("Accumulated error: $" << error);
 
-    if (error > 0.01) {  // Allow 1 cent error
+    if (error > 0.01) { // Allow 1 cent error
         TEST_WARN("Floating point error accumulated: $" << error);
     }
 
-    if (error > 1.0) {  // More than $1 is a problem
+    if (error > 1.0) { // More than $1 is a problem
         TEST_ERROR("Excessive floating point error");
         return false;
     }
@@ -521,7 +516,7 @@ bool test_change_calculation_range() {
     struct TestCase {
         Price mid;
         Price last_mid;
-        double expected_bps;  // Expected change in basis points
+        double expected_bps; // Expected change in basis points
         std::string description;
     };
 
@@ -547,8 +542,7 @@ bool test_change_calculation_range() {
         if (match) {
             TEST_OK(tc.description << ": " << change_bps << " bps");
         } else {
-            TEST_ERROR(tc.description << ": expected " << tc.expected_bps
-                      << " bps, got " << change_bps << " bps");
+            TEST_ERROR(tc.description << ": expected " << tc.expected_bps << " bps, got " << change_bps << " bps");
             all_passed = false;
         }
     }
@@ -564,7 +558,7 @@ bool test_regime_detection_trending_up() {
 
     TEST_LOG("Feeding steadily increasing prices...");
     for (int i = 0; i < 25; i++) {
-        double price = 100.0 + i * 2.0;  // +2% per tick
+        double price = 100.0 + i * 2.0; // +2% per tick
         detector.update(price);
     }
 
@@ -594,7 +588,7 @@ bool test_regime_detection_trending_down() {
 
     TEST_LOG("Feeding steadily decreasing prices...");
     for (int i = 0; i < 25; i++) {
-        double price = 200.0 - i * 2.0;  // -2% per tick
+        double price = 200.0 - i * 2.0; // -2% per tick
         detector.update(price);
     }
 
@@ -646,19 +640,21 @@ bool test_regime_detection_ranging() {
 bool test_regime_high_volatility() {
     RegimeConfig config;
     config.lookback = 10;
-    config.high_vol_threshold = 0.03;  // 3% vol is high
+    config.high_vol_threshold = 0.03; // 3% vol is high
 
     RegimeDetector detector(config);
 
     TEST_LOG("Feeding highly volatile prices...");
     std::mt19937 rng(42);
-    std::normal_distribution<double> dist(0, 5.0);  // High std dev
+    std::normal_distribution<double> dist(0, 5.0); // High std dev
 
     double price = 100.0;
     for (int i = 0; i < 30; i++) {
         price += dist(rng);
-        if (price < 50) price = 50;
-        if (price > 150) price = 150;
+        if (price < 50)
+            price = 50;
+        if (price > 150)
+            price = 150;
         detector.update(price);
     }
 
@@ -699,12 +695,9 @@ bool test_realistic_trading_session() {
     };
 
     std::vector<Trade> trades = {
-        {ETH, true, 3150.0, 5.0, "Buy ETH on dip"},
-        {ETH, true, 3140.0, 5.0, "Average down"},
-        {ETH, false, 3180.0, 3.0, "Take partial profit"},
-        {BTC, true, 91200.0, 0.5, "Diversify into BTC"},
-        {ETH, false, 3200.0, 7.0, "Exit remaining ETH"},
-        {BTC, false, 91500.0, 0.5, "Exit BTC with profit"},
+        {ETH, true, 3150.0, 5.0, "Buy ETH on dip"},       {ETH, true, 3140.0, 5.0, "Average down"},
+        {ETH, false, 3180.0, 3.0, "Take partial profit"}, {BTC, true, 91200.0, 0.5, "Diversify into BTC"},
+        {ETH, false, 3200.0, 7.0, "Exit remaining ETH"},  {BTC, false, 91500.0, 0.5, "Exit BTC with profit"},
     };
 
     for (const auto& t : trades) {
@@ -712,22 +705,21 @@ bool test_realistic_trading_session() {
 
         if (t.is_buy) {
             if (!p.can_buy(t.price, t.qty)) {
-                TEST_WARN("Cannot buy " << t.qty << " " << sym_name << " @ $" << t.price
-                         << " (insufficient cash: $" << p.cash << ")");
+                TEST_WARN("Cannot buy " << t.qty << " " << sym_name << " @ $" << t.price << " (insufficient cash: $"
+                                        << p.cash << ")");
                 continue;
             }
             p.buy(t.sym, t.price, t.qty);
-            TEST_LOG("BUY  " << std::setw(5) << t.qty << " " << sym_name
-                    << " @ $" << std::setw(8) << t.price << " | " << t.reason);
+            TEST_LOG("BUY  " << std::setw(5) << t.qty << " " << sym_name << " @ $" << std::setw(8) << t.price << " | "
+                             << t.reason);
         } else {
             if (!p.can_sell(t.sym, t.qty)) {
-                TEST_WARN("Cannot sell " << t.qty << " " << sym_name
-                         << " (only have " << p.get_holding(t.sym) << ")");
+                TEST_WARN("Cannot sell " << t.qty << " " << sym_name << " (only have " << p.get_holding(t.sym) << ")");
                 continue;
             }
             p.sell(t.sym, t.price, t.qty);
-            TEST_LOG("SELL " << std::setw(5) << t.qty << " " << sym_name
-                    << " @ $" << std::setw(8) << t.price << " | " << t.reason);
+            TEST_LOG("SELL " << std::setw(5) << t.qty << " " << sym_name << " @ $" << std::setw(8) << t.price << " | "
+                             << t.reason);
         }
         TEST_LOG("     Cash: $" << std::fixed << std::setprecision(2) << p.cash);
     }
@@ -825,7 +817,8 @@ bool test_multi_symbol_portfolio() {
     // Verify position count
     int positions = 0;
     for (const auto& [sym, qty] : p.holdings) {
-        if (qty > 0) positions++;
+        if (qty > 0)
+            positions++;
     }
 
     if (positions != 4) {
@@ -843,7 +836,7 @@ bool test_multi_symbol_portfolio() {
 
 bool benchmark_portfolio_operations() {
     Portfolio p;
-    p.init(1000000000.0);  // Large capital for many ops
+    p.init(1000000000.0); // Large capital for many ops
 
     Symbol SYM = 1;
     int iterations = 1000000;
@@ -919,7 +912,7 @@ bool benchmark_change_calculation() {
 
     for (int i = 0; i < 1000; i++) {
         last_mids[i] = 900000000 + (i % 10000);
-        mids[i] = last_mids[i] + (i % 100) - 50;  // Small changes
+        mids[i] = last_mids[i] + (i % 100) - 50; // Small changes
     }
 
     // Benchmark correct calculation
@@ -983,11 +976,11 @@ bool benchmark_regime_detection() {
         detector_fast.update(100.0 + (i % 10) * 0.1);
     }
 
-    volatile MarketRegime regime_sink;  // Prevent optimization
+    volatile MarketRegime regime_sink; // Prevent optimization
     auto start_fast = std::chrono::high_resolution_clock::now();
     for (int i = 0; i < iterations; i++) {
         detector_fast.update(100.0 + (i % 100) * 0.01);
-        regime_sink = detector_fast.regime();  // Force computation
+        regime_sink = detector_fast.regime(); // Force computation
     }
     auto end_fast = std::chrono::high_resolution_clock::now();
     (void)regime_sink;
@@ -999,16 +992,20 @@ bool benchmark_regime_detection() {
     TEST_LOG("┌─────────────────────────────────────────────────────┐");
     TEST_LOG("│           REGIME DETECTOR COMPARISON                │");
     TEST_LOG("├─────────────────────────────────────────────────────┤");
-    TEST_LOG("│  OLD (deque/vector): " << std::fixed << std::setw(8) << std::setprecision(1) << ns_old << " ns/op              │");
-    TEST_LOG("│  NEW (EMA, zero-storage): " << std::fixed << std::setw(8) << std::setprecision(1) << ns_fast << " ns/op         │");
+    TEST_LOG("│  OLD (deque/vector): " << std::fixed << std::setw(8) << std::setprecision(1) << ns_old
+                                       << " ns/op              │");
+    TEST_LOG("│  NEW (EMA, zero-storage): " << std::fixed << std::setw(8) << std::setprecision(1) << ns_fast
+                                            << " ns/op         │");
     TEST_LOG("├─────────────────────────────────────────────────────┤");
 
     double speedup = ns_old / ns_fast;
-    TEST_LOG("│  \033[32mSPEEDUP: " << std::fixed << std::setprecision(1) << speedup << "x faster!\033[0m                           │");
+    TEST_LOG("│  \033[32mSPEEDUP: " << std::fixed << std::setprecision(1) << speedup
+                                    << "x faster!\033[0m                           │");
     TEST_LOG("└─────────────────────────────────────────────────────┘");
 
     double updates_per_sec = 1e9 / ns_fast;
-    TEST_LOG("Fast detector throughput: " << std::fixed << std::setprecision(1) << (updates_per_sec / 1e6) << " M updates/sec");
+    TEST_LOG("Fast detector throughput: " << std::fixed << std::setprecision(1) << (updates_per_sec / 1e6)
+                                          << " M updates/sec");
 
     // Fast detector should be at least 10x faster
     if (speedup < 10) {
@@ -1052,7 +1049,8 @@ bool benchmark_multi_symbol_portfolio() {
     int total_ops = num_symbols * ops_per_symbol;
     double ns_per_op = std::chrono::duration<double, std::nano>(end - start).count() / total_ops;
 
-    TEST_LOG("Get holding (" << num_symbols << " symbols): " << std::fixed << std::setprecision(1) << ns_per_op << " ns/op");
+    TEST_LOG("Get holding (" << num_symbols << " symbols): " << std::fixed << std::setprecision(1) << ns_per_op
+                             << " ns/op");
 
     // Benchmark total_value calculation
     std::map<Symbol, double> prices;
@@ -1069,7 +1067,8 @@ bool benchmark_multi_symbol_portfolio() {
     (void)total;
 
     double value_us = std::chrono::duration<double, std::micro>(end - start).count() / 10000;
-    TEST_LOG("Total value calc (" << num_symbols << " symbols): " << std::fixed << std::setprecision(2) << value_us << " µs");
+    TEST_LOG("Total value calc (" << num_symbols << " symbols): " << std::fixed << std::setprecision(2) << value_us
+                                  << " µs");
 
     TEST_OK("Multi-symbol benchmark completed");
     return true;
@@ -1191,9 +1190,12 @@ int main() {
     std::cout << "╔══════════════════════════════════════════════════════════════════════╗\n";
     std::cout << "║                          TEST SUMMARY                                ║\n";
     std::cout << "╠══════════════════════════════════════════════════════════════════════╣\n";
-    std::cout << "║  Total:  " << std::setw(3) << (g_pass_count + g_fail_count) << " tests                                                    ║\n";
-    std::cout << "║  \033[32mPassed: " << std::setw(3) << g_pass_count << "\033[0m                                                        ║\n";
-    std::cout << "║  \033[31mFailed: " << std::setw(3) << g_fail_count << "\033[0m                                                        ║\n";
+    std::cout << "║  Total:  " << std::setw(3) << (g_pass_count + g_fail_count)
+              << " tests                                                    ║\n";
+    std::cout << "║  \033[32mPassed: " << std::setw(3) << g_pass_count
+              << "\033[0m                                                        ║\n";
+    std::cout << "║  \033[31mFailed: " << std::setw(3) << g_fail_count
+              << "\033[0m                                                        ║\n";
     std::cout << "╚══════════════════════════════════════════════════════════════════════╝\n\n";
 
     // Print benchmark summary
@@ -1203,9 +1205,8 @@ int main() {
 
     for (const auto& r : g_results) {
         if (r.name.find("BENCH") != std::string::npos) {
-            std::cout << "\033[1;33m│\033[0m  " << std::left << std::setw(35) << r.name
-                      << std::right << std::setw(12) << std::fixed << std::setprecision(1)
-                      << r.duration_us << " µs";
+            std::cout << "\033[1;33m│\033[0m  " << std::left << std::setw(35) << r.name << std::right << std::setw(12)
+                      << std::fixed << std::setprecision(1) << r.duration_us << " µs";
             std::cout << std::string(14, ' ') << "\033[1;33m│\033[0m\n";
         }
     }

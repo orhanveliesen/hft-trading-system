@@ -5,46 +5,50 @@
  * This ensures the tuner can fully control trading behavior.
  */
 
-#include <iostream>
+#include "../include/tuner/claude_client.hpp"
+
 #include <cassert>
 #include <cstring>
-
-#include "../include/tuner/claude_client.hpp"
+#include <iostream>
 
 #define TEST(name) void name()
 
-#define RUN_TEST(name) do { \
-    std::cout << "  " << #name << "... "; \
-    try { \
-        name(); \
-        std::cout << "PASSED\n"; \
-    } catch (...) { \
-        std::cout << "FAILED (exception)\n"; \
-        return 1; \
-    } \
-} while(0)
+#define RUN_TEST(name)                                                                                                 \
+    do {                                                                                                               \
+        std::cout << "  " << #name << "... ";                                                                          \
+        try {                                                                                                          \
+            name();                                                                                                    \
+            std::cout << "PASSED\n";                                                                                   \
+        } catch (...) {                                                                                                \
+            std::cout << "FAILED (exception)\n";                                                                       \
+            return 1;                                                                                                  \
+        }                                                                                                              \
+    } while (0)
 
-#define ASSERT_EQ(a, b) do { \
-    if ((a) != (b)) { \
-        std::cerr << "\nFAIL: " << #a << " (" << (a) << ") != " << #b << " (" << (b) << ")\n"; \
-        assert(false); \
-    } \
-} while(0)
+#define ASSERT_EQ(a, b)                                                                                                \
+    do {                                                                                                               \
+        if ((a) != (b)) {                                                                                              \
+            std::cerr << "\nFAIL: " << #a << " (" << (a) << ") != " << #b << " (" << (b) << ")\n";                     \
+            assert(false);                                                                                             \
+        }                                                                                                              \
+    } while (0)
 
-#define ASSERT_TRUE(expr) do { \
-    if (!(expr)) { \
-        std::cerr << "\nFAIL: " << #expr << " is false\n"; \
-        assert(false); \
-    } \
-} while(0)
+#define ASSERT_TRUE(expr)                                                                                              \
+    do {                                                                                                               \
+        if (!(expr)) {                                                                                                 \
+            std::cerr << "\nFAIL: " << #expr << " is false\n";                                                         \
+            assert(false);                                                                                             \
+        }                                                                                                              \
+    } while (0)
 
-#define ASSERT_NEAR(a, b, eps) do { \
-    double _a = (a), _b = (b), _eps = (eps); \
-    if (std::abs(_a - _b) > _eps) { \
-        std::cerr << "\nFAIL: " << #a << " (" << _a << ") != " << #b << " (" << _b << ") within " << _eps << "\n"; \
-        assert(false); \
-    } \
-} while(0)
+#define ASSERT_NEAR(a, b, eps)                                                                                         \
+    do {                                                                                                               \
+        double _a = (a), _b = (b), _eps = (eps);                                                                       \
+        if (std::abs(_a - _b) > _eps) {                                                                                \
+            std::cerr << "\nFAIL: " << #a << " (" << _a << ") != " << #b << " (" << _b << ") within " << _eps << "\n"; \
+            assert(false);                                                                                             \
+        }                                                                                                              \
+    } while (0)
 
 /**
  * Test wrapper that exposes private parsing methods for testing
@@ -56,13 +60,9 @@ public:
         return parse_tuner_command(text, cmd);
     }
 
-    std::string test_extract_string(const std::string& json, const char* key) {
-        return extract_string(json, key);
-    }
+    std::string test_extract_string(const std::string& json, const char* key) { return extract_string(json, key); }
 
-    double test_extract_number(const std::string& json, const char* key) {
-        return extract_number(json, key);
-    }
+    double test_extract_number(const std::string& json, const char* key) { return extract_number(json, key); }
 };
 
 // =============================================================================
@@ -94,10 +94,10 @@ TEST(parse_basic_update_config) {
     ASSERT_EQ(cmd.urgency, 1);
 
     // Verify config values
-    ASSERT_EQ(cmd.config.ema_dev_trending_x100, 150);  // 1.5% * 100
-    ASSERT_EQ(cmd.config.base_position_x100, 500);     // 5.0% * 100
-    ASSERT_EQ(cmd.config.target_pct_x100, 300);        // 3.0% * 100
-    ASSERT_EQ(cmd.config.stop_pct_x100, 400);          // 4.0% * 100
+    ASSERT_EQ(cmd.config.ema_dev_trending_x100, 150); // 1.5% * 100
+    ASSERT_EQ(cmd.config.base_position_x100, 500);    // 5.0% * 100
+    ASSERT_EQ(cmd.config.target_pct_x100, 300);       // 3.0% * 100
+    ASSERT_EQ(cmd.config.stop_pct_x100, 400);         // 4.0% * 100
 }
 
 // =============================================================================
@@ -150,10 +150,10 @@ TEST(parse_signal_thresholds) {
 
     bool parsed = client.test_parse_tuner_command(json, cmd);
     ASSERT_TRUE(parsed);
-    ASSERT_EQ(cmd.config.signal_aggressive_x100, 25);   // 0.25 * 100
-    ASSERT_EQ(cmd.config.signal_normal_x100, 45);       // 0.45 * 100
-    ASSERT_EQ(cmd.config.signal_cautious_x100, 65);     // 0.65 * 100
-    ASSERT_EQ(cmd.config.min_confidence_x100, 35);      // 0.35 * 100
+    ASSERT_EQ(cmd.config.signal_aggressive_x100, 25); // 0.25 * 100
+    ASSERT_EQ(cmd.config.signal_normal_x100, 45);     // 0.45 * 100
+    ASSERT_EQ(cmd.config.signal_cautious_x100, 65);   // 0.65 * 100
+    ASSERT_EQ(cmd.config.min_confidence_x100, 35);    // 0.35 * 100
 }
 
 // =============================================================================
@@ -180,12 +180,12 @@ TEST(parse_accumulation_control) {
 
     bool parsed = client.test_parse_tuner_command(json, cmd);
     ASSERT_TRUE(parsed);
-    ASSERT_EQ(cmd.config.accum_floor_trending_x100, 55);    // 0.55 * 100
-    ASSERT_EQ(cmd.config.accum_floor_ranging_x100, 35);     // 0.35 * 100
-    ASSERT_EQ(cmd.config.accum_floor_highvol_x100, 25);     // 0.25 * 100
-    ASSERT_EQ(cmd.config.accum_boost_per_win_x100, 15);     // 0.15 * 100
-    ASSERT_EQ(cmd.config.accum_penalty_per_loss_x100, 12);  // 0.12 * 100
-    ASSERT_EQ(cmd.config.accum_max_x100, 85);               // 0.85 * 100
+    ASSERT_EQ(cmd.config.accum_floor_trending_x100, 55);   // 0.55 * 100
+    ASSERT_EQ(cmd.config.accum_floor_ranging_x100, 35);    // 0.35 * 100
+    ASSERT_EQ(cmd.config.accum_floor_highvol_x100, 25);    // 0.25 * 100
+    ASSERT_EQ(cmd.config.accum_boost_per_win_x100, 15);    // 0.15 * 100
+    ASSERT_EQ(cmd.config.accum_penalty_per_loss_x100, 12); // 0.12 * 100
+    ASSERT_EQ(cmd.config.accum_max_x100, 85);              // 0.85 * 100
 }
 
 // =============================================================================
@@ -209,9 +209,9 @@ TEST(parse_min_position) {
 
     bool parsed = client.test_parse_tuner_command(json, cmd);
     ASSERT_TRUE(parsed);
-    ASSERT_EQ(cmd.config.base_position_x100, 300);  // 3.0% * 100
-    ASSERT_EQ(cmd.config.max_position_x100, 1000);  // 10.0% * 100
-    ASSERT_EQ(cmd.config.min_position_x100, 50);    // 0.5% * 100
+    ASSERT_EQ(cmd.config.base_position_x100, 300); // 3.0% * 100
+    ASSERT_EQ(cmd.config.max_position_x100, 1000); // 10.0% * 100
+    ASSERT_EQ(cmd.config.min_position_x100, 50);   // 0.5% * 100
 }
 
 // =============================================================================
@@ -274,7 +274,7 @@ TEST(parse_all_config_parameters) {
     ASSERT_EQ(cmd.config.target_pct_x100, 350);
     ASSERT_EQ(cmd.config.stop_pct_x100, 450);
     ASSERT_EQ(cmd.config.pullback_pct_x100, 80);
-    ASSERT_EQ(cmd.config.order_type_preference, 3);  // Adaptive
+    ASSERT_EQ(cmd.config.order_type_preference, 3); // Adaptive
     ASSERT_EQ(cmd.config.limit_offset_bps_x100, 300);
     ASSERT_EQ(cmd.config.limit_timeout_ms, 800);
 

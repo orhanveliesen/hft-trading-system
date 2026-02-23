@@ -1,19 +1,21 @@
-#include <cassert>
-#include <iostream>
-#include <cstring>
-#include <vector>
-#include "../include/types.hpp"
-#include "../include/itch_messages.hpp"
 #include "../include/feed_handler.hpp"
+#include "../include/itch_messages.hpp"
+#include "../include/types.hpp"
+
+#include <cassert>
+#include <cstring>
+#include <iostream>
+#include <vector>
 
 using namespace hft;
 
 #define TEST(name) void name()
-#define RUN_TEST(name) do { \
-    std::cout << "Running " << #name << "... "; \
-    name(); \
-    std::cout << "PASSED\n"; \
-} while(0)
+#define RUN_TEST(name)                                                                                                 \
+    do {                                                                                                               \
+        std::cout << "Running " << #name << "... ";                                                                    \
+        name();                                                                                                        \
+        std::cout << "PASSED\n";                                                                                       \
+    } while (0)
 
 #define ASSERT_EQ(a, b) assert((a) == (b))
 #define ASSERT_TRUE(x) assert(x)
@@ -58,32 +60,26 @@ struct TestCallback {
         add_orders.push_back({id, side, price, qty});
     }
 
-    void on_order_executed(OrderId id, Quantity qty) {
-        executions.push_back({id, qty});
-    }
+    void on_order_executed(OrderId id, Quantity qty) { executions.push_back({id, qty}); }
 
-    void on_order_cancelled(OrderId id, Quantity qty) {
-        cancels.push_back({id, qty});
-    }
+    void on_order_cancelled(OrderId id, Quantity qty) { cancels.push_back({id, qty}); }
 
-    void on_order_deleted(OrderId id) {
-        deletes.push_back(id);
-    }
+    void on_order_deleted(OrderId id) { deletes.push_back(id); }
 };
 
 // Build ITCH Add Order message (Type 'A')
 // Format: type(1) + locate(2) + tracking(2) + timestamp(6) + ref(8) + side(1) + shares(4) + stock(8) + price(4)
 std::vector<uint8_t> build_add_order(uint64_t order_ref, char side, uint32_t shares, uint32_t price) {
     std::vector<uint8_t> msg(36);
-    msg[0] = 'A';  // Message type
-    write_be16(&msg[1], 1);    // Stock locate
-    write_be16(&msg[3], 0);    // Tracking number
+    msg[0] = 'A';           // Message type
+    write_be16(&msg[1], 1); // Stock locate
+    write_be16(&msg[3], 0); // Tracking number
     // Timestamp (6 bytes) - leave as 0
-    write_be64(&msg[11], order_ref);  // Order reference
-    msg[19] = side;                    // Buy/Sell indicator
-    write_be32(&msg[20], shares);      // Shares
-    std::memcpy(&msg[24], "AAPL    ", 8);  // Stock symbol (8 chars, space padded)
-    write_be32(&msg[32], price);       // Price (4 decimal places)
+    write_be64(&msg[11], order_ref);      // Order reference
+    msg[19] = side;                       // Buy/Sell indicator
+    write_be32(&msg[20], shares);         // Shares
+    std::memcpy(&msg[24], "AAPL    ", 8); // Stock symbol (8 chars, space padded)
+    write_be32(&msg[32], price);          // Price (4 decimal places)
     return msg;
 }
 
@@ -91,13 +87,13 @@ std::vector<uint8_t> build_add_order(uint64_t order_ref, char side, uint32_t sha
 // Format: type(1) + locate(2) + tracking(2) + timestamp(6) + ref(8) + shares(4) + match(8)
 std::vector<uint8_t> build_order_executed(uint64_t order_ref, uint32_t shares) {
     std::vector<uint8_t> msg(31);
-    msg[0] = 'E';  // Message type
-    write_be16(&msg[1], 1);    // Stock locate
-    write_be16(&msg[3], 0);    // Tracking number
+    msg[0] = 'E';           // Message type
+    write_be16(&msg[1], 1); // Stock locate
+    write_be16(&msg[3], 0); // Tracking number
     // Timestamp (6 bytes) - leave as 0
-    write_be64(&msg[11], order_ref);  // Order reference
-    write_be32(&msg[19], shares);     // Executed shares
-    write_be64(&msg[23], 12345);      // Match number
+    write_be64(&msg[11], order_ref); // Order reference
+    write_be32(&msg[19], shares);    // Executed shares
+    write_be64(&msg[23], 12345);     // Match number
     return msg;
 }
 
@@ -105,12 +101,12 @@ std::vector<uint8_t> build_order_executed(uint64_t order_ref, uint32_t shares) {
 // Format: type(1) + locate(2) + tracking(2) + timestamp(6) + ref(8) + shares(4)
 std::vector<uint8_t> build_order_cancel(uint64_t order_ref, uint32_t shares) {
     std::vector<uint8_t> msg(23);
-    msg[0] = 'X';  // Message type
-    write_be16(&msg[1], 1);    // Stock locate
-    write_be16(&msg[3], 0);    // Tracking number
+    msg[0] = 'X';           // Message type
+    write_be16(&msg[1], 1); // Stock locate
+    write_be16(&msg[3], 0); // Tracking number
     // Timestamp (6 bytes) - leave as 0
-    write_be64(&msg[11], order_ref);  // Order reference
-    write_be32(&msg[19], shares);     // Cancelled shares
+    write_be64(&msg[11], order_ref); // Order reference
+    write_be32(&msg[19], shares);    // Cancelled shares
     return msg;
 }
 
@@ -118,11 +114,11 @@ std::vector<uint8_t> build_order_cancel(uint64_t order_ref, uint32_t shares) {
 // Format: type(1) + locate(2) + tracking(2) + timestamp(6) + ref(8)
 std::vector<uint8_t> build_order_delete(uint64_t order_ref) {
     std::vector<uint8_t> msg(19);
-    msg[0] = 'D';  // Message type
-    write_be16(&msg[1], 1);    // Stock locate
-    write_be16(&msg[3], 0);    // Tracking number
+    msg[0] = 'D';           // Message type
+    write_be16(&msg[1], 1); // Stock locate
+    write_be16(&msg[3], 0); // Tracking number
     // Timestamp (6 bytes) - leave as 0
-    write_be64(&msg[11], order_ref);  // Order reference
+    write_be64(&msg[11], order_ref); // Order reference
     return msg;
 }
 
@@ -131,7 +127,7 @@ TEST(test_parse_add_order) {
     TestCallback callback;
     FeedHandler<TestCallback> handler(callback);
 
-    auto msg = build_add_order(1001, 'B', 100, 150000);  // Buy 100 @ $15.00
+    auto msg = build_add_order(1001, 'B', 100, 150000); // Buy 100 @ $15.00
     handler.process_message(msg.data(), msg.size());
 
     ASSERT_EQ(callback.add_orders.size(), 1);
@@ -200,7 +196,7 @@ TEST(test_unknown_message_ignored) {
     FeedHandler<TestCallback> handler(callback);
 
     std::vector<uint8_t> msg(20, 0);
-    msg[0] = 'Z';  // Unknown type
+    msg[0] = 'Z'; // Unknown type
     handler.process_message(msg.data(), msg.size());
 
     ASSERT_EQ(callback.add_orders.size(), 0);

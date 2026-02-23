@@ -1,18 +1,20 @@
+#include "../include/ipc/shared_tuner_state.hpp"
+
 #include <cassert>
+#include <chrono>
 #include <iostream>
 #include <thread>
-#include <chrono>
 #include <vector>
-#include "../include/ipc/shared_tuner_state.hpp"
 
 using namespace hft::ipc;
 
 #define TEST(name) void name()
-#define RUN_TEST(name) do { \
-    std::cout << "  " << #name << "... "; \
-    name(); \
-    std::cout << "PASSED\n"; \
-} while(0)
+#define RUN_TEST(name)                                                                                                 \
+    do {                                                                                                               \
+        std::cout << "  " << #name << "... ";                                                                          \
+        name();                                                                                                        \
+        std::cout << "PASSED\n";                                                                                       \
+    } while (0)
 
 #define ASSERT_EQ(a, b) assert((a) == (b))
 #define ASSERT_TRUE(x) assert(x)
@@ -103,7 +105,7 @@ TEST(decision_is_valid) {
     TunerDecision d;
     d.clear();
 
-    ASSERT_FALSE(d.is_valid());  // sequence == 0
+    ASSERT_FALSE(d.is_valid()); // sequence == 0
 
     d.sequence = 1;
     ASSERT_TRUE(d.is_valid());
@@ -114,7 +116,7 @@ TEST(decision_is_valid) {
 // ============================================================================
 
 TEST(state_create_and_init) {
-    SharedTunerState::destroy(TEST_SHM_NAME);  // Clean up any previous
+    SharedTunerState::destroy(TEST_SHM_NAME); // Clean up any previous
 
     SharedTunerState* state = SharedTunerState::create(TEST_SHM_NAME);
     ASSERT_TRUE(state != nullptr);
@@ -170,7 +172,7 @@ TEST(state_write_and_read) {
     d1->set_symbol("BTCUSDT");
     d1->set_reason("Win rate 25% is unsustainable");
     d1->confidence = 80;
-    d1->action = 1;  // UpdateSymbolConfig
+    d1->action = 1; // UpdateSymbolConfig
     d1->add_change(TunerParam::Cooldown, 2000, 5000);
     d1->add_change(TunerParam::TargetPct, 2.0, 3.0);
     state->commit_write();
@@ -229,7 +231,7 @@ TEST(state_get_by_offset) {
     // Write 3 decisions
     for (int i = 0; i < 3; ++i) {
         auto* d = state->write_next();
-        d->confidence = (i + 1) * 10;  // 10, 20, 30
+        d->confidence = (i + 1) * 10; // 10, 20, 30
         state->commit_write();
     }
 
@@ -263,18 +265,16 @@ TEST(state_for_recent_decisions) {
     // Write 5 decisions
     for (int i = 0; i < 5; ++i) {
         auto* d = state->write_next();
-        d->confidence = (i + 1) * 10;  // 10, 20, 30, 40, 50
+        d->confidence = (i + 1) * 10; // 10, 20, 30, 40, 50
         state->commit_write();
     }
 
     // Iterate over last 3 (should be 50, 40, 30 in order)
     std::vector<uint8_t> observed;
-    state->for_recent_decisions(3, [&](const TunerDecision& d) {
-        observed.push_back(d.confidence);
-    });
+    state->for_recent_decisions(3, [&](const TunerDecision& d) { observed.push_back(d.confidence); });
 
     ASSERT_EQ(observed.size(), 3u);
-    ASSERT_EQ(observed[0], 50);  // newest first
+    ASSERT_EQ(observed[0], 50); // newest first
     ASSERT_EQ(observed[1], 40);
     ASSERT_EQ(observed[2], 30);
 

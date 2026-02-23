@@ -26,10 +26,10 @@
  *   Sharpe < 0    : Losing money on average
  */
 
-#include <cmath>
-#include <array>
-#include <cstdint>
 #include <algorithm>
+#include <array>
+#include <cmath>
+#include <cstdint>
 
 namespace hft {
 namespace strategy {
@@ -43,18 +43,14 @@ static constexpr size_t DEFAULT_SHARPE_WINDOW = 100;
  * Numerically stable, O(1) per update, no storage of all values.
  * But we also keep a ring buffer for rolling window.
  */
-template<size_t WindowSize = DEFAULT_SHARPE_WINDOW>
+template <size_t WindowSize = DEFAULT_SHARPE_WINDOW>
 class RollingSharpe {
 public:
     // Risk-free rate per trade (annualized 4% / ~2000 trades per year ≈ 0.002%)
     static constexpr double DEFAULT_RISK_FREE_PER_TRADE = 0.00002;
 
     explicit RollingSharpe(double risk_free_per_trade = DEFAULT_RISK_FREE_PER_TRADE)
-        : risk_free_(risk_free_per_trade)
-        , count_(0)
-        , head_(0)
-        , mean_(0)
-        , m2_(0)  // Sum of squared differences from mean
+        : risk_free_(risk_free_per_trade), count_(0), head_(0), mean_(0), m2_(0) // Sum of squared differences from mean
     {
         returns_.fill(0);
     }
@@ -85,8 +81,7 @@ public:
 
             // Update M2 (sum of squared deviations)
             // This is the tricky part for rolling window
-            m2_ = m2_ + (new_value - old_value) *
-                        (new_value - mean_ + old_value - old_mean);
+            m2_ = m2_ + (new_value - old_value) * (new_value - mean_ + old_value - old_mean);
 
             returns_[head_] = new_value;
             head_ = (head_ + 1) % WindowSize;
@@ -96,24 +91,21 @@ public:
     /**
      * Current mean return
      */
-    double mean() const {
-        return count_ > 0 ? mean_ : 0;
-    }
+    double mean() const { return count_ > 0 ? mean_ : 0; }
 
     /**
      * Current variance (sample variance)
      */
     double variance() const {
-        if (count_ < 2) return 0;
+        if (count_ < 2)
+            return 0;
         return m2_ / (count_ - 1);
     }
 
     /**
      * Current standard deviation
      */
-    double std_dev() const {
-        return std::sqrt(variance());
-    }
+    double std_dev() const { return std::sqrt(variance()); }
 
     /**
      * Sharpe Ratio = (Mean Return - Risk Free) / Std Dev
@@ -121,10 +113,12 @@ public:
      * Returns 0 if not enough data or zero volatility.
      */
     double sharpe_ratio() const {
-        if (count_ < 10) return 0;  // Need minimum samples
+        if (count_ < 10)
+            return 0; // Need minimum samples
 
         double sd = std_dev();
-        if (sd < 1e-10) return 0;  // Avoid division by zero
+        if (sd < 1e-10)
+            return 0; // Avoid division by zero
 
         return (mean_ - risk_free_) / sd;
     }
@@ -133,9 +127,7 @@ public:
      * Annualized Sharpe (assuming ~250 trading days, ~10 trades/day)
      * sqrt(2500) ≈ 50
      */
-    double annualized_sharpe() const {
-        return sharpe_ratio() * std::sqrt(2500.0);
-    }
+    double annualized_sharpe() const { return sharpe_ratio() * std::sqrt(2500.0); }
 
     /**
      * Number of returns in the window
@@ -171,10 +163,14 @@ public:
      */
     double position_multiplier() const {
         double s = sharpe_ratio();
-        if (s < 0) return 0;
-        if (s < 0.5) return 0.25;
-        if (s < 1.0) return 0.5;
-        if (s < 1.5) return 1.0;
+        if (s < 0)
+            return 0;
+        if (s < 0.5)
+            return 0.25;
+        if (s < 1.0)
+            return 0.5;
+        if (s < 1.5)
+            return 1.0;
         return 1.5;
     }
 
@@ -182,15 +178,17 @@ public:
      * Should we continue trading?
      */
     bool should_trade() const {
-        if (count_ < 20) return true;  // Not enough data, allow trading
-        return sharpe_ratio() > 0;      // Only trade if positive expectation
+        if (count_ < 20)
+            return true;           // Not enough data, allow trading
+        return sharpe_ratio() > 0; // Only trade if positive expectation
     }
 
     /**
      * Is strategy performing well?
      */
     bool is_performing_well() const {
-        if (!is_ready()) return true;  // Assume OK until proven otherwise
+        if (!is_ready())
+            return true; // Assume OK until proven otherwise
         return sharpe_ratio() >= 0.5;
     }
 
@@ -207,15 +205,8 @@ public:
     };
 
     Stats get_stats() const {
-        return Stats{
-            count_,
-            mean(),
-            std_dev(),
-            sharpe_ratio(),
-            annualized_sharpe(),
-            position_multiplier(),
-            should_trade()
-        };
+        return Stats{count_,        mean(), std_dev(), sharpe_ratio(), annualized_sharpe(), position_multiplier(),
+                     should_trade()};
     }
 
 private:
@@ -237,7 +228,8 @@ struct TradeReturn {
     bool is_long;
 
     double return_pct() const {
-        if (entry_price <= 0) return 0;
+        if (entry_price <= 0)
+            return 0;
         if (is_long) {
             return (exit_price - entry_price) / entry_price;
         } else {
@@ -254,5 +246,5 @@ struct TradeReturn {
     }
 };
 
-}  // namespace strategy
-}  // namespace hft
+} // namespace strategy
+} // namespace hft

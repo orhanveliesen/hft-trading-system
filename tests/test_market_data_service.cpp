@@ -8,21 +8,23 @@
  * - Notifies strategies on BBO changes
  */
 
-#include <cassert>
-#include <iostream>
-#include <vector>
-#include <cstring>
-#include <memory>
 #include "../include/market_data_service.hpp"
+
+#include <cassert>
+#include <cstring>
+#include <iostream>
+#include <memory>
+#include <vector>
 
 using namespace hft;
 
 #define TEST(name) void name()
-#define RUN_TEST(name) do { \
-    std::cout << "Running " << #name << "... "; \
-    name(); \
-    std::cout << "PASSED\n"; \
-} while(0)
+#define RUN_TEST(name)                                                                                                 \
+    do {                                                                                                               \
+        std::cout << "Running " << #name << "... ";                                                                    \
+        name();                                                                                                        \
+        std::cout << "PASSED\n";                                                                                       \
+    } while (0)
 
 #define ASSERT_EQ(a, b) assert((a) == (b))
 #define ASSERT_NE(a, b) assert((a) != (b))
@@ -41,14 +43,12 @@ std::unique_ptr<MarketDataService> create_test_service() {
     auto service = std::make_unique<MarketDataService>();
     reset_updates();
 
-    service->set_update_callback([](const MarketUpdate& update) {
-        received_updates.push_back(update);
-    });
+    service->set_update_callback([](const MarketUpdate& update) { received_updates.push_back(update); });
 
     // Add test symbols
     // Base price is the minimum price, range is the span
-    service->add_symbol(1, "AAPL", 145 * 10000, 200000);  // Base $145, range $20 (covers $145-$165)
-    service->add_symbol(2, "MSFT", 345 * 10000, 200000);  // Base $345, range $20 (covers $345-$365)
+    service->add_symbol(1, "AAPL", 145 * 10000, 200000); // Base $145, range $20 (covers $145-$165)
+    service->add_symbol(2, "MSFT", 345 * 10000, 200000); // Base $345, range $20 (covers $345-$365)
 
     return service;
 }
@@ -58,12 +58,10 @@ std::unique_ptr<MarketDataService> create_single_symbol_service() {
     auto service = std::make_unique<MarketDataService>();
     reset_updates();
 
-    service->set_update_callback([](const MarketUpdate& update) {
-        received_updates.push_back(update);
-    });
+    service->set_update_callback([](const MarketUpdate& update) { received_updates.push_back(update); });
 
     // Single symbol for deterministic behavior
-    service->add_symbol(1, "AAPL", 145 * 10000, 200000);  // Base $145, range $20 (covers $145-$165)
+    service->add_symbol(1, "AAPL", 145 * 10000, 200000); // Base $145, range $20 (covers $145-$165)
 
     return service;
 }
@@ -85,7 +83,7 @@ TEST(test_add_order_updates_book) {
     auto service = create_single_symbol_service();
 
     // Using generic interface: on_add_order(OrderId, Side, Price, Quantity)
-    service->on_add_order(1001, Side::Buy, 150 * 10000, 100);  // Buy 100 @ $150.00
+    service->on_add_order(1001, Side::Buy, 150 * 10000, 100); // Buy 100 @ $150.00
 
     // Verify book updated (uses first registered symbol in single-symbol mode)
     auto* book = service->get_order_book(1);
@@ -107,7 +105,7 @@ TEST(test_add_order_updates_book) {
 TEST(test_add_ask_order) {
     auto service = create_single_symbol_service();
 
-    service->on_add_order(2001, Side::Sell, 151 * 10000, 200);  // Sell 200 @ $151.00
+    service->on_add_order(2001, Side::Sell, 151 * 10000, 200); // Sell 200 @ $151.00
 
     auto* book = service->get_order_book(1);
     ASSERT_EQ(151 * 10000, book->best_ask());
@@ -119,13 +117,13 @@ TEST(test_order_execution) {
     auto service = create_single_symbol_service();
 
     // First add an order (use AAPL price range $145-$165)
-    service->on_add_order(3001, Side::Buy, 150 * 10000, 500);  // Buy 500 @ $150.00
+    service->on_add_order(3001, Side::Buy, 150 * 10000, 500); // Buy 500 @ $150.00
 
     // Now execute partial
     service->on_order_executed(3001, 200);
 
     auto* book = service->get_order_book(1);
-    ASSERT_EQ(300, book->bid_quantity_at(150 * 10000));  // 500 - 200 = 300
+    ASSERT_EQ(300, book->bid_quantity_at(150 * 10000)); // 500 - 200 = 300
     ASSERT_EQ(2, service->messages_processed());
 }
 
@@ -134,13 +132,13 @@ TEST(test_order_cancel) {
     auto service = create_single_symbol_service();
 
     // Add order
-    service->on_add_order(4001, Side::Sell, 152 * 10000, 1000);  // Sell 1000 @ $152.00
+    service->on_add_order(4001, Side::Sell, 152 * 10000, 1000); // Sell 1000 @ $152.00
 
     // Cancel partial
     service->on_order_cancelled(4001, 400);
 
     auto* book = service->get_order_book(1);
-    ASSERT_EQ(600, book->ask_quantity_at(152 * 10000));  // 1000 - 400 = 600
+    ASSERT_EQ(600, book->ask_quantity_at(152 * 10000)); // 1000 - 400 = 600
 }
 
 // Test 6: Order delete removes completely
@@ -148,7 +146,7 @@ TEST(test_order_delete) {
     auto service = create_single_symbol_service();
 
     // Add order
-    service->on_add_order(5001, Side::Buy, 149 * 10000, 100);  // Buy 100 @ $149.00
+    service->on_add_order(5001, Side::Buy, 149 * 10000, 100); // Buy 100 @ $149.00
 
     // Verify order exists
     auto* book = service->get_order_book(1);
@@ -200,10 +198,10 @@ TEST(test_bbo_spread_update) {
     auto service = create_single_symbol_service();
 
     // Add bid
-    service->on_add_order(11001, Side::Buy, 150 * 10000, 100);  // Bid $150.00
+    service->on_add_order(11001, Side::Buy, 150 * 10000, 100); // Bid $150.00
 
     // Add ask
-    service->on_add_order(11002, Side::Sell, 151 * 10000, 200);  // Ask $151.00
+    service->on_add_order(11002, Side::Sell, 151 * 10000, 200); // Ask $151.00
 
     // Last update should have both bid and ask
     ASSERT_GE(received_updates.size(), 2);

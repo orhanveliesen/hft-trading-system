@@ -3,11 +3,11 @@
 #include <atomic>
 #include <cstdint>
 #include <cstring>
+#include <fcntl.h>
+#include <stdexcept>
 #include <sys/mman.h>
 #include <sys/stat.h>
-#include <fcntl.h>
 #include <unistd.h>
-#include <stdexcept>
 
 namespace hft {
 namespace ipc {
@@ -40,7 +40,7 @@ namespace ipc {
  * @tparam T Element type (must be POD, preferably cache-aligned)
  * @tparam N Buffer size (must be power of 2)
  */
-template<typename T, size_t N = 65536>
+template <typename T, size_t N = 65536>
 class SharedRingBuffer {
     static_assert((N & (N - 1)) == 0, "N must be power of 2");
     static_assert(std::is_trivially_copyable<T>::value, "T must be trivially copyable");
@@ -54,12 +54,12 @@ public:
      * Cache-line aligned to prevent false sharing between head and tail
      */
     struct alignas(64) Header {
-        alignas(64) std::atomic<uint64_t> head{0};  // Producer writes here
-        alignas(64) std::atomic<uint64_t> tail{0};  // Consumer writes here
+        alignas(64) std::atomic<uint64_t> head{0}; // Producer writes here
+        alignas(64) std::atomic<uint64_t> tail{0}; // Consumer writes here
         uint64_t capacity{N};
         uint64_t element_size{sizeof(T)};
-        uint64_t magic{0x4846544F425356};  // "HFTOBSV" in hex
-        char padding[64 - 40];  // Pad to 64 bytes
+        uint64_t magic{0x4846544F425356}; // "HFTOBSV" in hex
+        char padding[64 - 40];            // Pad to 64 bytes
     };
 
     static_assert(sizeof(Header) == 128, "Header should be 128 bytes (2 cache lines)");
@@ -82,13 +82,12 @@ public:
      * @param create If true, create new (producer). If false, open existing (consumer).
      */
     explicit SharedRingBuffer(const char* name = DEFAULT_NAME, bool create = false)
-        : name_(name), is_producer_(create)
-    {
+        : name_(name), is_producer_(create) {
         mapped_size_ = sizeof(Header) + N * sizeof(T);
 
         if (create) {
             // Producer: create and initialize
-            shm_unlink(name_);  // Remove if exists
+            shm_unlink(name_); // Remove if exists
             fd_ = shm_open(name_, O_CREAT | O_RDWR, 0666);
             if (fd_ < 0) {
                 throw std::runtime_error("shm_open failed (create)");
@@ -100,8 +99,7 @@ public:
                 throw std::runtime_error("ftruncate failed");
             }
 
-            mapped_ = mmap(nullptr, mapped_size_, PROT_READ | PROT_WRITE,
-                          MAP_SHARED, fd_, 0);
+            mapped_ = mmap(nullptr, mapped_size_, PROT_READ | PROT_WRITE, MAP_SHARED, fd_, 0);
             if (mapped_ == MAP_FAILED) {
                 close(fd_);
                 shm_unlink(name_);
@@ -128,8 +126,7 @@ public:
                 throw std::runtime_error("shm_open failed (open) - is producer running?");
             }
 
-            mapped_ = mmap(nullptr, mapped_size_, PROT_READ | PROT_WRITE,
-                          MAP_SHARED, fd_, 0);
+            mapped_ = mmap(nullptr, mapped_size_, PROT_READ | PROT_WRITE, MAP_SHARED, fd_, 0);
             if (mapped_ == MAP_FAILED) {
                 close(fd_);
                 throw std::runtime_error("mmap failed");
@@ -176,11 +173,11 @@ public:
 
         // Check if full
         if (head - tail >= N) {
-            return false;  // Buffer full, drop event
+            return false; // Buffer full, drop event
         }
 
         // Write data
-        const size_t idx = head & (N - 1);  // Fast modulo
+        const size_t idx = head & (N - 1); // Fast modulo
         data_[idx] = item;
 
         // Publish (release ensures data write is visible before head update)
@@ -202,11 +199,11 @@ public:
 
         // Check if empty
         if (tail >= head) {
-            return false;  // Buffer empty
+            return false; // Buffer empty
         }
 
         // Read data
-        const size_t idx = tail & (N - 1);  // Fast modulo
+        const size_t idx = tail & (N - 1); // Fast modulo
         item = data_[idx];
 
         // Advance tail (release ensures read is complete before tail update)
@@ -242,13 +239,9 @@ public:
     bool full() const { return size() >= N; }
     size_t capacity() const { return N; }
 
-    uint64_t total_produced() const {
-        return header_->head.load(std::memory_order_acquire);
-    }
+    uint64_t total_produced() const { return header_->head.load(std::memory_order_acquire); }
 
-    uint64_t total_consumed() const {
-        return header_->tail.load(std::memory_order_acquire);
-    }
+    uint64_t total_consumed() const { return header_->tail.load(std::memory_order_acquire); }
 
     uint64_t dropped() const {
         // Can't track directly without additional counter
@@ -256,5 +249,5 @@ public:
     }
 };
 
-}  // namespace ipc
-}  // namespace hft
+} // namespace ipc
+} // namespace hft

@@ -9,11 +9,12 @@
  * All methods inline to eliminate function call overhead on hot path.
  */
 
-#include "types.hpp"
 #include "book_side.hpp"
+#include "types.hpp"
+
 #include <array>
-#include <memory>
 #include <functional>
+#include <memory>
 
 namespace hft {
 
@@ -22,16 +23,11 @@ public:
     using TradeCallback = std::function<void(const Trade&)>;
 
     inline MatchingEngine(Price base_price, size_t price_range)
-        : order_pool_(std::make_unique<std::array<Order, MAX_ORDERS>>())
-        , level_pool_(std::make_unique<std::array<PriceLevel, MAX_PRICE_LEVELS>>())
-        , free_orders_(nullptr)
-        , free_levels_(nullptr)
-        , order_index_(std::make_unique<std::array<Order*, MAX_ORDERS>>())
-        , bids_(base_price, price_range)
-        , asks_(base_price, price_range)
-        , trade_callback_(nullptr)
-        , current_timestamp_(0)
-    {
+        : order_pool_(std::make_unique<std::array<Order, MAX_ORDERS>>()),
+          level_pool_(std::make_unique<std::array<PriceLevel, MAX_PRICE_LEVELS>>()), free_orders_(nullptr),
+          free_levels_(nullptr), order_index_(std::make_unique<std::array<Order*, MAX_ORDERS>>()),
+          bids_(base_price, price_range), asks_(base_price, price_range), trade_callback_(nullptr),
+          current_timestamp_(0) {
         // Initialize order free list
         for (size_t i = 0; i < MAX_ORDERS - 1; ++i) {
             (*order_pool_)[i].next = &(*order_pool_)[i + 1];
@@ -51,13 +47,11 @@ public:
     }
 
     // Set callback for trade notifications
-    inline void set_trade_callback(TradeCallback callback) {
-        trade_callback_ = std::move(callback);
-    }
+    inline void set_trade_callback(TradeCallback callback) { trade_callback_ = std::move(callback); }
 
     // Add order - may trigger matching
     inline OrderResult add_order(OrderId id, Side side, Price price, Quantity quantity,
-                                  TraderId trader_id = NO_TRADER) {
+                                 TraderId trader_id = NO_TRADER) {
         // Validate inputs
         if (!is_valid_order_id(id)) {
             return OrderResult::InvalidOrderId;
@@ -111,20 +105,20 @@ public:
 
     // Cancel resting order
     inline bool cancel_order(OrderId id) {
-        if (!is_valid_order_id(id)) return false;
+        if (!is_valid_order_id(id))
+            return false;
 
         Order* order = (*order_index_)[id];
-        if (!order) return false;
+        if (!order)
+            return false;
 
-        PriceLevel* level = (order->side == Side::Buy)
-            ? bids_.find_level(order->price)
-            : asks_.find_level(order->price);
+        PriceLevel* level =
+            (order->side == Side::Buy) ? bids_.find_level(order->price) : asks_.find_level(order->price);
 
         if (level) {
             remove_order_from_level(order, level);
-            PriceLevel* removed = (order->side == Side::Buy)
-                ? bids_.remove_level_if_empty(level)
-                : asks_.remove_level_if_empty(level);
+            PriceLevel* removed =
+                (order->side == Side::Buy) ? bids_.remove_level_if_empty(level) : asks_.remove_level_if_empty(level);
             if (removed) {
                 deallocate_level(removed);
             }
@@ -136,21 +130,13 @@ public:
     }
 
     // Market data queries
-    inline Price best_bid() const {
-        return bids_.best_price();
-    }
+    inline Price best_bid() const { return bids_.best_price(); }
 
-    inline Price best_ask() const {
-        return asks_.best_price();
-    }
+    inline Price best_ask() const { return asks_.best_price(); }
 
-    inline Quantity bid_quantity_at(Price price) const {
-        return bids_.quantity_at(price);
-    }
+    inline Quantity bid_quantity_at(Price price) const { return bids_.quantity_at(price); }
 
-    inline Quantity ask_quantity_at(Price price) const {
-        return asks_.quantity_at(price);
-    }
+    inline Quantity ask_quantity_at(Price price) const { return asks_.quantity_at(price); }
 
 private:
     // Pre-allocated pools
@@ -176,7 +162,8 @@ private:
 
     // Pool management - Orders
     inline Order* allocate_order() {
-        if (!free_orders_) return nullptr;
+        if (!free_orders_)
+            return nullptr;
         Order* order = free_orders_;
         free_orders_ = free_orders_->next;
         order->prev = nullptr;
@@ -191,7 +178,8 @@ private:
 
     // Pool management - Price Levels
     inline PriceLevel* allocate_level() {
-        if (!free_levels_) return nullptr;
+        if (!free_levels_)
+            return nullptr;
         PriceLevel* level = free_levels_;
         free_levels_ = free_levels_->next;
         level->prev = nullptr;
@@ -216,11 +204,12 @@ private:
         while (remaining > 0) {
             Price best_ask_price = asks_.best_price();
             if (best_ask_price == INVALID_PRICE || best_ask_price > limit_price) {
-                break;  // No more matchable asks
+                break; // No more matchable asks
             }
 
             PriceLevel* level = asks_.find_level(best_ask_price);
-            if (!level || !level->head) break;
+            if (!level || !level->head)
+                break;
 
             Order* passive = level->head;
 
@@ -260,11 +249,12 @@ private:
         while (remaining > 0) {
             Price best_bid_price = bids_.best_price();
             if (best_bid_price == INVALID_PRICE || best_bid_price < limit_price) {
-                break;  // No more matchable bids
+                break; // No more matchable bids
             }
 
             PriceLevel* level = bids_.find_level(best_bid_price);
-            if (!level || !level->head) break;
+            if (!level || !level->head)
+                break;
 
             Order* passive = level->head;
 
@@ -297,18 +287,17 @@ private:
     }
 
     inline void execute_trade(Order* aggressive, Order* passive, Quantity qty) {
-        if (!trade_callback_) return;
+        if (!trade_callback_)
+            return;
 
-        Trade trade{
-            aggressive->id,
-            passive->id,
-            aggressive->trader_id,
-            passive->trader_id,
-            passive->price,  // Trade at passive order's price
-            qty,
-            aggressive->side,
-            current_timestamp_
-        };
+        Trade trade{aggressive->id,
+                    passive->id,
+                    aggressive->trader_id,
+                    passive->trader_id,
+                    passive->price, // Trade at passive order's price
+                    qty,
+                    aggressive->side,
+                    current_timestamp_};
 
         trade_callback_(trade);
     }
@@ -316,8 +305,7 @@ private:
     // Self-trade prevention
     inline bool would_self_trade(const Order* aggressive, const Order* passive) const {
         // Self-trade if same non-zero trader
-        return aggressive->trader_id != NO_TRADER &&
-               aggressive->trader_id == passive->trader_id;
+        return aggressive->trader_id != NO_TRADER && aggressive->trader_id == passive->trader_id;
     }
 
     // Order placement
@@ -328,7 +316,8 @@ private:
             level = bids_.find_level(order->price);
             if (!level) {
                 level = allocate_level();
-                if (!level) return;  // Pool exhausted
+                if (!level)
+                    return; // Pool exhausted
                 level->price = order->price;
                 bids_.insert_level(level);
             }
@@ -336,7 +325,8 @@ private:
             level = asks_.find_level(order->price);
             if (!level) {
                 level = allocate_level();
-                if (!level) return;  // Pool exhausted
+                if (!level)
+                    return; // Pool exhausted
                 level->price = order->price;
                 asks_.insert_level(level);
             }
@@ -376,12 +366,11 @@ private:
     }
 
     // Order index management
-    __attribute__((always_inline))
-    void clear_order_index(OrderId id) {
+    __attribute__((always_inline)) void clear_order_index(OrderId id) {
         if (id < MAX_ORDERS) {
             (*order_index_)[id] = nullptr;
         }
     }
 };
 
-}  // namespace hft
+} // namespace hft

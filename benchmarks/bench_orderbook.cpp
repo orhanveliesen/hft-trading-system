@@ -1,12 +1,13 @@
-#include <iostream>
-#include <iomanip>
-#include <random>
-#include "../include/types.hpp"
-#include "../include/orderbook.hpp"
-#include "../include/order_sender.hpp"
-#include "../include/trading_engine.hpp"
-#include "../include/benchmark/timer.hpp"
 #include "../include/benchmark/histogram.hpp"
+#include "../include/benchmark/timer.hpp"
+#include "../include/order_sender.hpp"
+#include "../include/orderbook.hpp"
+#include "../include/trading_engine.hpp"
+#include "../include/types.hpp"
+
+#include <iomanip>
+#include <iostream>
+#include <random>
 
 using namespace hft;
 using namespace hft::benchmark;
@@ -92,13 +93,13 @@ void bench_execute_order(OrderBook& book, double freq_ghz) {
     for (size_t i = 0; i < BENCH_OPS; ++i) {
         Price price = 100000 + (i % 1000);
         Side side = (i % 2 == 0) ? Side::Buy : Side::Sell;
-        book.add_order(i, side, price, 1000);  // Large quantity for partial executions
+        book.add_order(i, side, price, 1000); // Large quantity for partial executions
     }
 
     // Benchmark partial executions
     for (size_t i = 0; i < BENCH_OPS; ++i) {
         uint64_t start = RdtscTimer::now_serialized();
-        book.execute_order(i, 10);  // Partial execution
+        book.execute_order(i, 10); // Partial execution
         uint64_t end = RdtscTimer::now_serialized();
 
         hist.record(end - start);
@@ -119,7 +120,7 @@ void bench_best_bid_ask(OrderBook& book, double freq_ghz) {
     }
 
     // Benchmark best bid/ask queries
-    volatile Price bid, ask;  // Prevent optimization
+    volatile Price bid, ask; // Prevent optimization
     for (size_t i = 0; i < BENCH_OPS; ++i) {
         uint64_t start = RdtscTimer::now_serialized();
         bid = book.best_bid();
@@ -129,12 +130,13 @@ void bench_best_bid_ask(OrderBook& book, double freq_ghz) {
         hist.record(end - start);
     }
 
-    (void)bid; (void)ask;
+    (void)bid;
+    (void)ask;
     print_stats("Best Bid/Ask Query", hist, freq_ghz);
 }
 
 void bench_throughput(OrderBook& book, double freq_ghz) {
-    constexpr size_t OPS = 1000000;  // 1M ops
+    constexpr size_t OPS = 1000000; // 1M ops
 
     book = OrderBook();
 
@@ -170,9 +172,7 @@ void bench_symbol_world_lookup_by_id(BenchEngine& engine, double freq_ghz) {
 
     // Get the symbol IDs we added
     std::vector<Symbol> symbols;
-    engine.for_each_symbol([&](const SymbolWorld& world) {
-        symbols.push_back(world.id());
-    });
+    engine.for_each_symbol([&](const SymbolWorld& world) { symbols.push_back(world.id()); });
 
     // Warmup
     for (size_t i = 0; i < WARMUP_OPS; ++i) {
@@ -200,9 +200,7 @@ void bench_symbol_world_lookup_by_ticker(BenchEngine& engine, double freq_ghz) {
 
     // Get tickers
     std::vector<std::string> tickers;
-    engine.for_each_symbol([&](const SymbolWorld& world) {
-        tickers.push_back(world.ticker());
-    });
+    engine.for_each_symbol([&](const SymbolWorld& world) { tickers.push_back(world.ticker()); });
 
     // Warmup
     for (size_t i = 0; i < WARMUP_OPS; ++i) {
@@ -230,9 +228,7 @@ void bench_symbol_world_full_path(BenchEngine& engine, double freq_ghz) {
 
     // Get symbol IDs
     std::vector<Symbol> symbols;
-    engine.for_each_symbol([&](const SymbolWorld& world) {
-        symbols.push_back(world.id());
-    });
+    engine.for_each_symbol([&](const SymbolWorld& world) { symbols.push_back(world.id()); });
 
     // Pre-fill order books
     for (auto id : symbols) {
@@ -254,7 +250,8 @@ void bench_symbol_world_full_path(BenchEngine& engine, double freq_ghz) {
         volatile Price ask = world->book().best_ask();
         uint64_t end = RdtscTimer::now_serialized();
 
-        (void)bid; (void)ask;
+        (void)bid;
+        (void)ask;
         hist.record(end - start);
     }
 
@@ -267,7 +264,8 @@ void bench_direct_vs_engine_comparison(BenchEngine& engine, OrderBook& direct_bo
     // Get first symbol
     Symbol sym_id = 0;
     engine.for_each_symbol([&](const SymbolWorld& world) {
-        if (sym_id == 0) sym_id = world.id();
+        if (sym_id == 0)
+            sym_id = world.id();
     });
 
     // Pre-fill both books identically
@@ -288,7 +286,8 @@ void bench_direct_vs_engine_comparison(BenchEngine& engine, OrderBook& direct_bo
         volatile Price ask = direct_book.best_ask();
         uint64_t end = RdtscTimer::now_serialized();
 
-        (void)bid; (void)ask;
+        (void)bid;
+        (void)ask;
         hist_direct.record(end - start);
     }
 
@@ -300,7 +299,8 @@ void bench_direct_vs_engine_comparison(BenchEngine& engine, OrderBook& direct_bo
         volatile Price ask = w->book().best_ask();
         uint64_t end = RdtscTimer::now_serialized();
 
-        (void)bid; (void)ask;
+        (void)bid;
+        (void)ask;
         hist_engine.record(end - start);
     }
 

@@ -1,13 +1,14 @@
 #pragma once
 
 #include "../types.hpp"
-#include <unordered_map>
-#include <map>
-#include <vector>
+
+#include <cmath>
 #include <deque>
 #include <functional>
+#include <map>
 #include <tuple>
-#include <cmath>
+#include <unordered_map>
+#include <vector>
 
 namespace hft {
 namespace paper {
@@ -16,32 +17,44 @@ namespace paper {
  * Fill Confidence Levels
  */
 enum class FillConfidence : uint8_t {
-    Confirmed,      // 100% - Order behind us got filled
-    VeryLikely,     // 90%  - Most of queue ahead cleared
-    Likely,         // 70%  - Significant volume traded
-    Possible,       // 50%  - Price touched our level
-    Unlikely        // 20%  - Still waiting in queue
+    Confirmed,  // 100% - Order behind us got filled
+    VeryLikely, // 90%  - Most of queue ahead cleared
+    Likely,     // 70%  - Significant volume traded
+    Possible,   // 50%  - Price touched our level
+    Unlikely    // 20%  - Still waiting in queue
 };
 
 inline const char* confidence_to_string(FillConfidence conf) {
     switch (conf) {
-        case FillConfidence::Confirmed:  return "CONFIRMED";
-        case FillConfidence::VeryLikely: return "VERY_LIKELY";
-        case FillConfidence::Likely:     return "LIKELY";
-        case FillConfidence::Possible:   return "POSSIBLE";
-        case FillConfidence::Unlikely:   return "UNLIKELY";
-        default: return "UNKNOWN";
+    case FillConfidence::Confirmed:
+        return "CONFIRMED";
+    case FillConfidence::VeryLikely:
+        return "VERY_LIKELY";
+    case FillConfidence::Likely:
+        return "LIKELY";
+    case FillConfidence::Possible:
+        return "POSSIBLE";
+    case FillConfidence::Unlikely:
+        return "UNLIKELY";
+    default:
+        return "UNKNOWN";
     }
 }
 
 inline double confidence_weight(FillConfidence conf) {
     switch (conf) {
-        case FillConfidence::Confirmed:  return 1.0;
-        case FillConfidence::VeryLikely: return 0.85;
-        case FillConfidence::Likely:     return 0.65;
-        case FillConfidence::Possible:   return 0.40;
-        case FillConfidence::Unlikely:   return 0.10;
-        default: return 0.0;
+    case FillConfidence::Confirmed:
+        return 1.0;
+    case FillConfidence::VeryLikely:
+        return 0.85;
+    case FillConfidence::Likely:
+        return 0.65;
+    case FillConfidence::Possible:
+        return 0.40;
+    case FillConfidence::Unlikely:
+        return 0.10;
+    default:
+        return 0.0;
     }
 }
 
@@ -49,11 +62,11 @@ inline double confidence_weight(FillConfidence conf) {
  * Queue Entry - Represents an order in the queue
  */
 struct QueueEntry {
-    uint64_t sequence;      // Exchange sequence number (order arrival time)
+    uint64_t sequence; // Exchange sequence number (order arrival time)
     Quantity quantity;
     Quantity remaining;
     bool is_ours;
-    OrderId our_order_id;   // Only valid if is_ours
+    OrderId our_order_id; // Only valid if is_ours
 };
 
 /**
@@ -66,18 +79,19 @@ struct PriceLevelQueue {
 
     // Our order info
     bool has_our_order = false;
-    size_t our_position = 0;        // Index in queue
+    size_t our_position = 0; // Index in queue
     uint64_t our_sequence = 0;
     Quantity our_original_qty = 0;
     Quantity our_remaining = 0;
     OrderId our_order_id = 0;
 
     // Tracking
-    Quantity total_ahead_at_entry = 0;  // Queue depth when we joined
-    Quantity volume_traded = 0;          // Total volume traded at this level
+    Quantity total_ahead_at_entry = 0; // Queue depth when we joined
+    Quantity volume_traded = 0;        // Total volume traded at this level
 
     Quantity queue_ahead() const {
-        if (!has_our_order || our_position == 0) return 0;
+        if (!has_our_order || our_position == 0)
+            return 0;
 
         Quantity ahead = 0;
         for (size_t i = 0; i < our_position && i < queue.size(); ++i) {
@@ -98,7 +112,7 @@ struct FillResult {
     uint64_t fill_time_ns = 0;
 
     // For stats
-    uint64_t queue_wait_ns = 0;     // Time spent in queue
+    uint64_t queue_wait_ns = 0; // Time spent in queue
     Quantity queue_ahead_at_fill = 0;
 };
 
@@ -121,9 +135,9 @@ struct PaperOrderState {
  * Queue Fill Detector Configuration
  */
 struct QueueFillDetectorConfig {
-    bool pessimistic_mode = true;   // Only count confirmed fills
-    bool track_probabilistic = true; // Also track likely fills for stats
-    double partial_fill_threshold = 0.9;  // VeryLikely when 90% of queue traded
+    bool pessimistic_mode = true;        // Only count confirmed fills
+    bool track_probabilistic = true;     // Also track likely fills for stats
+    double partial_fill_threshold = 0.9; // VeryLikely when 90% of queue traded
 };
 
 /**
@@ -141,54 +155,47 @@ public:
     using FillCallback = std::function<void(OrderId, const FillResult&)>;
     using Config = QueueFillDetectorConfig;
 
-    explicit QueueFillDetector(const Config& config = Config())
-        : config_(config)
-        , next_sequence_(1)
-    {}
+    explicit QueueFillDetector(const Config& config = Config()) : config_(config), next_sequence_(1) {}
 
     /**
      * Set initial queue depth ahead of our order
      * Call this AFTER register_order to simulate L2 snapshot data
      */
-    void set_initial_queue_depth(Symbol symbol, Side side, Price price,
-                                  Quantity depth_ahead) {
+    void set_initial_queue_depth(Symbol symbol, Side side, Price price, Quantity depth_ahead) {
         auto key = make_key(symbol, price, side);
         auto it = levels_.find(key);
-        if (it == levels_.end()) return;
+        if (it == levels_.end())
+            return;
 
         auto& level = it->second;
-        if (!level.has_our_order) return;
+        if (!level.has_our_order)
+            return;
 
         // Insert the depth ahead of our order (at front of queue)
-        level.queue.insert(level.queue.begin(), QueueEntry{
-            .sequence = 0,  // Low sequence = ahead of us
-            .quantity = depth_ahead,
-            .remaining = depth_ahead,
-            .is_ours = false,
-            .our_order_id = 0
-        });
+        level.queue.insert(level.queue.begin(), QueueEntry{.sequence = 0, // Low sequence = ahead of us
+                                                           .quantity = depth_ahead,
+                                                           .remaining = depth_ahead,
+                                                           .is_ours = false,
+                                                           .our_order_id = 0});
 
-        level.our_position = 1;  // Now we're at position 1
+        level.our_position = 1; // Now we're at position 1
         level.total_ahead_at_entry = depth_ahead;
     }
 
     /**
      * Register our order
      */
-    void register_order(OrderId id, Symbol symbol, Side side,
-                       Price price, Quantity qty, uint64_t timestamp_ns) {
+    void register_order(OrderId id, Symbol symbol, Side side, Price price, Quantity qty, uint64_t timestamp_ns) {
         // Create order state
-        PaperOrderState order{
-            .id = id,
-            .symbol = symbol,
-            .side = side,
-            .price = price,
-            .quantity = qty,
-            .filled = 0,
-            .submit_time_ns = timestamp_ns,
-            .sequence = next_sequence_++,
-            .is_active = true
-        };
+        PaperOrderState order{.id = id,
+                              .symbol = symbol,
+                              .side = side,
+                              .price = price,
+                              .quantity = qty,
+                              .filled = 0,
+                              .submit_time_ns = timestamp_ns,
+                              .sequence = next_sequence_++,
+                              .is_active = true};
 
         orders_[id] = order;
 
@@ -209,12 +216,7 @@ public:
 
         // Add our entry to queue
         level.queue.push_back(QueueEntry{
-            .sequence = order.sequence,
-            .quantity = qty,
-            .remaining = qty,
-            .is_ours = true,
-            .our_order_id = id
-        });
+            .sequence = order.sequence, .quantity = qty, .remaining = qty, .is_ours = true, .our_order_id = id});
 
         order_to_level_[id] = key;
     }
@@ -223,25 +225,23 @@ public:
      * L2 Update - Track queue changes
      * Call this when order book level changes
      */
-    void on_l2_update(Symbol symbol, Side side, Price price,
-                     Quantity old_size, Quantity new_size,
-                     uint64_t timestamp_ns) {
+    void on_l2_update(Symbol symbol, Side side, Price price, Quantity old_size, Quantity new_size,
+                      uint64_t timestamp_ns) {
         auto key = make_key(symbol, price, side);
         auto it = levels_.find(key);
-        if (it == levels_.end()) return;
+        if (it == levels_.end())
+            return;
 
         auto& level = it->second;
         int64_t delta = static_cast<int64_t>(new_size) - static_cast<int64_t>(old_size);
 
         if (delta > 0) {
             // New order(s) added - goes to back of queue
-            level.queue.push_back(QueueEntry{
-                .sequence = next_sequence_++,
-                .quantity = static_cast<Quantity>(delta),
-                .remaining = static_cast<Quantity>(delta),
-                .is_ours = false,
-                .our_order_id = 0
-            });
+            level.queue.push_back(QueueEntry{.sequence = next_sequence_++,
+                                             .quantity = static_cast<Quantity>(delta),
+                                             .remaining = static_cast<Quantity>(delta),
+                                             .is_ours = false,
+                                             .our_order_id = 0});
         } else if (delta < 0) {
             // Order(s) removed - could be cancel or fill
             // We'll get more info from on_trade
@@ -257,21 +257,21 @@ public:
      * @param aggressor_side The side that initiated the trade (taker)
      * @param passive_sequence Sequence of the passive (maker) order if known
      */
-    void on_trade(Symbol symbol, Price price, Quantity qty,
-                 Side aggressor_side, uint64_t timestamp_ns,
-                 uint64_t passive_sequence = 0) {
-
+    void on_trade(Symbol symbol, Price price, Quantity qty, Side aggressor_side, uint64_t timestamp_ns,
+                  uint64_t passive_sequence = 0) {
         // Passive side is opposite of aggressor
         Side passive_side = (aggressor_side == Side::Buy) ? Side::Sell : Side::Buy;
 
         auto key = make_key(symbol, price, passive_side);
         auto it = levels_.find(key);
-        if (it == levels_.end()) return;
+        if (it == levels_.end())
+            return;
 
         auto& level = it->second;
         level.volume_traded += qty;
 
-        if (!level.has_our_order) return;
+        if (!level.has_our_order)
+            return;
 
         // PESSIMISTIC CHECK: Did an order AFTER us get filled?
         if (passive_sequence > 0 && passive_sequence > level.our_sequence) {
@@ -319,7 +319,8 @@ public:
      */
     void cancel_order(OrderId id) {
         auto it = orders_.find(id);
-        if (it == orders_.end()) return;
+        if (it == orders_.end())
+            return;
 
         it->second.is_active = false;
 
@@ -369,7 +370,8 @@ public:
     size_t active_orders() const {
         size_t count = 0;
         for (const auto& [id, order] : orders_) {
-            if (order.is_active) count++;
+            if (order.is_active)
+                count++;
         }
         return count;
     }
@@ -386,9 +388,7 @@ private:
 
     FillCallback on_fill_;
 
-    static LevelKey make_key(Symbol s, Price p, Side side) {
-        return std::make_tuple(s, p, side);
-    }
+    static LevelKey make_key(Symbol s, Price p, Side side) { return std::make_tuple(s, p, side); }
 
     Quantity calculate_total_remaining(const PriceLevelQueue& level) const {
         Quantity total = 0;
@@ -400,8 +400,7 @@ private:
         return total;
     }
 
-    void remove_from_front(PriceLevelQueue& level, Quantity qty,
-                          uint64_t timestamp_ns) {
+    void remove_from_front(PriceLevelQueue& level, Quantity qty, uint64_t timestamp_ns) {
         Quantity remaining = qty;
         std::vector<OrderId> filled_orders;
 
@@ -446,29 +445,30 @@ private:
     }
 
     void confirm_fill(PriceLevelQueue& level, uint64_t timestamp_ns) {
-        if (!level.has_our_order) return;
+        if (!level.has_our_order)
+            return;
 
         auto order_it = orders_.find(level.our_order_id);
-        if (order_it == orders_.end()) return;
+        if (order_it == orders_.end())
+            return;
 
         auto& order = order_it->second;
         Quantity fill_qty = order.quantity - order.filled;
 
-        if (fill_qty == 0) return;
+        if (fill_qty == 0)
+            return;
 
         order.filled = order.quantity;
         order.is_active = false;
         level.has_our_order = false;
 
-        FillResult result{
-            .filled = true,
-            .confidence = FillConfidence::Confirmed,
-            .fill_quantity = fill_qty,
-            .fill_price = level.price,
-            .fill_time_ns = timestamp_ns,
-            .queue_wait_ns = timestamp_ns - order.submit_time_ns,
-            .queue_ahead_at_fill = 0
-        };
+        FillResult result{.filled = true,
+                          .confidence = FillConfidence::Confirmed,
+                          .fill_quantity = fill_qty,
+                          .fill_price = level.price,
+                          .fill_time_ns = timestamp_ns,
+                          .queue_wait_ns = timestamp_ns - order.submit_time_ns,
+                          .queue_ahead_at_fill = 0};
 
         if (on_fill_) {
             on_fill_(order.id, result);
@@ -477,26 +477,27 @@ private:
 
     void confirm_fill_order(OrderId order_id, Price fill_price, uint64_t timestamp_ns) {
         auto order_it = orders_.find(order_id);
-        if (order_it == orders_.end()) return;
+        if (order_it == orders_.end())
+            return;
 
         auto& order = order_it->second;
-        if (!order.is_active) return;
+        if (!order.is_active)
+            return;
 
         Quantity fill_qty = order.quantity - order.filled;
-        if (fill_qty == 0) return;
+        if (fill_qty == 0)
+            return;
 
         order.filled = order.quantity;
         order.is_active = false;
 
-        FillResult result{
-            .filled = true,
-            .confidence = FillConfidence::Confirmed,
-            .fill_quantity = fill_qty,
-            .fill_price = fill_price,
-            .fill_time_ns = timestamp_ns,
-            .queue_wait_ns = timestamp_ns - order.submit_time_ns,
-            .queue_ahead_at_fill = 0
-        };
+        FillResult result{.filled = true,
+                          .confidence = FillConfidence::Confirmed,
+                          .fill_quantity = fill_qty,
+                          .fill_price = fill_price,
+                          .fill_time_ns = timestamp_ns,
+                          .queue_wait_ns = timestamp_ns - order.submit_time_ns,
+                          .queue_ahead_at_fill = 0};
 
         if (on_fill_) {
             on_fill_(order_id, result);
@@ -513,15 +514,15 @@ private:
         }
     }
 
-    void check_probabilistic_fill(PriceLevelQueue& level,
-                                  uint64_t timestamp_ns) {
-        if (!level.has_our_order) return;
+    void check_probabilistic_fill(PriceLevelQueue& level, uint64_t timestamp_ns) {
+        if (!level.has_our_order)
+            return;
 
         // Calculate fill probability based on volume traded
         Quantity ahead = level.queue_ahead();
         double fill_ratio = (level.total_ahead_at_entry > 0)
-            ? static_cast<double>(level.volume_traded) / level.total_ahead_at_entry
-            : 0.0;
+                                ? static_cast<double>(level.volume_traded) / level.total_ahead_at_entry
+                                : 0.0;
 
         FillConfidence conf;
         if (fill_ratio >= config_.partial_fill_threshold) {
@@ -535,32 +536,28 @@ private:
         }
 
         // Store for stats (don't trigger callback in pessimistic mode)
-        probabilistic_estimates_[level.our_order_id] = FillResult{
-            .filled = (conf == FillConfidence::VeryLikely),
-            .confidence = conf,
-            .fill_quantity = level.our_original_qty,
-            .fill_price = level.price,
-            .fill_time_ns = timestamp_ns,
-            .queue_wait_ns = timestamp_ns - orders_[level.our_order_id].submit_time_ns,
-            .queue_ahead_at_fill = ahead
-        };
+        probabilistic_estimates_[level.our_order_id] =
+            FillResult{.filled = (conf == FillConfidence::VeryLikely),
+                       .confidence = conf,
+                       .fill_quantity = level.our_original_qty,
+                       .fill_price = level.price,
+                       .fill_time_ns = timestamp_ns,
+                       .queue_wait_ns = timestamp_ns - orders_[level.our_order_id].submit_time_ns,
+                       .queue_ahead_at_fill = ahead};
     }
 
-    FillResult calculate_fill_estimate(const PaperOrderState& order,
-                                       const PriceLevelQueue& level) const {
+    FillResult calculate_fill_estimate(const PaperOrderState& order, const PriceLevelQueue& level) const {
         if (order.filled >= order.quantity) {
-            return FillResult{
-                .filled = true,
-                .confidence = FillConfidence::Confirmed,
-                .fill_quantity = order.quantity,
-                .fill_price = level.price
-            };
+            return FillResult{.filled = true,
+                              .confidence = FillConfidence::Confirmed,
+                              .fill_quantity = order.quantity,
+                              .fill_price = level.price};
         }
 
         Quantity ahead = level.queue_ahead();
         double fill_ratio = (level.total_ahead_at_entry > 0)
-            ? static_cast<double>(level.volume_traded) / level.total_ahead_at_entry
-            : 0.0;
+                                ? static_cast<double>(level.volume_traded) / level.total_ahead_at_entry
+                                : 0.0;
 
         FillConfidence conf;
         if (fill_ratio >= config_.partial_fill_threshold) {
@@ -573,13 +570,11 @@ private:
             conf = FillConfidence::Unlikely;
         }
 
-        return FillResult{
-            .filled = false,
-            .confidence = conf,
-            .fill_quantity = 0,
-            .fill_price = level.price,
-            .queue_ahead_at_fill = ahead
-        };
+        return FillResult{.filled = false,
+                          .confidence = conf,
+                          .fill_quantity = 0,
+                          .fill_price = level.price,
+                          .queue_ahead_at_fill = ahead};
     }
 
     std::unordered_map<OrderId, FillResult> probabilistic_estimates_;
@@ -603,20 +598,20 @@ struct PaperTradingStats {
 
     void record_fill(const FillResult& result, double pnl) {
         switch (result.confidence) {
-            case FillConfidence::Confirmed:
-                confirmed_fills++;
-                confirmed_pnl += pnl;
-                break;
-            case FillConfidence::VeryLikely:
-            case FillConfidence::Likely:
-                likely_fills++;
-                likely_pnl += pnl;
-                break;
-            case FillConfidence::Possible:
-            case FillConfidence::Unlikely:
-                possible_fills++;
-                possible_pnl += pnl;
-                break;
+        case FillConfidence::Confirmed:
+            confirmed_fills++;
+            confirmed_pnl += pnl;
+            break;
+        case FillConfidence::VeryLikely:
+        case FillConfidence::Likely:
+            likely_fills++;
+            likely_pnl += pnl;
+            break;
+        case FillConfidence::Possible:
+        case FillConfidence::Unlikely:
+            possible_fills++;
+            possible_pnl += pnl;
+            break;
         }
 
         if (result.filled) {
@@ -625,23 +620,18 @@ struct PaperTradingStats {
         }
     }
 
-    double pessimistic_pnl() const {
-        return confirmed_pnl;
-    }
+    double pessimistic_pnl() const { return confirmed_pnl; }
 
-    double expected_pnl() const {
-        return confirmed_pnl + likely_pnl * 0.7;
-    }
+    double expected_pnl() const { return confirmed_pnl + likely_pnl * 0.7; }
 
-    double optimistic_pnl() const {
-        return confirmed_pnl + likely_pnl + possible_pnl;
-    }
+    double optimistic_pnl() const { return confirmed_pnl + likely_pnl + possible_pnl; }
 
     double avg_queue_wait_ms() const {
-        if (confirmed_fills == 0) return 0;
+        if (confirmed_fills == 0)
+            return 0;
         return static_cast<double>(total_queue_wait_ns) / confirmed_fills / 1'000'000.0;
     }
 };
 
-}  // namespace paper
-}  // namespace hft
+} // namespace paper
+} // namespace hft

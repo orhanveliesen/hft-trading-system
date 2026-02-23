@@ -1,16 +1,18 @@
-#include <cassert>
-#include <iostream>
-#include <cmath>
 #include "../include/top_of_book.hpp"
+
+#include <cassert>
+#include <cmath>
+#include <iostream>
 
 using namespace hft;
 
 #define TEST(name) void name()
-#define RUN_TEST(name) do { \
-    std::cout << "Running " << #name << "... "; \
-    name(); \
-    std::cout << "PASSED\n"; \
-} while(0)
+#define RUN_TEST(name)                                                                                                 \
+    do {                                                                                                               \
+        std::cout << "Running " << #name << "... ";                                                                    \
+        name();                                                                                                        \
+        std::cout << "PASSED\n";                                                                                       \
+    } while (0)
 
 #define ASSERT_EQ(a, b) assert((a) == (b))
 #define ASSERT_TRUE(x) assert(x)
@@ -57,13 +59,13 @@ TEST(test_single_ask) {
 TEST(test_bbo_and_spread) {
     TopOfBook book;
 
-    book.set_level(Side::Buy, 10000, 100);   // Best bid: $1.0000
-    book.set_level(Side::Sell, 10050, 200);  // Best ask: $1.0050
+    book.set_level(Side::Buy, 10000, 100);  // Best bid: $1.0000
+    book.set_level(Side::Sell, 10050, 200); // Best ask: $1.0050
 
     ASSERT_EQ(book.best_bid(), 10000);
     ASSERT_EQ(book.best_ask(), 10050);
-    ASSERT_EQ(book.spread(), 50);  // $0.0050 spread
-    ASSERT_EQ(book.mid_price(), 10025);  // $1.0025 mid
+    ASSERT_EQ(book.spread(), 50);       // $0.0050 spread
+    ASSERT_EQ(book.mid_price(), 10025); // $1.0025 mid
 }
 
 // === Level Ordering Tests ===
@@ -73,7 +75,7 @@ TEST(test_bids_sorted_descending) {
 
     // Add in random order
     book.set_level(Side::Buy, 9900, 100);
-    book.set_level(Side::Buy, 10000, 200);  // Best
+    book.set_level(Side::Buy, 10000, 200); // Best
     book.set_level(Side::Buy, 9950, 150);
 
     ASSERT_EQ(book.best_bid(), 10000);
@@ -88,7 +90,7 @@ TEST(test_asks_sorted_ascending) {
 
     // Add in random order
     book.set_level(Side::Sell, 10100, 100);
-    book.set_level(Side::Sell, 10000, 200);  // Best
+    book.set_level(Side::Sell, 10000, 200); // Best
     book.set_level(Side::Sell, 10050, 150);
 
     ASSERT_EQ(book.best_ask(), 10000);
@@ -109,7 +111,7 @@ TEST(test_update_existing_level) {
     // Update same price
     book.set_level(Side::Buy, 10000, 500);
     ASSERT_EQ(book.best_bid_size(), 500);
-    ASSERT_EQ(book.bid_levels(), 1);  // Still one level
+    ASSERT_EQ(book.bid_levels(), 1); // Still one level
 }
 
 TEST(test_remove_level_with_zero_size) {
@@ -130,16 +132,16 @@ TEST(test_max_depth_limit) {
     TopOfBook book;
 
     // Add 7 levels (only 5 should be kept)
-    book.set_level(Side::Buy, 10000, 100);  // Best
+    book.set_level(Side::Buy, 10000, 100); // Best
     book.set_level(Side::Buy, 9900, 100);
     book.set_level(Side::Buy, 9800, 100);
     book.set_level(Side::Buy, 9700, 100);
-    book.set_level(Side::Buy, 9600, 100);  // Level 5
-    book.set_level(Side::Buy, 9500, 100);  // Should be ignored
-    book.set_level(Side::Buy, 9400, 100);  // Should be ignored
+    book.set_level(Side::Buy, 9600, 100); // Level 5
+    book.set_level(Side::Buy, 9500, 100); // Should be ignored
+    book.set_level(Side::Buy, 9400, 100); // Should be ignored
 
     ASSERT_EQ(book.bid_levels(), 5);
-    ASSERT_EQ(book.bid(4).price, 9600);  // Worst tracked level
+    ASSERT_EQ(book.bid(4).price, 9600); // Worst tracked level
 }
 
 TEST(test_better_price_pushes_out_worst) {
@@ -152,13 +154,13 @@ TEST(test_better_price_pushes_out_worst) {
     book.set_level(Side::Buy, 9900, 100);
     book.set_level(Side::Buy, 10000, 100);
 
-    ASSERT_EQ(book.bid(4).price, 9600);  // Worst
+    ASSERT_EQ(book.bid(4).price, 9600); // Worst
 
     // Add better price - should push out 9600
     book.set_level(Side::Buy, 10100, 200);
 
     ASSERT_EQ(book.best_bid(), 10100);
-    ASSERT_EQ(book.bid(4).price, 9700);  // 9600 pushed out
+    ASSERT_EQ(book.bid(4).price, 9700); // 9600 pushed out
 }
 
 // === Depth Calculations ===
@@ -218,7 +220,7 @@ TEST(test_clear_book) {
 
 TEST(test_struct_size) {
     // Verify cache-friendly size
-    ASSERT_TRUE(sizeof(TopOfBook) <= 128);  // Max 2 cache lines
+    ASSERT_TRUE(sizeof(TopOfBook) <= 128); // Max 2 cache lines
     ASSERT_EQ(sizeof(TopOfBook::Level), 8);
 }
 

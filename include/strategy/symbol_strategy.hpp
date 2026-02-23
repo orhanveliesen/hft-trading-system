@@ -25,12 +25,12 @@ struct SymbolStrategy {
     MarketRegime current_regime = MarketRegime::Unknown;
     Price last_mid = 0;
     uint64_t last_signal_time = 0;
-    char ticker[16] = {0};  // Fixed size, no std::string allocation
-    bool active = false;    // Is this slot in use?
+    char ticker[16] = {0}; // Fixed size, no std::string allocation
+    bool active = false;   // Is this slot in use?
 
     // Dynamic spread tracking (EMA of spread)
-    double ema_spread_pct = 0.001;  // Start with 0.1% default
-    static constexpr double SPREAD_ALPHA = 0.1;  // EMA decay
+    double ema_spread_pct = 0.001;              // Start with 0.1% default
+    static constexpr double SPREAD_ALPHA = 0.1; // EMA decay
 
     void init(const std::string& symbol) {
         active = true;
@@ -50,13 +50,13 @@ struct SymbolStrategy {
     // Math: entry spread + exit spread = 2x spread, so need >2x to profit
     double buy_threshold() const {
         double threshold = ema_spread_pct * 3.0;
-        return -std::max(threshold, 0.0002);  // At least -0.02%
+        return -std::max(threshold, 0.0002); // At least -0.02%
     }
     double sell_threshold() const {
         double threshold = ema_spread_pct * 3.0;
-        return std::max(threshold, 0.0002);   // At least +0.02%
+        return std::max(threshold, 0.0002); // At least +0.02%
     }
 };
 
-}  // namespace strategy
-}  // namespace hft
+} // namespace strategy
+} // namespace hft

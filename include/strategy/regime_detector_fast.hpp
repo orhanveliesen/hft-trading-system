@@ -1,6 +1,7 @@
 #pragma once
 
-#include "regime_detector.hpp"  // For MarketRegime enum
+#include "regime_detector.hpp" // For MarketRegime enum
+
 #include <cmath>
 
 namespace hft {
@@ -12,11 +13,11 @@ namespace strategy {
  * Regime Detection Configuration
  */
 struct FastRegimeConfig {
-    double high_vol_threshold = 0.03;    // 3% daily vol = high
-    double low_vol_threshold = 0.01;     // 1% daily vol = low
-    double trend_threshold = 0.3;        // trend_strength > 0.3 = trending
-    double annualize_factor = 4.899;     // sqrt(24) for hourly → daily
-    double alpha = 0.1;                  // EMA decay (~10 period window)
+    double high_vol_threshold = 0.03; // 3% daily vol = high
+    double low_vol_threshold = 0.01;  // 1% daily vol = low
+    double trend_threshold = 0.3;     // trend_strength > 0.3 = trending
+    double annualize_factor = 4.899;  // sqrt(24) for hourly → daily
+    double alpha = 0.1;               // EMA decay (~10 period window)
 };
 
 /**
@@ -37,18 +38,14 @@ class FastRegimeDetector {
 public:
     static constexpr int MIN_SAMPLES = 10;
 
-    explicit FastRegimeDetector(const FastRegimeConfig& config = FastRegimeConfig{})
-        : config_(config)
-    {
-        reset();
-    }
+    explicit FastRegimeDetector(const FastRegimeConfig& config = FastRegimeConfig{}) : config_(config) { reset(); }
 
     /**
      * Update with new price - O(1), zero allocation, zero storage
      */
-    __attribute__((always_inline))
-    void update(double price) {
-        if (price <= 0) [[unlikely]] return;
+    __attribute__((always_inline)) void update(double price) {
+        if (price <= 0) [[unlikely]]
+            return;
 
         count_++;
 
@@ -79,28 +76,20 @@ public:
     }
 
     // Getters - all O(1)
-    __attribute__((always_inline))
-    MarketRegime regime() const { return regime_; }
+    __attribute__((always_inline)) MarketRegime regime() const { return regime_; }
 
-    __attribute__((always_inline))
-    double volatility() const { return volatility_; }
+    __attribute__((always_inline)) double volatility() const { return volatility_; }
 
-    __attribute__((always_inline))
-    double trend_strength() const { return trend_strength_; }
+    __attribute__((always_inline)) double trend_strength() const { return trend_strength_; }
 
-    __attribute__((always_inline))
-    double ma() const { return ema_price_; }
+    __attribute__((always_inline)) double ma() const { return ema_price_; }
 
-    __attribute__((always_inline))
-    bool is_trending() const {
-        return regime_ == MarketRegime::TrendingUp ||
-               regime_ == MarketRegime::TrendingDown;
+    __attribute__((always_inline)) bool is_trending() const {
+        return regime_ == MarketRegime::TrendingUp || regime_ == MarketRegime::TrendingDown;
     }
 
-    __attribute__((always_inline))
-    bool is_mean_reverting() const {
-        return regime_ == MarketRegime::Ranging ||
-               regime_ == MarketRegime::LowVolatility;
+    __attribute__((always_inline)) bool is_mean_reverting() const {
+        return regime_ == MarketRegime::Ranging || regime_ == MarketRegime::LowVolatility;
     }
 
     void reset() {
@@ -122,26 +111,26 @@ private:
     // Running statistics - NO ARRAYS!
     int count_ = 0;
     double last_price_ = 0;
-    double ema_price_ = 0;      // EMA of price (for MA)
-    double ema_ret_ = 0;        // EMA of returns (for momentum)
-    double ema_ret_sq_ = 0;     // EMA of squared returns (for volatility)
+    double ema_price_ = 0;  // EMA of price (for MA)
+    double ema_ret_ = 0;    // EMA of returns (for momentum)
+    double ema_ret_sq_ = 0; // EMA of squared returns (for volatility)
 
     // Cached results
     double volatility_ = 0;
     double trend_strength_ = 0;
     MarketRegime regime_ = MarketRegime::Unknown;
 
-    __attribute__((always_inline))
-    void update_regime(double current_price) {
+    __attribute__((always_inline)) void update_regime(double current_price) {
         // Volatility from EMA: Var(X) ≈ E[X²] - E[X]²
         double variance = ema_ret_sq_ - (ema_ret_ * ema_ret_);
-        if (variance < 0) variance = 0;  // Floating point safety
+        if (variance < 0)
+            variance = 0; // Floating point safety
 
         volatility_ = std::sqrt(variance) * config_.annualize_factor;
 
         // Trend: price vs EMA + momentum
         double pct_from_ma = (current_price - ema_price_) / ema_price_;
-        double momentum = ema_ret_ * 10;  // Scale factor
+        double momentum = ema_ret_ * 10; // Scale factor
 
         trend_strength_ = (pct_from_ma + momentum) * 5;
         trend_strength_ = std::max(-1.0, std::min(1.0, trend_strength_));
@@ -150,8 +139,7 @@ private:
         if (volatility_ > config_.high_vol_threshold) {
             regime_ = MarketRegime::HighVolatility;
         } else if (std::abs(trend_strength_) > config_.trend_threshold) {
-            regime_ = (trend_strength_ > 0) ?
-                MarketRegime::TrendingUp : MarketRegime::TrendingDown;
+            regime_ = (trend_strength_ > 0) ? MarketRegime::TrendingUp : MarketRegime::TrendingDown;
         } else if (volatility_ < config_.low_vol_threshold) {
             regime_ = MarketRegime::LowVolatility;
         } else {
@@ -160,5 +148,5 @@ private:
     }
 };
 
-}  // namespace strategy
-}  // namespace hft
+} // namespace strategy
+} // namespace hft

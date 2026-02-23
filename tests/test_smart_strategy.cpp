@@ -5,11 +5,11 @@
  * Verifies magic numbers are replaced with config values.
  */
 
-#include <cassert>
-#include <iostream>
-#include <cmath>
-
 #include "strategy/smart_strategy.hpp"
+
+#include <cassert>
+#include <cmath>
+#include <iostream>
 
 using namespace hft::strategy;
 
@@ -75,7 +75,7 @@ void test_win_rate_mode_uses_config_threshold() {
     // Create config with custom threshold (5 instead of default 10)
     SmartStrategyConfig config;
     config.min_trades_for_win_rate_mode = 5;
-    config.min_trades_for_sharpe_mode = 100;  // Disable Sharpe-based mode for this test
+    config.min_trades_for_sharpe_mode = 100; // Disable Sharpe-based mode for this test
 
     SmartStrategy strategy(config);
 
@@ -86,7 +86,7 @@ void test_win_rate_mode_uses_config_threshold() {
 
     // At 4 trades, should be below threshold
     assert(strategy.total_trades() == 4);
-    assert(strategy.win_rate() == 1.0);  // 100% win rate
+    assert(strategy.win_rate() == 1.0); // 100% win rate
 
     // Add one more to hit threshold
     strategy.record_trade_result(0.02, true);

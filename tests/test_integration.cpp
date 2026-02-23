@@ -1,21 +1,23 @@
+#include "../include/feed_handler.hpp"
+#include "../include/itch_messages.hpp"
+#include "../include/market_data_handler.hpp"
+#include "../include/orderbook.hpp"
+#include "../include/types.hpp"
+
 #include <cassert>
+#include <cstring>
 #include <iostream>
 #include <vector>
-#include <cstring>
-#include "../include/types.hpp"
-#include "../include/orderbook.hpp"
-#include "../include/itch_messages.hpp"
-#include "../include/feed_handler.hpp"
-#include "../include/market_data_handler.hpp"
 
 using namespace hft;
 
 #define TEST(name) void name()
-#define RUN_TEST(name) do { \
-    std::cout << "Running " << #name << "... "; \
-    name(); \
-    std::cout << "PASSED\n"; \
-} while(0)
+#define RUN_TEST(name)                                                                                                 \
+    do {                                                                                                               \
+        std::cout << "Running " << #name << "... ";                                                                    \
+        name();                                                                                                        \
+        std::cout << "PASSED\n";                                                                                       \
+    } while (0)
 
 #define ASSERT_EQ(a, b) assert((a) == (b))
 
@@ -87,7 +89,7 @@ TEST(test_feed_add_updates_book) {
     MarketDataHandler handler(book);
     FeedHandler<MarketDataHandler> feed(handler);
 
-    auto msg = build_add_order(100, 'B', 500, 150000);  // Buy 500 @ $15.00
+    auto msg = build_add_order(100, 'B', 500, 150000); // Buy 500 @ $15.00
     feed.process_message(msg.data(), msg.size());
 
     ASSERT_EQ(book.best_bid(), 150000);
@@ -101,17 +103,17 @@ TEST(test_feed_builds_book) {
     FeedHandler<MarketDataHandler> feed(handler);
 
     // Add buy orders at different prices
-    feed.process_message(build_add_order(1, 'B', 100, 149000).data(), 36);  // $14.90
-    feed.process_message(build_add_order(2, 'B', 200, 150000).data(), 36);  // $15.00
-    feed.process_message(build_add_order(3, 'B', 150, 150000).data(), 36);  // $15.00
+    feed.process_message(build_add_order(1, 'B', 100, 149000).data(), 36); // $14.90
+    feed.process_message(build_add_order(2, 'B', 200, 150000).data(), 36); // $15.00
+    feed.process_message(build_add_order(3, 'B', 150, 150000).data(), 36); // $15.00
 
     // Add sell orders
-    feed.process_message(build_add_order(4, 'S', 100, 151000).data(), 36);  // $15.10
-    feed.process_message(build_add_order(5, 'S', 200, 152000).data(), 36);  // $15.20
+    feed.process_message(build_add_order(4, 'S', 100, 151000).data(), 36); // $15.10
+    feed.process_message(build_add_order(5, 'S', 200, 152000).data(), 36); // $15.20
 
-    ASSERT_EQ(book.best_bid(), 150000);  // Highest buy
-    ASSERT_EQ(book.best_ask(), 151000);  // Lowest sell
-    ASSERT_EQ(book.bid_quantity_at(150000), 350);  // 200 + 150
+    ASSERT_EQ(book.best_bid(), 150000);           // Highest buy
+    ASSERT_EQ(book.best_ask(), 151000);           // Lowest sell
+    ASSERT_EQ(book.bid_quantity_at(150000), 350); // 200 + 150
     ASSERT_EQ(book.bid_quantity_at(149000), 100);
 }
 
@@ -122,9 +124,9 @@ TEST(test_feed_execution_reduces_book) {
     FeedHandler<MarketDataHandler> feed(handler);
 
     feed.process_message(build_add_order(1, 'B', 100, 150000).data(), 36);
-    feed.process_message(build_order_executed(1, 30).data(), 31);  // Execute 30
+    feed.process_message(build_order_executed(1, 30).data(), 31); // Execute 30
 
-    ASSERT_EQ(book.bid_quantity_at(150000), 70);  // 100 - 30
+    ASSERT_EQ(book.bid_quantity_at(150000), 70); // 100 - 30
 }
 
 // Test: Full execution removes order
@@ -134,7 +136,7 @@ TEST(test_feed_full_execution_removes_order) {
     FeedHandler<MarketDataHandler> feed(handler);
 
     feed.process_message(build_add_order(1, 'B', 100, 150000).data(), 36);
-    feed.process_message(build_order_executed(1, 100).data(), 31);  // Full execution
+    feed.process_message(build_order_executed(1, 100).data(), 31); // Full execution
 
     ASSERT_EQ(book.best_bid(), INVALID_PRICE);
     ASSERT_EQ(book.bid_quantity_at(150000), 0);
@@ -148,9 +150,9 @@ TEST(test_feed_delete_removes_order) {
 
     feed.process_message(build_add_order(1, 'B', 100, 150000).data(), 36);
     feed.process_message(build_add_order(2, 'B', 200, 150000).data(), 36);
-    feed.process_message(build_order_delete(1).data(), 19);  // Delete order 1
+    feed.process_message(build_order_delete(1).data(), 19); // Delete order 1
 
-    ASSERT_EQ(book.bid_quantity_at(150000), 200);  // Only order 2 remains
+    ASSERT_EQ(book.bid_quantity_at(150000), 200); // Only order 2 remains
 }
 
 // Test: Order cancel reduces quantity
@@ -160,9 +162,9 @@ TEST(test_feed_cancel_reduces_quantity) {
     FeedHandler<MarketDataHandler> feed(handler);
 
     feed.process_message(build_add_order(1, 'B', 100, 150000).data(), 36);
-    feed.process_message(build_order_cancel(1, 40).data(), 23);  // Cancel 40
+    feed.process_message(build_order_cancel(1, 40).data(), 23); // Cancel 40
 
-    ASSERT_EQ(book.bid_quantity_at(150000), 60);  // 100 - 40
+    ASSERT_EQ(book.bid_quantity_at(150000), 60); // 100 - 40
 }
 
 // Test: Realistic trading sequence
@@ -172,10 +174,10 @@ TEST(test_realistic_trading_sequence) {
     FeedHandler<MarketDataHandler> feed(handler);
 
     // Market opens - orders arrive
-    feed.process_message(build_add_order(1, 'B', 1000, 100000).data(), 36);  // Bid @ $10.00
-    feed.process_message(build_add_order(2, 'B', 500, 99900).data(), 36);    // Bid @ $9.99
-    feed.process_message(build_add_order(3, 'S', 800, 100100).data(), 36);   // Ask @ $10.01
-    feed.process_message(build_add_order(4, 'S', 600, 100200).data(), 36);   // Ask @ $10.02
+    feed.process_message(build_add_order(1, 'B', 1000, 100000).data(), 36); // Bid @ $10.00
+    feed.process_message(build_add_order(2, 'B', 500, 99900).data(), 36);   // Bid @ $9.99
+    feed.process_message(build_add_order(3, 'S', 800, 100100).data(), 36);  // Ask @ $10.01
+    feed.process_message(build_add_order(4, 'S', 600, 100200).data(), 36);  // Ask @ $10.02
 
     ASSERT_EQ(book.best_bid(), 100000);
     ASSERT_EQ(book.best_ask(), 100100);
@@ -186,7 +188,7 @@ TEST(test_realistic_trading_sequence) {
 
     // Trader cancels remaining order 1
     feed.process_message(build_order_delete(1).data(), 19);
-    ASSERT_EQ(book.best_bid(), 99900);  // Next level becomes best
+    ASSERT_EQ(book.best_bid(), 99900); // Next level becomes best
 
     // New aggressive bid
     feed.process_message(build_add_order(5, 'B', 200, 100050).data(), 36);

@@ -10,10 +10,10 @@
  * Run with: ./test_commission_scaling
  */
 
-#include <iostream>
 #include <cassert>
 #include <cmath>
 #include <cstdint>
+#include <iostream>
 #include <string>
 
 // =============================================================================
@@ -21,34 +21,37 @@
 // =============================================================================
 
 #define TEST(name) void test_##name()
-#define RUN_TEST(name) do { \
-    std::cout << "  Running " #name "... "; \
-    test_##name(); \
-    std::cout << "PASSED\n"; \
-} while(0)
+#define RUN_TEST(name)                                                                                                 \
+    do {                                                                                                               \
+        std::cout << "  Running " #name "... ";                                                                        \
+        test_##name();                                                                                                 \
+        std::cout << "PASSED\n";                                                                                       \
+    } while (0)
 
-#define ASSERT_EQ(a, b) do { \
-    if ((a) != (b)) { \
-        std::cerr << "\nFAILED: " << #a << " != " << #b << "\n"; \
-        std::cerr << "  Actual: " << (a) << " != " << (b) << "\n"; \
-        assert(false); \
-    } \
-} while(0)
+#define ASSERT_EQ(a, b)                                                                                                \
+    do {                                                                                                               \
+        if ((a) != (b)) {                                                                                              \
+            std::cerr << "\nFAILED: " << #a << " != " << #b << "\n";                                                   \
+            std::cerr << "  Actual: " << (a) << " != " << (b) << "\n";                                                 \
+            assert(false);                                                                                             \
+        }                                                                                                              \
+    } while (0)
 
-#define ASSERT_NEAR(a, b, tol) do { \
-    if (std::abs((a) - (b)) > (tol)) { \
-        std::cerr << "\nFAILED: " << #a << " != " << #b \
-                  << " (" << (a) << " != " << (b) << ")\n"; \
-        assert(false); \
-    } \
-} while(0)
+#define ASSERT_NEAR(a, b, tol)                                                                                         \
+    do {                                                                                                               \
+        if (std::abs((a) - (b)) > (tol)) {                                                                             \
+            std::cerr << "\nFAILED: " << #a << " != " << #b << " (" << (a) << " != " << (b) << ")\n";                  \
+            assert(false);                                                                                             \
+        }                                                                                                              \
+    } while (0)
 
-#define ASSERT_TRUE(expr) do { \
-    if (!(expr)) { \
-        std::cerr << "\nFAILED: " << #expr << " is false\n"; \
-        assert(false); \
-    } \
-} while(0)
+#define ASSERT_TRUE(expr)                                                                                              \
+    do {                                                                                                               \
+        if (!(expr)) {                                                                                                 \
+            std::cerr << "\nFAILED: " << #expr << " is false\n";                                                       \
+            assert(false);                                                                                             \
+        }                                                                                                              \
+    } while (0)
 
 // =============================================================================
 // Minimal Portfolio for Testing Commission Scaling
@@ -60,7 +63,7 @@ public:
 
     double cash = 0;
     double total_commissions = 0;
-    double commission_rate_ = 0.001;  // 0.1%
+    double commission_rate_ = 0.001; // 0.1%
 
     // Simple position tracking
     struct Position {
@@ -79,7 +82,8 @@ public:
     }
 
     void buy(uint32_t symbol, double price, double qty, double commission) {
-        if (symbol >= MAX_SYMBOLS) return;
+        if (symbol >= MAX_SYMBOLS)
+            return;
 
         auto& pos = positions[symbol];
         double cost = price * qty;
@@ -99,14 +103,15 @@ public:
     // OLD SIGNATURE (BUG): void sell() - doesn't return actual commission
     // NEW SIGNATURE (FIX): returns actual_commission
     double sell(uint32_t symbol, double price, double qty, double commission) {
-        if (symbol >= MAX_SYMBOLS) return 0;
+        if (symbol >= MAX_SYMBOLS)
+            return 0;
 
         auto& pos = positions[symbol];
 
         // Overselling protection: cap at available position
         double actual_sold = std::min(qty, pos.quantity);
         if (actual_sold <= 0.0001) {
-            return 0;  // Nothing to sell
+            return 0; // Nothing to sell
         }
 
         // Scale commission proportionally if we sold less than requested
@@ -132,12 +137,14 @@ public:
     }
 
     double position_qty(uint32_t symbol) const {
-        if (symbol >= MAX_SYMBOLS) return 0;
+        if (symbol >= MAX_SYMBOLS)
+            return 0;
         return positions[symbol].quantity;
     }
 
     double position_avg_price(uint32_t symbol) const {
-        if (symbol >= MAX_SYMBOLS) return 0;
+        if (symbol >= MAX_SYMBOLS)
+            return 0;
         return positions[symbol].avg_price;
     }
 };
@@ -173,14 +180,14 @@ TEST(sell_returns_actual_commission_when_full_qty) {
     portfolio.init(10000.0);
 
     // Buy 1.0 BTC at $50000
-    portfolio.buy(0, 50000.0, 1.0, 5.0);  // $5 commission
+    portfolio.buy(0, 50000.0, 1.0, 5.0); // $5 commission
 
     // Sell all 1.0 BTC at $51000 with $5 commission
     double actual_commission = portfolio.sell(0, 51000.0, 1.0, 5.0);
 
     // Should return full commission since we sold full qty
     ASSERT_NEAR(actual_commission, 5.0, 0.001);
-    ASSERT_NEAR(portfolio.total_commissions, 10.0, 0.001);  // 5 + 5
+    ASSERT_NEAR(portfolio.total_commissions, 10.0, 0.001); // 5 + 5
 }
 
 TEST(sell_returns_scaled_commission_when_partial_qty) {
@@ -189,7 +196,7 @@ TEST(sell_returns_scaled_commission_when_partial_qty) {
     portfolio.init(10000.0);
 
     // Buy 0.5 BTC at $50000
-    portfolio.buy(0, 50000.0, 0.5, 2.5);  // $2.5 commission
+    portfolio.buy(0, 50000.0, 0.5, 2.5); // $2.5 commission
 
     // Try to sell 1.0 BTC (but we only have 0.5)
     // Requested commission: $5.0
@@ -198,7 +205,7 @@ TEST(sell_returns_scaled_commission_when_partial_qty) {
 
     // Commission should be scaled to 50%
     ASSERT_NEAR(actual_commission, 2.5, 0.001);
-    ASSERT_NEAR(portfolio.total_commissions, 5.0, 0.001);  // 2.5 + 2.5
+    ASSERT_NEAR(portfolio.total_commissions, 5.0, 0.001); // 2.5 + 2.5
     ASSERT_NEAR(portfolio.position_qty(0), 0.0, 0.0001);  // All sold
 }
 
@@ -228,11 +235,11 @@ TEST(accounting_matches_when_using_actual_commission) {
 
     // Update state with ACTUAL commission (THE FIX!)
     state.set_cash(portfolio.cash);
-    state.add_commission(actual_commission);  // Not requested_commission!
+    state.add_commission(actual_commission); // Not requested_commission!
 
     // Calculate realized P&L for the actual quantity sold
-    double actual_sold = qty_before;  // 0.5
-    double realized_pnl = (51000.0 - avg_entry) * actual_sold;  // (51000 - 50000) * 0.5 = 500
+    double actual_sold = qty_before;                           // 0.5
+    double realized_pnl = (51000.0 - avg_entry) * actual_sold; // (51000 - 50000) * 0.5 = 500
     state.add_realized_pnl(realized_pnl);
 
     // P&L Reconciliation
@@ -245,9 +252,8 @@ TEST(accounting_matches_when_using_actual_commission) {
     // The difference should be ZERO (or very close)
     double difference = equity_pnl - component_pnl;
 
-    std::cout << "\n    equity_pnl=" << equity_pnl
-              << ", component_pnl=" << component_pnl
-              << ", diff=" << difference << " ";
+    std::cout << "\n    equity_pnl=" << equity_pnl << ", component_pnl=" << component_pnl << ", diff=" << difference
+              << " ";
 
     ASSERT_NEAR(difference, 0.0, 0.01);
 }
@@ -268,7 +274,7 @@ TEST(accounting_drifts_when_using_original_commission_BUG) {
     state.add_commission(buy_commission);
 
     // Try to sell 1.0 BTC at $51000 (but we only have 0.5)
-    double requested_commission = 5.0;  // Original commission
+    double requested_commission = 5.0; // Original commission
     double avg_entry = portfolio.position_avg_price(0);
     double qty_before = portfolio.position_qty(0);
 
@@ -277,7 +283,7 @@ TEST(accounting_drifts_when_using_original_commission_BUG) {
 
     // BUG: State uses ORIGINAL commission, not actual!
     state.set_cash(portfolio.cash);
-    state.add_commission(requested_commission);  // BUG: Should be actual_commission
+    state.add_commission(requested_commission); // BUG: Should be actual_commission
 
     // Calculate realized P&L
     double actual_sold = qty_before;
@@ -295,13 +301,11 @@ TEST(accounting_drifts_when_using_original_commission_BUG) {
     // So component_pnl is LOWER than equity_pnl by 2.5
     double expected_drift = requested_commission - actual_commission;
 
-    std::cout << "\n    BUG DEMO: equity_pnl=" << equity_pnl
-              << ", component_pnl=" << component_pnl
-              << ", drift=" << difference
-              << " (expected=" << expected_drift << ") ";
+    std::cout << "\n    BUG DEMO: equity_pnl=" << equity_pnl << ", component_pnl=" << component_pnl
+              << ", drift=" << difference << " (expected=" << expected_drift << ") ";
 
     ASSERT_NEAR(difference, expected_drift, 0.01);
-    ASSERT_TRUE(std::abs(difference) > 0.01);  // Drift exists!
+    ASSERT_TRUE(std::abs(difference) > 0.01); // Drift exists!
 }
 
 TEST(multiple_partial_sells_accumulate_drift) {
@@ -352,7 +356,7 @@ TEST(sell_zero_position_returns_zero_commission) {
 
     ASSERT_NEAR(actual_commission, 0.0, 0.001);
     ASSERT_NEAR(portfolio.total_commissions, 0.0, 0.001);
-    ASSERT_NEAR(portfolio.cash, 10000.0, 0.001);  // Cash unchanged
+    ASSERT_NEAR(portfolio.cash, 10000.0, 0.001); // Cash unchanged
 }
 
 TEST(sell_exact_position_no_scaling) {
@@ -360,10 +364,10 @@ TEST(sell_exact_position_no_scaling) {
     TestPortfolio portfolio;
     portfolio.init(10000.0);
 
-    portfolio.buy(0, 100.0, 5.0, 0.5);  // Buy 5 units
-    double actual_commission = portfolio.sell(0, 110.0, 5.0, 0.5);  // Sell exactly 5
+    portfolio.buy(0, 100.0, 5.0, 0.5);                             // Buy 5 units
+    double actual_commission = portfolio.sell(0, 110.0, 5.0, 0.5); // Sell exactly 5
 
-    ASSERT_NEAR(actual_commission, 0.5, 0.001);  // No scaling
+    ASSERT_NEAR(actual_commission, 0.5, 0.001); // No scaling
 }
 
 // =============================================================================

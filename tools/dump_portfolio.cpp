@@ -1,13 +1,14 @@
 /**
  * Dump shared portfolio state for debugging
  */
-#include <iostream>
-#include <iomanip>
+#include "../include/ipc/shared_portfolio_state.hpp"
+
+#include <cstring>
 #include <fcntl.h>
+#include <iomanip>
+#include <iostream>
 #include <sys/mman.h>
 #include <unistd.h>
-#include <cstring>
-#include "../include/ipc/shared_portfolio_state.hpp"
 
 int main() {
     // Try direct mmap first for debugging
@@ -17,8 +18,7 @@ int main() {
         return 1;
     }
 
-    void* ptr = mmap(nullptr, sizeof(hft::ipc::SharedPortfolioState),
-                     PROT_READ, MAP_SHARED, fd, 0);
+    void* ptr = mmap(nullptr, sizeof(hft::ipc::SharedPortfolioState), PROT_READ, MAP_SHARED, fd, 0);
     close(fd);
 
     if (ptr == MAP_FAILED) {
@@ -61,8 +61,8 @@ int main() {
 
     std::cout << "[ Calculated Values ]\n";
     double market_value = state->total_market_value();
-    double equity = state->total_equity();  // cash + market_value
-    double pnl = state->total_pnl();        // equity - initial_cash
+    double equity = state->total_equity(); // cash + market_value
+    double pnl = state->total_pnl();       // equity - initial_cash
     double pnl_pct = (pnl / state->initial_cash()) * 100.0;
 
     std::cout << "  market_value:     $" << market_value << "\n";
@@ -120,12 +120,9 @@ int main() {
         if (pos.active.load()) {
             double qty = pos.quantity();
             if (qty > 0.0001) {
-                std::cout << "  [" << i << "] " << pos.symbol
-                          << ": qty=" << std::setprecision(6) << qty
-                          << " avg=" << std::setprecision(2) << pos.avg_price()
-                          << " last=" << pos.last_price()
-                          << " unreal=" << pos.unrealized_pnl()
-                          << "\n";
+                std::cout << "  [" << i << "] " << pos.symbol << ": qty=" << std::setprecision(6) << qty
+                          << " avg=" << std::setprecision(2) << pos.avg_price() << " last=" << pos.last_price()
+                          << " unreal=" << pos.unrealized_pnl() << "\n";
                 active_count++;
             }
         }

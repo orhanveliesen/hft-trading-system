@@ -1,22 +1,24 @@
-#include <cassert>
-#include <iostream>
-#include <cmath>
-#include "../include/strategy/simple_mean_reversion.hpp"
+#include "../include/strategy/fair_value.hpp"
 #include "../include/strategy/momentum.hpp"
-#include "../include/strategy/vwap.hpp"
 #include "../include/strategy/order_flow_imbalance.hpp"
 #include "../include/strategy/pairs_trading.hpp"
-#include "../include/strategy/fair_value.hpp"
+#include "../include/strategy/simple_mean_reversion.hpp"
+#include "../include/strategy/vwap.hpp"
+
+#include <cassert>
+#include <cmath>
+#include <iostream>
 
 using namespace hft;
 using namespace hft::strategy;
 
 #define TEST(name) void name()
-#define RUN_TEST(name) do { \
-    std::cout << "  " << #name << "... "; \
-    name(); \
-    std::cout << "PASSED\n"; \
-} while(0)
+#define RUN_TEST(name)                                                                                                 \
+    do {                                                                                                               \
+        std::cout << "  " << #name << "... ";                                                                          \
+        name();                                                                                                        \
+        std::cout << "PASSED\n";                                                                                       \
+    } while (0)
 
 #define ASSERT_EQ(a, b) assert((a) == (b))
 #define ASSERT_TRUE(x) assert(x)
@@ -243,13 +245,13 @@ TEST(fair_value_microprice_calculation) {
     // = (100×100 + 102×300) / 400 = 40600/400 = 101.5
 
     double mp = FairValueStrategy::microprice(100, 102, 300, 100);
-    ASSERT_NEAR(mp, 101.5, 0.01);  // Daha fazla bid → fiyat ask'e yakın
+    ASSERT_NEAR(mp, 101.5, 0.01); // Daha fazla bid → fiyat ask'e yakın
 }
 
 TEST(fair_value_signals_buy_below_fv) {
     FairValueConfig config;
     config.threshold_bps = 5;
-    config.use_microprice = false;  // Basit mid kullan
+    config.use_microprice = false; // Basit mid kullan
     FairValueStrategy strategy(config);
 
     // İlk tick: FV = 10005
@@ -264,7 +266,7 @@ TEST(fair_value_signals_buy_below_fv) {
 
 TEST(fair_value_ema_smoothing) {
     FairValueConfig config;
-    config.ema_alpha = 0.5;  // Hızlı smoothing
+    config.ema_alpha = 0.5; // Hızlı smoothing
     FairValueStrategy strategy(config);
 
     // FV = microprice(99, 101, 100, 100) = (99×100 + 101×100) / 200 = 100
@@ -280,7 +282,7 @@ TEST(fair_value_ema_smoothing) {
 TEST(index_arb_theoretical_spot) {
     IndexArbConfig config;
     config.futures_multiplier = 1.0;
-    config.cost_of_carry_bps = 10;  // %0.1 carry
+    config.cost_of_carry_bps = 10; // %0.1 carry
     IndexArbitrage strategy(config);
 
     // Futures = 10000

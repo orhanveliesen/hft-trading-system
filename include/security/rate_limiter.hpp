@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../types.hpp"
+
 #include <array>
 #include <atomic>
 
@@ -19,9 +20,9 @@ namespace security {
 class RateLimiter {
 public:
     static constexpr size_t MAX_TRADERS = 10000;
-    static constexpr uint32_t DEFAULT_RATE_LIMIT = 1000;      // orders/sec per trader
-    static constexpr uint32_t DEFAULT_MAX_ACTIVE = 10000;     // max active orders per trader
-    static constexpr uint32_t DEFAULT_GLOBAL_RATE = 100000;   // global orders/sec
+    static constexpr uint32_t DEFAULT_RATE_LIMIT = 1000;    // orders/sec per trader
+    static constexpr uint32_t DEFAULT_MAX_ACTIVE = 10000;   // max active orders per trader
+    static constexpr uint32_t DEFAULT_GLOBAL_RATE = 100000; // global orders/sec
 
     struct TraderStats {
         std::atomic<uint32_t> orders_this_second{0};
@@ -45,26 +46,21 @@ public:
         bool enabled;
 
         Config()
-            : orders_per_second(DEFAULT_RATE_LIMIT)
-            , max_active_orders(DEFAULT_MAX_ACTIVE)
-            , global_rate_limit(DEFAULT_GLOBAL_RATE)
-            , enabled(true)
-        {}
+            : orders_per_second(DEFAULT_RATE_LIMIT), max_active_orders(DEFAULT_MAX_ACTIVE),
+              global_rate_limit(DEFAULT_GLOBAL_RATE), enabled(true) {}
     };
 
     explicit RateLimiter(const Config& config = Config{})
-        : config_(config)
-        , global_orders_this_second_(0)
-        , global_last_reset_(0)
-    {
+        : config_(config), global_orders_this_second_(0), global_last_reset_(0) {
         // TraderStats are already zero-initialized by default constructor
     }
 
     // Check if order is allowed (call before processing)
-    __attribute__((always_inline))
-    bool allow_order(TraderId trader, Timestamp current_time) {
-        if (!config_.enabled) return true;
-        if (trader == NO_TRADER) return true;  // Anonymous orders bypass (market data replay)
+    __attribute__((always_inline)) bool allow_order(TraderId trader, Timestamp current_time) {
+        if (!config_.enabled)
+            return true;
+        if (trader == NO_TRADER)
+            return true; // Anonymous orders bypass (market data replay)
 
         // Check global rate
         if (!check_global_rate(current_time)) {
@@ -112,13 +108,9 @@ public:
     void set_enabled(bool enabled) { config_.enabled = enabled; }
     bool is_enabled() const { return config_.enabled; }
 
-    void set_rate_limit(uint32_t orders_per_second) {
-        config_.orders_per_second = orders_per_second;
-    }
+    void set_rate_limit(uint32_t orders_per_second) { config_.orders_per_second = orders_per_second; }
 
-    void set_max_active_orders(uint32_t max_active) {
-        config_.max_active_orders = max_active;
-    }
+    void set_max_active_orders(uint32_t max_active) { config_.max_active_orders = max_active; }
 
 private:
     bool check_global_rate(Timestamp current_time) {
@@ -150,13 +142,13 @@ private:
         // Check rate limit
         uint32_t count = stats.orders_this_second.fetch_add(1, std::memory_order_relaxed);
         if (count >= config_.orders_per_second) {
-            return false;  // Rate limit exceeded
+            return false; // Rate limit exceeded
         }
 
         // Check max active orders
         uint32_t active = stats.active_orders.load(std::memory_order_relaxed);
         if (active >= config_.max_active_orders) {
-            return false;  // Too many active orders
+            return false; // Too many active orders
         }
 
         return true;
@@ -181,15 +173,22 @@ enum class RejectionReason : uint8_t {
 
 inline const char* rejection_reason_to_string(RejectionReason reason) {
     switch (reason) {
-        case RejectionReason::None: return "None";
-        case RejectionReason::RateLimitExceeded: return "RateLimitExceeded";
-        case RejectionReason::MaxActiveOrdersExceeded: return "MaxActiveOrdersExceeded";
-        case RejectionReason::GlobalRateLimitExceeded: return "GlobalRateLimitExceeded";
-        case RejectionReason::InvalidTrader: return "InvalidTrader";
-        case RejectionReason::Blacklisted: return "Blacklisted";
-        default: return "Unknown";
+    case RejectionReason::None:
+        return "None";
+    case RejectionReason::RateLimitExceeded:
+        return "RateLimitExceeded";
+    case RejectionReason::MaxActiveOrdersExceeded:
+        return "MaxActiveOrdersExceeded";
+    case RejectionReason::GlobalRateLimitExceeded:
+        return "GlobalRateLimitExceeded";
+    case RejectionReason::InvalidTrader:
+        return "InvalidTrader";
+    case RejectionReason::Blacklisted:
+        return "Blacklisted";
+    default:
+        return "Unknown";
     }
 }
 
-}  // namespace security
-}  // namespace hft
+} // namespace security
+} // namespace hft

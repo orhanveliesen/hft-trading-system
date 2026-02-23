@@ -1,18 +1,20 @@
-#include <cassert>
-#include <iostream>
-#include <fstream>
-#include <cstdio>
 #include "../include/exchange/market_data.hpp"
+
+#include <cassert>
+#include <cstdio>
+#include <fstream>
+#include <iostream>
 
 using namespace hft;
 using namespace hft::exchange;
 
 #define TEST(name) void name()
-#define RUN_TEST(name) do { \
-    std::cout << "Running " << #name << "... "; \
-    name(); \
-    std::cout << "PASSED\n"; \
-} while(0)
+#define RUN_TEST(name)                                                                                                 \
+    do {                                                                                                               \
+        std::cout << "Running " << #name << "... ";                                                                    \
+        name();                                                                                                        \
+        std::cout << "PASSED\n";                                                                                       \
+    } while (0)
 
 #define ASSERT_EQ(a, b) assert((a) == (b))
 #define ASSERT_TRUE(x) assert(x)
@@ -23,10 +25,10 @@ using namespace hft::exchange;
 
 TEST(test_kline_mid) {
     Kline k;
-    k.high = 100000;  // $10.00
-    k.low = 90000;    // $9.00
+    k.high = 100000; // $10.00
+    k.low = 90000;   // $9.00
 
-    ASSERT_EQ(k.mid(), 95000);  // $9.50
+    ASSERT_EQ(k.mid(), 95000); // $9.50
 }
 
 TEST(test_kline_range) {
@@ -85,9 +87,9 @@ TEST(test_save_load_klines_csv) {
     std::vector<Kline> original;
 
     Kline k1;
-    k1.open_time = 1704067200000;  // 2024-01-01 00:00:00
+    k1.open_time = 1704067200000; // 2024-01-01 00:00:00
     k1.close_time = 1704070799999;
-    k1.open = 420000;  // $42.00
+    k1.open = 420000; // $42.00
     k1.high = 430000;
     k1.low = 415000;
     k1.close = 425000;
@@ -148,7 +150,7 @@ TEST(test_load_klines_csv_with_header) {
 
     ASSERT_EQ(klines.size(), 1);
     ASSERT_EQ(klines[0].open_time, 1704067200000ULL);
-    ASSERT_EQ(klines[0].open, 420000);  // 42.0 * 10000
+    ASSERT_EQ(klines[0].open, 420000); // 42.0 * 10000
 
     std::remove(filename.c_str());
 }

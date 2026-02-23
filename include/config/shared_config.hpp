@@ -1,13 +1,14 @@
 #pragma once
 
 #include "../types.hpp"
+
 #include <atomic>
 #include <cstring>
 #include <fcntl.h>
+#include <stdexcept>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
-#include <stdexcept>
 
 namespace hft {
 namespace config {
@@ -40,34 +41,34 @@ namespace config {
  *   └─────────────────────────────────────────┘
  */
 
-struct alignas(64) SharedConfig {  // Cache line aligned
+struct alignas(64) SharedConfig { // Cache line aligned
     // Header
-    uint64_t magic;                          // 0x4846545F434F4E46 ("HFT_CONF")
-    uint32_t version;                        // Schema version
+    uint64_t magic;   // 0x4846545F434F4E46 ("HFT_CONF")
+    uint32_t version; // Schema version
     uint32_t _pad0;
 
     // Kill switches (en kritik, en üstte)
-    std::atomic<bool> kill_switch;           // true = TÜM işlemleri durdur
-    std::atomic<bool> trading_enabled;       // false = yeni pozisyon açma
+    std::atomic<bool> kill_switch;     // true = TÜM işlemleri durdur
+    std::atomic<bool> trading_enabled; // false = yeni pozisyon açma
     char _pad1[6];
 
     // Position limits
-    std::atomic<int64_t> max_position;       // Maksimum net pozisyon
-    std::atomic<Quantity> order_size;        // Her işlemde lot
-    std::atomic<int64_t> max_daily_loss;     // Günlük max zarar (cent)
+    std::atomic<int64_t> max_position;   // Maksimum net pozisyon
+    std::atomic<Quantity> order_size;    // Her işlemde lot
+    std::atomic<int64_t> max_daily_loss; // Günlük max zarar (cent)
 
     // Strategy parameters
-    std::atomic<uint32_t> threshold_bps;     // Sinyal eşiği (basis points)
-    std::atomic<uint32_t> lookback_ticks;    // Geriye bakış penceresi
-    std::atomic<uint32_t> cooldown_ms;       // İşlemler arası bekleme
+    std::atomic<uint32_t> threshold_bps;  // Sinyal eşiği (basis points)
+    std::atomic<uint32_t> lookback_ticks; // Geriye bakış penceresi
+    std::atomic<uint32_t> cooldown_ms;    // İşlemler arası bekleme
     uint32_t _pad2;
 
     // Metadata
-    std::atomic<uint64_t> sequence;          // Her değişiklikte artır
-    std::atomic<uint64_t> last_update_ns;    // Son güncelleme timestamp
+    std::atomic<uint64_t> sequence;       // Her değişiklikte artır
+    std::atomic<uint64_t> last_update_ns; // Son güncelleme timestamp
 
     // Defaults
-    static constexpr uint64_t MAGIC = 0x4846545F434F4E46ULL;  // "HFT_CONF"
+    static constexpr uint64_t MAGIC = 0x4846545F434F4E46ULL; // "HFT_CONF"
     static constexpr uint32_t VERSION = 1;
 
     void init_defaults() {
@@ -77,7 +78,7 @@ struct alignas(64) SharedConfig {  // Cache line aligned
         trading_enabled.store(true);
         max_position.store(1000);
         order_size.store(100);
-        max_daily_loss.store(100000);  // $1000
+        max_daily_loss.store(100000); // $1000
         threshold_bps.store(5);
         lookback_ticks.store(10);
         cooldown_ms.store(0);
@@ -85,9 +86,7 @@ struct alignas(64) SharedConfig {  // Cache line aligned
         last_update_ns.store(0);
     }
 
-    bool is_valid() const {
-        return magic == MAGIC && version == VERSION;
-    }
+    bool is_valid() const { return magic == MAGIC && version == VERSION; }
 };
 
 static_assert(sizeof(SharedConfig) <= 128, "SharedConfig should fit in 2 cache lines");
@@ -116,8 +115,7 @@ public:
             throw std::runtime_error("ftruncate failed");
         }
 
-        void* ptr = mmap(nullptr, sizeof(SharedConfig),
-                         PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+        void* ptr = mmap(nullptr, sizeof(SharedConfig), PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
         ::close(fd);
 
         if (ptr == MAP_FAILED) {
@@ -134,11 +132,10 @@ public:
     static SharedConfig* open(const char* name = DEFAULT_SHM_NAME) {
         int fd = shm_open(name, O_RDWR, 0666);
         if (fd < 0) {
-            return nullptr;  // Henüz oluşturulmamış
+            return nullptr; // Henüz oluşturulmamış
         }
 
-        void* ptr = mmap(nullptr, sizeof(SharedConfig),
-                         PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+        void* ptr = mmap(nullptr, sizeof(SharedConfig), PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
         ::close(fd);
 
         if (ptr == MAP_FAILED) {
@@ -161,8 +158,7 @@ public:
             return nullptr;
         }
 
-        void* ptr = mmap(nullptr, sizeof(SharedConfig),
-                         PROT_READ, MAP_SHARED, fd, 0);
+        void* ptr = mmap(nullptr, sizeof(SharedConfig), PROT_READ, MAP_SHARED, fd, 0);
         ::close(fd);
 
         if (ptr == MAP_FAILED) {
@@ -192,9 +188,7 @@ public:
     }
 
     // Shared memory sil
-    static void destroy(const char* name = DEFAULT_SHM_NAME) {
-        shm_unlink(name);
-    }
+    static void destroy(const char* name = DEFAULT_SHM_NAME) { shm_unlink(name); }
 };
 
 /**
@@ -202,13 +196,9 @@ public:
  */
 class ScopedSharedConfig {
 public:
-    explicit ScopedSharedConfig(bool create = false,
-                                const char* name = SharedConfigManager::DEFAULT_SHM_NAME)
-        : config_(create ? SharedConfigManager::create(name)
-                         : SharedConfigManager::open(name))
-        , is_owner_(create)
-        , name_(name)
-    {}
+    explicit ScopedSharedConfig(bool create = false, const char* name = SharedConfigManager::DEFAULT_SHM_NAME)
+        : config_(create ? SharedConfigManager::create(name) : SharedConfigManager::open(name)), is_owner_(create),
+          name_(name) {}
 
     ~ScopedSharedConfig() {
         if (config_) {
@@ -225,10 +215,7 @@ public:
 
     // Movable
     ScopedSharedConfig(ScopedSharedConfig&& other) noexcept
-        : config_(other.config_)
-        , is_owner_(other.is_owner_)
-        , name_(other.name_)
-    {
+        : config_(other.config_), is_owner_(other.is_owner_), name_(other.name_) {
         other.config_ = nullptr;
         other.is_owner_ = false;
     }
@@ -245,5 +232,5 @@ private:
     const char* name_;
 };
 
-}  // namespace config
-}  // namespace hft
+} // namespace config
+} // namespace hft

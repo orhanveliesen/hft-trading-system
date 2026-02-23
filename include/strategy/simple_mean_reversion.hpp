@@ -19,16 +19,13 @@ namespace strategy {
  */
 
 struct SimpleMRConfig {
-    Quantity order_size = 100;       // Her işlemde kaç lot
-    int64_t max_position = 1000;     // Maksimum pozisyon
+    Quantity order_size = 100;   // Her işlemde kaç lot
+    int64_t max_position = 1000; // Maksimum pozisyon
 };
 
 class SimpleMeanReversion {
 public:
-    explicit SimpleMeanReversion(const SimpleMRConfig& config = {})
-        : config_(config)
-        , last_mid_(INVALID_PRICE)
-    {}
+    explicit SimpleMeanReversion(const SimpleMRConfig& config = {}) : config_(config), last_mid_(INVALID_PRICE) {}
 
     // Ana fonksiyon: Market data geldi, ne yapayım?
     Signal operator()(Price bid, Price ask, int64_t current_position) {
@@ -74,7 +71,7 @@ public:
 
     // Overload: TopOfBook ile de çalışsın
     Signal operator()(Price bid, Price ask) {
-        return (*this)(bid, ask, 0);  // Position bilgisi yoksa 0 varsay
+        return (*this)(bid, ask, 0); // Position bilgisi yoksa 0 varsay
     }
 
     // Config erişimi
@@ -85,17 +82,13 @@ public:
     void reset() { last_mid_ = INVALID_PRICE; }
 
 private:
-    bool can_buy(int64_t position) const {
-        return position < config_.max_position;
-    }
+    bool can_buy(int64_t position) const { return position < config_.max_position; }
 
-    bool can_sell(int64_t position) const {
-        return position > -config_.max_position;
-    }
+    bool can_sell(int64_t position) const { return position > -config_.max_position; }
 
     SimpleMRConfig config_;
     Price last_mid_;
 };
 
-}  // namespace strategy
-}  // namespace hft
+} // namespace strategy
+} // namespace hft

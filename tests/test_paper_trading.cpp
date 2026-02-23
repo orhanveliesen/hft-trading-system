@@ -1,9 +1,10 @@
-#include <cassert>
-#include <iostream>
-#include <thread>
-#include <chrono>
 #include "../include/logging/async_logger.hpp"
 #include "../include/paper/paper_trading_engine.hpp"
+
+#include <cassert>
+#include <chrono>
+#include <iostream>
+#include <thread>
 
 using namespace hft;
 using namespace hft::logging;
@@ -12,11 +13,12 @@ using namespace hft::strategy;
 using namespace hft::risk;
 
 #define TEST(name) void name()
-#define RUN_TEST(name) do { \
-    std::cout << "  " << #name << "... "; \
-    name(); \
-    std::cout << "PASSED\n"; \
-} while(0)
+#define RUN_TEST(name)                                                                                                 \
+    do {                                                                                                               \
+        std::cout << "  " << #name << "... ";                                                                          \
+        name();                                                                                                        \
+        std::cout << "PASSED\n";                                                                                       \
+    } while (0)
 
 #define ASSERT_EQ(a, b) assert((a) == (b))
 #define ASSERT_TRUE(x) assert(x)
@@ -43,7 +45,7 @@ using namespace hft::risk;
 // FUTURE TASK: Refactor AsyncLogger to match this specification.
 // ============================================
 
-#if 0  // DISABLED - AsyncLogger API needs redesign to match this specification
+#if 0 // DISABLED - AsyncLogger API needs redesign to match this specification
 
 TEST(test_log_entry_size) {
     ASSERT_EQ(sizeof(LogEntry), 64);  // One cache line
@@ -168,7 +170,7 @@ TEST(test_async_logger_categories) {
     ASSERT_EQ(captured[2].category, LogCategory::Risk);
 }
 
-#endif  // DISABLED - AsyncLogger API needs redesign to match this specification
+#endif // DISABLED - AsyncLogger API needs redesign to match this specification
 
 // ============================================
 // Paper Order Sender Tests
@@ -181,24 +183,22 @@ TEST(test_paper_sender_order_concept) {
 
 TEST(test_paper_sender_basic_order) {
     FillSimConfig config;
-    config.min_latency_ns = 0;  // No latency for testing
+    config.min_latency_ns = 0; // No latency for testing
     config.max_latency_ns = 0;
-    config.jitter_ns = 0;  // No jitter for deterministic timing
+    config.jitter_ns = 0; // No jitter for deterministic timing
     config.enable_partial_fills = false;
 
     PaperOrderSender sender(config);
 
     std::vector<FillEvent> fills;
-    sender.set_fill_callback([&](const FillEvent& event) {
-        fills.push_back(event);
-    });
+    sender.set_fill_callback([&](const FillEvent& event) { fills.push_back(event); });
 
     ASSERT_TRUE(sender.send_order(1, Side::Buy, 100, true));
     ASSERT_EQ(sender.total_orders(), 1u);
     ASSERT_EQ(sender.pending_count(), 1u);
 
     // Process fills with market price
-    sender.process_fills(1, 1000000, 1001000);  // Bid: $100.00, Ask: $100.10
+    sender.process_fills(1, 1000000, 1001000); // Bid: $100.00, Ask: $100.10
 
     ASSERT_EQ(fills.size(), 1u);
     ASSERT_EQ(fills[0].symbol, 1u);
@@ -209,7 +209,7 @@ TEST(test_paper_sender_basic_order) {
 
 TEST(test_paper_sender_cancel_order) {
     FillSimConfig config;
-    config.min_latency_ns = 1'000'000'000;  // 1 second latency (won't fill)
+    config.min_latency_ns = 1'000'000'000; // 1 second latency (won't fill)
     config.max_latency_ns = 1'000'000'000;
 
     PaperOrderSender sender(config);
@@ -217,7 +217,7 @@ TEST(test_paper_sender_cancel_order) {
     sender.send_order(1, Side::Buy, 100, true);
     ASSERT_EQ(sender.pending_count(), 1u);
 
-    ASSERT_TRUE(sender.cancel_order(1, 1));  // Cancel order ID 1
+    ASSERT_TRUE(sender.cancel_order(1, 1)); // Cancel order ID 1
     ASSERT_EQ(sender.pending_count(), 0u);
 }
 
@@ -225,20 +225,18 @@ TEST(test_paper_sender_slippage) {
     FillSimConfig config;
     config.min_latency_ns = 0;
     config.max_latency_ns = 0;
-    config.jitter_ns = 0;  // No jitter for deterministic timing
-    config.slippage_bps = 10.0;  // 10 bps = 0.1%
+    config.jitter_ns = 0;       // No jitter for deterministic timing
+    config.slippage_bps = 10.0; // 10 bps = 0.1%
     config.enable_partial_fills = false;
 
     PaperOrderSender sender(config);
 
     std::vector<FillEvent> fills;
-    sender.set_fill_callback([&](const FillEvent& event) {
-        fills.push_back(event);
-    });
+    sender.set_fill_callback([&](const FillEvent& event) { fills.push_back(event); });
 
     // Buy order
     sender.send_order(1, Side::Buy, 100, true);
-    sender.process_fills(1, 1000000, 1001000);  // Ask: $100.10
+    sender.process_fills(1, 1000000, 1001000); // Ask: $100.10
 
     // Fill price should be >= ask (slippage goes against us)
     ASSERT_GE(fills[0].price, 1001000u);
@@ -269,8 +267,8 @@ TEST(test_paper_engine_market_data) {
 
     // Feed some market data
     for (int i = 0; i < 30; ++i) {
-        Price bid = 1000000 + i * 100;  // $100.00 + $0.01 per tick
-        Price ask = bid + 1000;          // $0.10 spread
+        Price bid = 1000000 + i * 100; // $100.00 + $0.01 per tick
+        Price ask = bid + 1000;        // $0.10 spread
         engine.on_market_data(1, bid, ask, i * 1000000);
     }
 
@@ -308,20 +306,20 @@ TEST(test_paper_engine_pnl_calculation) {
     config.enable_logging = false;
     config.fill_config.min_latency_ns = 0;
     config.fill_config.max_latency_ns = 0;
-    config.fill_config.slippage_bps = 0;  // No slippage for exact calculation
-    config.fill_config.slippage_variance = 0;  // No random variance
-    config.fill_config.market_impact_bps = 0;  // No market impact
-    config.fill_config.jitter_ns = 0;  // No jitter for deterministic timing
+    config.fill_config.slippage_bps = 0;      // No slippage for exact calculation
+    config.fill_config.slippage_variance = 0; // No random variance
+    config.fill_config.market_impact_bps = 0; // No market impact
+    config.fill_config.jitter_ns = 0;         // No jitter for deterministic timing
     config.fill_config.enable_partial_fills = false;
 
     PaperTradingEngine engine(config);
 
     // Buy 100 shares
     engine.submit_order(1, Side::Buy, 100, true);
-    engine.on_market_data(1, 1000000, 1001000, 0);  // Entry @ ~$100.10
+    engine.on_market_data(1, 1000000, 1001000, 0); // Entry @ ~$100.10
 
     // Price goes up
-    engine.on_market_data(1, 1010000, 1011000, 1000000);  // Bid: $101.00
+    engine.on_market_data(1, 1010000, 1011000, 1000000); // Bid: $101.00
 
     // Should have unrealized profit
     const auto& pos = engine.get_position(1);
@@ -330,9 +328,9 @@ TEST(test_paper_engine_pnl_calculation) {
 
 TEST(test_paper_engine_risk_halt) {
     PaperTradingEngine::Config config;
-    config.initial_capital = 10000 * risk::PRICE_SCALE;  // $10,000 scaled
-    config.max_drawdown_pct = 0.01;  // 1% max drawdown = $100
-    config.daily_loss_limit_pct = 0.01;                   // 1% daily loss limit = $100
+    config.initial_capital = 10000 * risk::PRICE_SCALE; // $10,000 scaled
+    config.max_drawdown_pct = 0.01;                     // 1% max drawdown = $100
+    config.daily_loss_limit_pct = 0.01;                 // 1% daily loss limit = $100
     config.enable_logging = false;
     config.fill_config.min_latency_ns = 0;
     config.fill_config.max_latency_ns = 0;
@@ -351,7 +349,7 @@ TEST(test_paper_engine_risk_halt) {
     ASSERT_FALSE(engine.is_halted());
 
     // Price drops significantly (more than 1% loss on position)
-    engine.on_market_data(1, 980000, 981000, 1000000);  // Bid: $98.00 (2% loss)
+    engine.on_market_data(1, 980000, 981000, 1000000); // Bid: $98.00 (2% loss)
 
     // Should be halted due to drawdown
     ASSERT_TRUE(engine.is_halted());
@@ -362,7 +360,7 @@ TEST(test_paper_engine_risk_halt) {
 
 TEST(test_paper_engine_position_limit) {
     PaperTradingEngine::Config config;
-    config.default_max_position = 100;  // Max 100 shares per symbol
+    config.default_max_position = 100; // Max 100 shares per symbol
     config.enable_logging = false;
     config.fill_config.min_latency_ns = 0;
     config.fill_config.max_latency_ns = 0;
@@ -371,7 +369,7 @@ TEST(test_paper_engine_position_limit) {
     PaperTradingEngine engine(config);
 
     // Register symbol with position limit
-    engine.register_symbol("TEST", 100, 0);  // max 100 shares
+    engine.register_symbol("TEST", 100, 0); // max 100 shares
 
     // Submit order for 100 shares - should work
     ASSERT_TRUE(engine.submit_order(0, Side::Buy, 100, true));

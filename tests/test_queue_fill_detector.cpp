@@ -1,17 +1,19 @@
+#include "../include/paper/queue_fill_detector.hpp"
+
 #include <cassert>
 #include <iostream>
 #include <vector>
-#include "../include/paper/queue_fill_detector.hpp"
 
 using namespace hft;
 using namespace hft::paper;
 
 #define TEST(name) void name()
-#define RUN_TEST(name) do { \
-    std::cout << "  " << #name << "... "; \
-    name(); \
-    std::cout << "PASSED\n"; \
-} while(0)
+#define RUN_TEST(name)                                                                                                 \
+    do {                                                                                                               \
+        std::cout << "  " << #name << "... ";                                                                          \
+        name();                                                                                                        \
+        std::cout << "PASSED\n";                                                                                       \
+    } while (0)
 
 #define ASSERT_EQ(a, b) assert((a) == (b))
 #define ASSERT_TRUE(x) assert(x)
@@ -76,9 +78,7 @@ TEST(test_pessimistic_fill_confirmation) {
     QueueFillDetector detector;
 
     std::vector<FillResult> fills;
-    detector.set_fill_callback([&](OrderId id, const FillResult& result) {
-        fills.push_back(result);
-    });
+    detector.set_fill_callback([&](OrderId id, const FillResult& result) { fills.push_back(result); });
 
     // Register our order at price 100, 500 shares
     detector.register_order(1, 100, Side::Buy, 1000000, 500, 1000);
@@ -94,7 +94,7 @@ TEST(test_pessimistic_fill_confirmation) {
 
     // More trades - now an order AFTER us (sequence > ours) gets filled
     // This simulates seeing a trade where passive_sequence > our_sequence
-    detector.on_trade(100, 1000000, 2000, Side::Sell, 3000, 999);  // seq 999 > our seq
+    detector.on_trade(100, 1000000, 2000, Side::Sell, 3000, 999); // seq 999 > our seq
 
     // NOW we should be confirmed filled
     ASSERT_EQ(fills.size(), 1u);
@@ -106,9 +106,7 @@ TEST(test_fifo_fill_detection) {
     QueueFillDetector detector;
 
     std::vector<FillResult> fills;
-    detector.set_fill_callback([&](OrderId id, const FillResult& result) {
-        fills.push_back(result);
-    });
+    detector.set_fill_callback([&](OrderId id, const FillResult& result) { fills.push_back(result); });
 
     // Our order
     detector.register_order(1, 100, Side::Buy, 1000000, 300, 1000);
@@ -128,7 +126,7 @@ TEST(test_queue_position_tracking) {
     detector.register_order(1, 100, Side::Buy, 1000000, 500, 1000);
 
     // Add orders behind us via L2 update
-    detector.on_l2_update(100, Side::Buy, 1000000, 500, 1500, 2000);  // +1000 shares
+    detector.on_l2_update(100, Side::Buy, 1000000, 500, 1500, 2000); // +1000 shares
 
     auto estimate = detector.get_fill_estimate(1);
     // Our order is at front, so queue_ahead should be 0
@@ -139,15 +137,13 @@ TEST(test_l2_update_removal) {
     QueueFillDetector detector;
 
     std::vector<FillResult> fills;
-    detector.set_fill_callback([&](OrderId id, const FillResult& result) {
-        fills.push_back(result);
-    });
+    detector.set_fill_callback([&](OrderId id, const FillResult& result) { fills.push_back(result); });
 
     // Our order at front
     detector.register_order(1, 100, Side::Buy, 1000000, 500, 1000);
 
     // L2 shows reduction (fills/cancels at this level)
-    detector.on_l2_update(100, Side::Buy, 1000000, 500, 0, 2000);  // Level emptied
+    detector.on_l2_update(100, Side::Buy, 1000000, 500, 0, 2000); // Level emptied
 
     // Our order should be filled
     ASSERT_EQ(fills.size(), 1u);
@@ -158,9 +154,7 @@ TEST(test_multiple_orders_same_level) {
     QueueFillDetector detector;
 
     std::vector<std::pair<OrderId, FillResult>> fills;
-    detector.set_fill_callback([&](OrderId id, const FillResult& result) {
-        fills.push_back({id, result});
-    });
+    detector.set_fill_callback([&](OrderId id, const FillResult& result) { fills.push_back({id, result}); });
 
     // Two of our orders at same price
     detector.register_order(1, 100, Side::Buy, 1000000, 300, 1000);
@@ -188,20 +182,17 @@ TEST(test_probabilistic_tracking) {
 
     auto estimate = detector.get_fill_estimate(1);
     // Should have some confidence level based on activity
-    ASSERT_TRUE(estimate.confidence == FillConfidence::Possible ||
-                estimate.confidence == FillConfidence::Unlikely);
+    ASSERT_TRUE(estimate.confidence == FillConfidence::Possible || estimate.confidence == FillConfidence::Unlikely);
 }
 
 TEST(test_queue_wait_time) {
     QueueFillDetector detector;
 
     FillResult last_fill;
-    detector.set_fill_callback([&](OrderId id, const FillResult& result) {
-        last_fill = result;
-    });
+    detector.set_fill_callback([&](OrderId id, const FillResult& result) { last_fill = result; });
 
-    uint64_t submit_time = 1'000'000'000;  // 1 second in ns
-    uint64_t fill_time = 1'500'000'000;    // 1.5 seconds in ns
+    uint64_t submit_time = 1'000'000'000; // 1 second in ns
+    uint64_t fill_time = 1'500'000'000;   // 1.5 seconds in ns
 
     detector.register_order(1, 100, Side::Buy, 1000000, 500, submit_time);
 
@@ -209,7 +200,7 @@ TEST(test_queue_wait_time) {
     detector.on_l2_update(100, Side::Buy, 1000000, 500, 0, fill_time);
 
     ASSERT_TRUE(last_fill.filled);
-    ASSERT_EQ(last_fill.queue_wait_ns, 500'000'000u);  // 0.5 seconds
+    ASSERT_EQ(last_fill.queue_wait_ns, 500'000'000u); // 0.5 seconds
 }
 
 // ============================================
@@ -219,13 +210,11 @@ TEST(test_queue_wait_time) {
 TEST(test_stats_recording) {
     PaperTradingStats stats;
 
-    FillResult confirmed_fill{
-        .filled = true,
-        .confidence = FillConfidence::Confirmed,
-        .fill_quantity = 100,
-        .fill_price = 1000000,
-        .queue_wait_ns = 1'000'000
-    };
+    FillResult confirmed_fill{.filled = true,
+                              .confidence = FillConfidence::Confirmed,
+                              .fill_quantity = 100,
+                              .fill_price = 1000000,
+                              .queue_wait_ns = 1'000'000};
 
     stats.record_fill(confirmed_fill, 50.0);
 
@@ -255,20 +244,20 @@ TEST(test_stats_queue_wait_avg) {
     FillResult fill1{
         .filled = true,
         .confidence = FillConfidence::Confirmed,
-        .queue_wait_ns = 1'000'000  // 1ms
+        .queue_wait_ns = 1'000'000 // 1ms
     };
 
     FillResult fill2{
         .filled = true,
         .confidence = FillConfidence::Confirmed,
-        .queue_wait_ns = 3'000'000  // 3ms
+        .queue_wait_ns = 3'000'000 // 3ms
     };
 
     stats.record_fill(fill1, 0);
     stats.record_fill(fill2, 0);
 
     ASSERT_EQ(stats.confirmed_fills, 2u);
-    ASSERT_EQ(stats.avg_queue_wait_ms(), 2.0);  // (1+3)/2 = 2ms
+    ASSERT_EQ(stats.avg_queue_wait_ms(), 2.0); // (1+3)/2 = 2ms
 }
 
 // ============================================

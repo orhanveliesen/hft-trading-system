@@ -5,16 +5,16 @@
  * These tests ensure type contracts are enforced at compile time.
  */
 
-#include <iostream>
-#include <cassert>
-
 #include "../include/concepts.hpp"
-#include "../include/order_sender.hpp"
-#include "../include/mock_order_sender.hpp"
 #include "../include/feed_handler.hpp"
-#include "../include/orderbook.hpp"
 #include "../include/market_data_handler.hpp"
+#include "../include/mock_order_sender.hpp"
+#include "../include/order_sender.hpp"
+#include "../include/orderbook.hpp"
 #include "../include/strategy/simple_mean_reversion.hpp"
+
+#include <cassert>
+#include <iostream>
 
 using namespace hft;
 using namespace hft::concepts;
@@ -48,8 +48,7 @@ static_assert(ReadableOrderBook<OrderBook>, "OrderBook must satisfy ReadableOrde
 static_assert(DetailedOrderBook<OrderBook>, "OrderBook must satisfy DetailedOrderBook");
 
 // TradingStrategy
-static_assert(BasicStrategy<strategy::SimpleMeanReversion>,
-              "SimpleMeanReversion must satisfy BasicStrategy");
+static_assert(BasicStrategy<strategy::SimpleMeanReversion>, "SimpleMeanReversion must satisfy BasicStrategy");
 
 // Type traits compatibility
 static_assert(is_order_sender_v<NullOrderSender>, "is_order_sender_v must work");
@@ -127,7 +126,7 @@ void test_trading_strategy_concept() {
 
     // BasicStrategy requires operator()(Price, Price)
     auto signal1 = strategy(100, 101);
-    auto signal2 = strategy(99, 100);  // Price dropped -> should signal
+    auto signal2 = strategy(99, 100); // Price dropped -> should signal
 
     // PositionAwareStrategy requires operator()(Price, Price, Position)
     auto signal3 = strategy(100, 101, 0);
@@ -154,13 +153,13 @@ void test_feed_handler_with_concept() {
 // =============================================================================
 
 // Function constrained by OrderSender concept
-template<OrderSender T>
+template <OrderSender T>
 bool send_test_order(T& sender) {
     return sender.send_order(1, Side::Buy, 100, true);
 }
 
 // Function constrained by ReadableOrderBook concept
-template<ReadableOrderBook T>
+template <ReadableOrderBook T>
 Price get_spread(const T& book) {
     return book.best_ask() - book.best_bid();
 }

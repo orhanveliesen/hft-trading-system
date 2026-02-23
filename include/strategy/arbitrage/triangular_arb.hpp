@@ -1,15 +1,15 @@
 #pragma once
 
-#include "symbol_pair.hpp"
-#include "arbitrage_config.hpp"
 #include "../../types.hpp"
+#include "arbitrage_config.hpp"
+#include "symbol_pair.hpp"
 
-#include <vector>
+#include <algorithm>
+#include <cmath>
+#include <functional>
 #include <unordered_map>
 #include <unordered_set>
-#include <functional>
-#include <cmath>
-#include <algorithm>
+#include <vector>
 
 namespace hft {
 namespace strategy {
@@ -28,27 +28,39 @@ namespace arbitrage {
  *   - If implied ETH/USDT > actual ETH/USDT, profit!
  */
 struct TriangularRelation {
-    SymbolPair leg1;  // A/B - base pair (quote is the "anchor" currency)
-    SymbolPair leg2;  // C/A - cross pair
-    SymbolPair leg3;  // C/B - synthetic pair
+    SymbolPair leg1; // A/B - base pair (quote is the "anchor" currency)
+    SymbolPair leg2; // C/A - cross pair
+    SymbolPair leg3; // C/B - synthetic pair
 
     TriangularArbConfig config;
     TriangularArbState state;
 
     // Symbol to leg mapping for quick updates
     int get_leg_index(const std::string& symbol) const {
-        if (symbol == leg1.original || symbol == leg1.to_string()) return 1;
-        if (symbol == leg2.original || symbol == leg2.to_string()) return 2;
-        if (symbol == leg3.original || symbol == leg3.to_string()) return 3;
+        if (symbol == leg1.original || symbol == leg1.to_string())
+            return 1;
+        if (symbol == leg2.original || symbol == leg2.to_string())
+            return 2;
+        if (symbol == leg3.original || symbol == leg3.to_string())
+            return 3;
         return 0;
     }
 
     // Update price for a leg
     void update_price(int leg, double bid, double ask) {
         switch (leg) {
-            case 1: state.leg1_bid = bid; state.leg1_ask = ask; break;
-            case 2: state.leg2_bid = bid; state.leg2_ask = ask; break;
-            case 3: state.leg3_bid = bid; state.leg3_ask = ask; break;
+        case 1:
+            state.leg1_bid = bid;
+            state.leg1_ask = ask;
+            break;
+        case 2:
+            state.leg2_bid = bid;
+            state.leg2_ask = ask;
+            break;
+        case 3:
+            state.leg3_bid = bid;
+            state.leg3_ask = ask;
+            break;
         }
     }
 
@@ -94,20 +106,19 @@ struct TriangularRelation {
         if (!config.enabled || !state.has_all_prices()) {
             return false;
         }
-        return state.forward_spread > config.min_spread_pct ||
-               state.reverse_spread > config.min_spread_pct;
+        return state.forward_spread > config.min_spread_pct || state.reverse_spread > config.min_spread_pct;
     }
 
     // Get the profitable direction (1 = forward, -1 = reverse, 0 = none)
     int profitable_direction() const {
-        if (state.forward_spread > config.min_spread_pct) return 1;
-        if (state.reverse_spread > config.min_spread_pct) return -1;
+        if (state.forward_spread > config.min_spread_pct)
+            return 1;
+        if (state.reverse_spread > config.min_spread_pct)
+            return -1;
         return 0;
     }
 
-    double best_spread() const {
-        return std::max(state.forward_spread, state.reverse_spread);
-    }
+    double best_spread() const { return std::max(state.forward_spread, state.reverse_spread); }
 };
 
 /**
@@ -117,7 +128,7 @@ struct ArbOrderSignal {
     std::string symbol;
     Side side;
     double quantity;
-    double price;  // Limit price (0 = market)
+    double price; // Limit price (0 = market)
 };
 
 /**
@@ -125,7 +136,7 @@ struct ArbOrderSignal {
  */
 struct ArbOpportunity {
     const TriangularRelation* relation;
-    int direction;  // 1 = forward, -1 = reverse
+    int direction; // 1 = forward, -1 = reverse
     double spread;
     std::vector<ArbOrderSignal> orders;
     uint64_t timestamp_ns;
@@ -144,8 +155,7 @@ class TriangularArbDetector {
 public:
     using OpportunityCallback = std::function<void(const ArbOpportunity&)>;
 
-    explicit TriangularArbDetector(const ArbitrageConfig& config = ArbitrageConfig{})
-        : config_(config) {}
+    explicit TriangularArbDetector(const ArbitrageConfig& config = ArbitrageConfig{}) : config_(config) {}
 
     /**
      * Detect triangular relationships from available symbols
@@ -163,7 +173,8 @@ public:
 
         for (const auto& sym : symbols) {
             // Skip excluded symbols
-            if (is_excluded(sym)) continue;
+            if (is_excluded(sym))
+                continue;
 
             auto parsed = SymbolPair::parse(sym);
             if (parsed && parsed->is_valid()) {
@@ -177,12 +188,15 @@ public:
         for (const auto& ab : pairs) {
             for (const auto& ca : pairs) {
                 // C/A means ca.quote == ab.base
-                if (ca.quote != ab.base) continue;
-                if (ca.base == ab.base || ca.base == ab.quote) continue;
+                if (ca.quote != ab.base)
+                    continue;
+                if (ca.base == ab.base || ca.base == ab.quote)
+                    continue;
 
                 // Look for C/B
                 std::string cb_symbol = ca.base + "/" + ab.quote;
-                if (symbol_set.find(cb_symbol) == symbol_set.end()) continue;
+                if (symbol_set.find(cb_symbol) == symbol_set.end())
+                    continue;
 
                 // Found triangular relationship!
                 TriangularRelation rel;
@@ -229,12 +243,8 @@ public:
      * @param timestamp_ns Timestamp in nanoseconds
      * @return List of opportunities detected (if any)
      */
-    std::vector<ArbOpportunity> on_price_update(
-        const std::string& symbol,
-        double bid,
-        double ask,
-        uint64_t timestamp_ns = 0
-    ) {
+    std::vector<ArbOpportunity> on_price_update(const std::string& symbol, double bid, double ask,
+                                                uint64_t timestamp_ns = 0) {
         std::vector<ArbOpportunity> opportunities;
 
         auto it = symbol_to_relations_.find(symbol);
@@ -298,9 +308,7 @@ public:
     /**
      * Set callback for opportunity detection
      */
-    void set_opportunity_callback(OpportunityCallback callback) {
-        opportunity_callback_ = std::move(callback);
-    }
+    void set_opportunity_callback(OpportunityCallback callback) { opportunity_callback_ = std::move(callback); }
 
     /**
      * Mark an opportunity as executed
@@ -351,7 +359,8 @@ public:
         stats.total_relations = relations_.size();
 
         for (const auto& rel : relations_) {
-            if (rel.config.enabled) stats.active_relations++;
+            if (rel.config.enabled)
+                stats.active_relations++;
             stats.total_opportunities += rel.state.opportunities_detected;
             stats.total_executions += rel.state.opportunities_executed;
             stats.total_profit += rel.state.total_profit;
@@ -407,10 +416,7 @@ private:
         }
     }
 
-    std::vector<ArbOrderSignal> generate_orders(
-        const TriangularRelation& rel,
-        int direction
-    ) const {
+    std::vector<ArbOrderSignal> generate_orders(const TriangularRelation& rel, int direction) const {
         std::vector<ArbOrderSignal> orders;
         double qty = rel.config.max_quantity;
 
@@ -435,6 +441,6 @@ private:
     OpportunityCallback opportunity_callback_;
 };
 
-}  // namespace arbitrage
-}  // namespace strategy
-}  // namespace hft
+} // namespace arbitrage
+} // namespace strategy
+} // namespace hft

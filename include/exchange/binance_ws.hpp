@@ -1,17 +1,18 @@
 #pragma once
 
-#include "market_data.hpp"
 #include "../types.hpp"
-#include <libwebsockets.h>
-#include <string>
-#include <vector>
-#include <functional>
+#include "market_data.hpp"
+
 #include <atomic>
-#include <thread>
+#include <concepts>
+#include <cstring>
+#include <functional>
+#include <libwebsockets.h>
 #include <mutex>
 #include <queue>
-#include <cstring>
-#include <concepts>
+#include <string>
+#include <thread>
+#include <vector>
 
 namespace hft {
 namespace exchange {
@@ -64,7 +65,7 @@ struct WsKline {
     Price close = 0;
     double volume = 0;
     uint32_t trades = 0;
-    bool is_closed = false;  // True when candle is finalized
+    bool is_closed = false; // True when candle is finalized
 };
 
 // Callbacks
@@ -74,12 +75,12 @@ using WsKlineCallback = std::function<void(const WsKline&)>;
 using WsErrorCallback = std::function<void(const std::string&)>;
 using WsConnectCallback = std::function<void(bool connected)>;
 // Callback concepts for compile-time type checking
-template<typename T, typename... Args>
+template <typename T, typename... Args>
 concept Callable = requires(T t, Args... args) {
     { t(args...) } -> std::same_as<void>;
 };
 
-template<typename T>
+template <typename T>
 concept ReconnectCallable = Callable<T, uint32_t, bool>;
 
 // Type-erased storage (required due to libwebsockets C-style callback architecture)
@@ -110,17 +111,10 @@ public:
     static constexpr int TESTNET_PORT = 443;
 
     explicit BinanceWs(bool use_testnet = false)
-        : host_(use_testnet ? TESTNET_WS : MAINNET_WS)
-        , port_(use_testnet ? TESTNET_PORT : MAINNET_PORT)
-        , running_(false)
-        , connected_(false)
-        , wsi_(nullptr)
-        , context_(nullptr) {
-    }
+        : host_(use_testnet ? TESTNET_WS : MAINNET_WS), port_(use_testnet ? TESTNET_PORT : MAINNET_PORT),
+          running_(false), connected_(false), wsi_(nullptr), context_(nullptr) {}
 
-    ~BinanceWs() {
-        disconnect();
-    }
+    ~BinanceWs() { disconnect(); }
 
     // Non-copyable
     BinanceWs(const BinanceWs&) = delete;
@@ -154,25 +148,15 @@ public:
     // Callbacks
     // ========================================
 
-    void set_book_ticker_callback(BookTickerCallback cb) {
-        book_ticker_callback_ = std::move(cb);
-    }
+    void set_book_ticker_callback(BookTickerCallback cb) { book_ticker_callback_ = std::move(cb); }
 
-    void set_trade_callback(WsTradeCallback cb) {
-        trade_callback_ = std::move(cb);
-    }
+    void set_trade_callback(WsTradeCallback cb) { trade_callback_ = std::move(cb); }
 
-    void set_kline_callback(WsKlineCallback cb) {
-        kline_callback_ = std::move(cb);
-    }
+    void set_kline_callback(WsKlineCallback cb) { kline_callback_ = std::move(cb); }
 
-    void set_error_callback(WsErrorCallback cb) {
-        error_callback_ = std::move(cb);
-    }
+    void set_error_callback(WsErrorCallback cb) { error_callback_ = std::move(cb); }
 
-    void set_connect_callback(WsConnectCallback cb) {
-        connect_callback_ = std::move(cb);
-    }
+    void set_connect_callback(WsConnectCallback cb) { connect_callback_ = std::move(cb); }
 
     // ========================================
     // Connection Management
@@ -203,41 +187,33 @@ public:
         connected_ = false;
     }
 
-    bool is_connected() const {
-        return connected_;
-    }
+    bool is_connected() const { return connected_; }
 
-    bool is_running() const {
-        return running_;
-    }
+    bool is_running() const { return running_; }
 
     // ========================================
     // Auto-Reconnect and Health Management
     // ========================================
 
-    void enable_auto_reconnect(bool enable = true) {
-        auto_reconnect_ = enable;
-    }
+    void enable_auto_reconnect(bool enable = true) { auto_reconnect_ = enable; }
 
     bool is_healthy() const {
-        return is_healthy(30);  // Default to 30 seconds
+        return is_healthy(30); // Default to 30 seconds
     }
 
     bool is_healthy(int timeout_seconds) const {
-        if (!connected_) return false;
+        if (!connected_)
+            return false;
         // Consider healthy if we received data within timeout
         auto now = std::chrono::steady_clock::now();
-        auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
-            now - last_data_time_.load()).count();
+        auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - last_data_time_.load()).count();
         return elapsed < timeout_seconds;
     }
 
-    void force_reconnect() {
-        reconnect_requested_ = true;
-    }
+    void force_reconnect() { reconnect_requested_ = true; }
 
     // Template setter with concept constraint for compile-time type checking
-    template<ReconnectCallable Callback>
+    template <ReconnectCallable Callback>
     void set_reconnect_callback(Callback&& cb) {
         reconnect_callback_ = std::forward<Callback>(cb);
     }
@@ -285,7 +261,8 @@ private:
 
         std::string path = "/stream?streams=";
         for (size_t i = 0; i < streams_.size(); ++i) {
-            if (i > 0) path += "/";
+            if (i > 0)
+                path += "/";
             path += streams_[i];
         }
         return path;
@@ -322,21 +299,19 @@ private:
         }
 
         // Determine message type and parse
-        if (stream_name.find("@bookTicker") != std::string::npos ||
-            data_json.find("\"b\":") != std::string::npos) {
+        if (stream_name.find("@bookTicker") != std::string::npos || data_json.find("\"b\":") != std::string::npos) {
             parse_book_ticker(data_json);
-        } else if (stream_name.find("@trade") != std::string::npos ||
-                   data_json.find("\"T\":") != std::string::npos) {
+        } else if (stream_name.find("@trade") != std::string::npos || data_json.find("\"T\":") != std::string::npos) {
             parse_trade(data_json);
-        } else if (stream_name.find("@kline") != std::string::npos ||
-                   data_json.find("\"k\":") != std::string::npos) {
+        } else if (stream_name.find("@kline") != std::string::npos || data_json.find("\"k\":") != std::string::npos) {
             parse_kline(data_json);
         }
     }
 
     // Parse book ticker: {"u":123,"s":"BTCUSDT","b":"50000.00","B":"1.5","a":"50001.00","A":"2.0"}
     void parse_book_ticker(const std::string& json) {
-        if (!book_ticker_callback_) return;
+        if (!book_ticker_callback_)
+            return;
 
         BookTicker bt;
         bt.symbol = extract_string(json, "s");
@@ -351,7 +326,8 @@ private:
 
     // Parse trade: {"e":"trade","E":123,"s":"BTCUSDT","t":123,"p":"50000.00","q":"1.5","T":123,"m":true}
     void parse_trade(const std::string& json) {
-        if (!trade_callback_) return;
+        if (!trade_callback_)
+            return;
 
         WsTrade trade;
         trade.symbol = extract_string(json, "s");
@@ -366,15 +342,18 @@ private:
 
     // Parse kline: {"e":"kline","E":123,"s":"BTCUSDT","k":{...}}
     void parse_kline(const std::string& json) {
-        if (!kline_callback_) return;
+        if (!kline_callback_)
+            return;
 
         // Find the "k" object
         size_t k_pos = json.find("\"k\":");
-        if (k_pos == std::string::npos) return;
+        if (k_pos == std::string::npos)
+            return;
 
         size_t start = json.find("{", k_pos);
         size_t end = json.find("}", start);
-        if (start == std::string::npos || end == std::string::npos) return;
+        if (start == std::string::npos || end == std::string::npos)
+            return;
 
         std::string k_json = json.substr(start, end - start + 1);
 
@@ -397,11 +376,13 @@ private:
     std::string extract_string(const std::string& json, const std::string& key) {
         std::string search = "\"" + key + "\":\"";
         size_t pos = json.find(search);
-        if (pos == std::string::npos) return "";
+        if (pos == std::string::npos)
+            return "";
 
         size_t start = pos + search.length();
         size_t end = json.find("\"", start);
-        if (end == std::string::npos) return "";
+        if (end == std::string::npos)
+            return "";
 
         return json.substr(start, end - start);
     }
@@ -422,11 +403,13 @@ private:
         // Try unquoted: "key":123.45
         search = "\"" + key + "\":";
         pos = json.find(search);
-        if (pos == std::string::npos) return 0.0;
+        if (pos == std::string::npos)
+            return 0.0;
 
         size_t start = pos + search.length();
         size_t end = json.find_first_of(",}", start);
-        if (end == std::string::npos) return 0.0;
+        if (end == std::string::npos)
+            return 0.0;
 
         return std::stod(json.substr(start, end - start));
     }
@@ -434,11 +417,13 @@ private:
     uint64_t extract_uint64(const std::string& json, const std::string& key) {
         std::string search = "\"" + key + "\":";
         size_t pos = json.find(search);
-        if (pos == std::string::npos) return 0;
+        if (pos == std::string::npos)
+            return 0;
 
         size_t start = pos + search.length();
         size_t end = json.find_first_of(",}", start);
-        if (end == std::string::npos) return 0;
+        if (end == std::string::npos)
+            return 0;
 
         return std::stoull(json.substr(start, end - start));
     }
@@ -446,7 +431,8 @@ private:
     bool extract_bool(const std::string& json, const std::string& key) {
         std::string search = "\"" + key + "\":";
         size_t pos = json.find(search);
-        if (pos == std::string::npos) return false;
+        if (pos == std::string::npos)
+            return false;
 
         size_t start = pos + search.length();
         return (json.compare(start, 4, "true") == 0);
@@ -460,47 +446,47 @@ private:
     static constexpr int LWS_CLIENT_RECEIVE_COMPAT = LWS_CALLBACK_CLIENT_RECEIVE;
 #endif
 
-    static int ws_callback(struct lws* wsi, enum lws_callback_reasons reason,
-                           void* user, void* in, size_t len) {
+    static int ws_callback(struct lws* wsi, enum lws_callback_reasons reason, void* user, void* in, size_t len) {
         BinanceWs* self = static_cast<BinanceWs*>(lws_context_user(lws_get_context(wsi)));
 
-        if (!self) return 0;
+        if (!self)
+            return 0;
 
         switch (reason) {
-            case LWS_CALLBACK_CLIENT_ESTABLISHED:
-                self->connected_ = true;
-                if (self->connect_callback_) {
-                    self->connect_callback_(true);
-                }
-                break;
+        case LWS_CALLBACK_CLIENT_ESTABLISHED:
+            self->connected_ = true;
+            if (self->connect_callback_) {
+                self->connect_callback_(true);
+            }
+            break;
 
-            case LWS_CALLBACK_CLIENT_RECEIVE:
+        case LWS_CALLBACK_CLIENT_RECEIVE:
 #ifdef LWS_VERSION_4_3_PLUS
-            case 71:  // LWS_CALLBACK_CLIENT_RECEIVE in lws 4.3+
+        case 71: // LWS_CALLBACK_CLIENT_RECEIVE in lws 4.3+
 #endif
-                if (in && len > 0) {
-                    std::string msg(static_cast<char*>(in), len);
-                    self->parse_message(msg);
-                }
-                break;
+            if (in && len > 0) {
+                std::string msg(static_cast<char*>(in), len);
+                self->parse_message(msg);
+            }
+            break;
 
-            case LWS_CALLBACK_CLIENT_CONNECTION_ERROR:
-                self->connected_ = false;
-                if (self->error_callback_) {
-                    std::string error = in ? std::string(static_cast<char*>(in), len) : "Connection error";
-                    self->error_callback_(error);
-                }
-                break;
+        case LWS_CALLBACK_CLIENT_CONNECTION_ERROR:
+            self->connected_ = false;
+            if (self->error_callback_) {
+                std::string error = in ? std::string(static_cast<char*>(in), len) : "Connection error";
+                self->error_callback_(error);
+            }
+            break;
 
-            case LWS_CALLBACK_CLOSED:
-                self->connected_ = false;
-                if (self->connect_callback_) {
-                    self->connect_callback_(false);
-                }
-                break;
+        case LWS_CALLBACK_CLOSED:
+            self->connected_ = false;
+            if (self->connect_callback_) {
+                self->connect_callback_(false);
+            }
+            break;
 
-            default:
-                break;
+        default:
+            break;
         }
 
         return 0;
@@ -512,15 +498,11 @@ private:
         struct lws_context_creation_info info;
         memset(&info, 0, sizeof(info));
 
-        static const struct lws_protocols protocols[] = {
-            {
-                "binance-ws",
-                ws_callback,
-                0,
-                65536,  // rx buffer size
-            },
-            { nullptr, nullptr, 0, 0 }
-        };
+        static const struct lws_protocols protocols[] = {{
+                                                             "binance-ws", ws_callback, 0,
+                                                             65536, // rx buffer size
+                                                         },
+                                                         {nullptr, nullptr, 0, 0}};
 
         info.port = CONTEXT_PORT_NO_LISTEN;
         info.protocols = protocols;
@@ -551,13 +533,10 @@ private:
         ccinfo.path = path.c_str();
         ccinfo.host = host_.c_str();
         ccinfo.origin = host_.c_str();
-        ccinfo.protocol = protocols[0].name;  // Use same protocol name as defined
+        ccinfo.protocol = protocols[0].name; // Use same protocol name as defined
         // WSL2'de CA bundle sorunu olabilir, sertifika doğrulamayı atla
-        ccinfo.ssl_connection = LCCSCF_USE_SSL |
-                                LCCSCF_ALLOW_SELFSIGNED |
-                                LCCSCF_SKIP_SERVER_CERT_HOSTNAME_CHECK |
-                                LCCSCF_ALLOW_EXPIRED |
-                                LCCSCF_ALLOW_INSECURE;
+        ccinfo.ssl_connection = LCCSCF_USE_SSL | LCCSCF_ALLOW_SELFSIGNED | LCCSCF_SKIP_SERVER_CERT_HOSTNAME_CHECK |
+                                LCCSCF_ALLOW_EXPIRED | LCCSCF_ALLOW_INSECURE;
 
         wsi_ = lws_client_connect_via_info(&ccinfo);
         if (!wsi_) {
@@ -569,33 +548,28 @@ private:
 
         // Event loop with auto-reconnect (unlimited retries with exponential backoff)
         uint32_t retry_count = 0;
-        static constexpr int BASE_RETRY_DELAY_SEC = 5;      // Start with 5 seconds
-        static constexpr int MAX_RETRY_DELAY_SEC = 300;     // Max 5 minutes between retries
+        static constexpr int BASE_RETRY_DELAY_SEC = 5;  // Start with 5 seconds
+        static constexpr int MAX_RETRY_DELAY_SEC = 300; // Max 5 minutes between retries
         auto last_connect_attempt = std::chrono::steady_clock::now();
 
         while (running_) {
-            lws_service(context_, 100);  // 100ms timeout
+            lws_service(context_, 100); // 100ms timeout
 
             // Handle reconnection if needed
             auto now = std::chrono::steady_clock::now();
 
             // Calculate backoff delay: 5s, 10s, 20s, 40s, 80s, ... up to 300s
-            int backoff_delay = std::min(
-                BASE_RETRY_DELAY_SEC * (1 << std::min(retry_count, 6u)),
-                MAX_RETRY_DELAY_SEC
-            );
+            int backoff_delay = std::min(BASE_RETRY_DELAY_SEC * (1 << std::min(retry_count, 6u)), MAX_RETRY_DELAY_SEC);
 
-            auto since_last_attempt = std::chrono::duration_cast<std::chrono::seconds>(
-                now - last_connect_attempt).count();
+            auto since_last_attempt =
+                std::chrono::duration_cast<std::chrono::seconds>(now - last_connect_attempt).count();
 
-            if (reconnect_requested_.exchange(false) ||
-                (!connected_ && since_last_attempt > backoff_delay)) {
-
+            if (reconnect_requested_.exchange(false) || (!connected_ && since_last_attempt > backoff_delay)) {
                 // UNLIMITED RETRIES - connection is essential for trading
                 ++retry_count;
                 if (error_callback_) {
-                    error_callback_("Reconnection attempt " + std::to_string(retry_count) +
-                                   " (next retry in " + std::to_string(backoff_delay) + "s)");
+                    error_callback_("Reconnection attempt " + std::to_string(retry_count) + " (next retry in " +
+                                    std::to_string(backoff_delay) + "s)");
                 }
                 if (reconnect_callback_) {
                     reconnect_callback_(retry_count, false);
@@ -609,7 +583,7 @@ private:
             // Reset retry count on successful connection
             if (connected_) {
                 if (retry_count > 0 && reconnect_callback_) {
-                    reconnect_callback_(retry_count, true);  // Notify success
+                    reconnect_callback_(retry_count, true); // Notify success
                 }
                 retry_count = 0;
             }
@@ -617,5 +591,5 @@ private:
     }
 };
 
-}  // namespace exchange
-}  // namespace hft
+} // namespace exchange
+} // namespace hft

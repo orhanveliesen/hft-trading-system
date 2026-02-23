@@ -22,8 +22,9 @@
  * All methods inline to eliminate function call overhead on hot path.
  */
 
-#include "types.hpp"
 #include "book_side.hpp"
+#include "types.hpp"
+
 #include <array>
 #include <memory>
 
@@ -35,23 +36,15 @@ public:
     static constexpr size_t DEFAULT_PRICE_RANGE = 200'000;
     static constexpr Price DEFAULT_BASE_PRICE = 90'000;
 
-    inline OrderBook()
-        : OrderBook(DEFAULT_BASE_PRICE, DEFAULT_PRICE_RANGE)
-    {}
+    inline OrderBook() : OrderBook(DEFAULT_BASE_PRICE, DEFAULT_PRICE_RANGE) {}
 
-    inline explicit OrderBook(Price base_price)
-        : OrderBook(base_price, DEFAULT_PRICE_RANGE)
-    {}
+    inline explicit OrderBook(Price base_price) : OrderBook(base_price, DEFAULT_PRICE_RANGE) {}
 
     inline OrderBook(Price base_price, size_t price_range)
-        : order_pool_(std::make_unique<std::array<Order, MAX_ORDERS>>())
-        , level_pool_(std::make_unique<std::array<PriceLevel, MAX_PRICE_LEVELS>>())
-        , free_orders_(nullptr)
-        , free_levels_(nullptr)
-        , order_index_(std::make_unique<std::array<Order*, MAX_ORDERS>>())
-        , bids_(base_price, price_range)
-        , asks_(base_price, price_range)
-    {
+        : order_pool_(std::make_unique<std::array<Order, MAX_ORDERS>>()),
+          level_pool_(std::make_unique<std::array<PriceLevel, MAX_PRICE_LEVELS>>()), free_orders_(nullptr),
+          free_levels_(nullptr), order_index_(std::make_unique<std::array<Order*, MAX_ORDERS>>()),
+          bids_(base_price, price_range), asks_(base_price, price_range) {
         // Initialize order free list
         for (size_t i = 0; i < MAX_ORDERS - 1; ++i) {
             (*order_pool_)[i].next = &(*order_pool_)[i + 1];
@@ -136,21 +129,21 @@ public:
     }
 
     inline bool cancel_order(OrderId id) {
-        if (!is_valid_order_id(id)) return false;
+        if (!is_valid_order_id(id))
+            return false;
 
         Order* order = (*order_index_)[id];
-        if (!order) return false;
+        if (!order)
+            return false;
 
         // Find the price level via BookSide - O(1)
-        PriceLevel* level = (order->side == Side::Buy)
-            ? bids_.find_level(order->price)
-            : asks_.find_level(order->price);
+        PriceLevel* level =
+            (order->side == Side::Buy) ? bids_.find_level(order->price) : asks_.find_level(order->price);
 
         if (level) {
             remove_order_from_level(order, level);
-            PriceLevel* removed = (order->side == Side::Buy)
-                ? bids_.remove_level_if_empty(level)
-                : asks_.remove_level_if_empty(level);
+            PriceLevel* removed =
+                (order->side == Side::Buy) ? bids_.remove_level_if_empty(level) : asks_.remove_level_if_empty(level);
             if (removed) {
                 deallocate_level(removed);
             }
@@ -163,24 +156,25 @@ public:
     }
 
     inline bool execute_order(OrderId id, Quantity quantity) {
-        if (!is_valid_order_id(id)) return false;
+        if (!is_valid_order_id(id))
+            return false;
 
         Order* order = (*order_index_)[id];
-        if (!order) return false;
+        if (!order)
+            return false;
 
         // Find the price level via BookSide - O(1)
-        PriceLevel* level = (order->side == Side::Buy)
-            ? bids_.find_level(order->price)
-            : asks_.find_level(order->price);
+        PriceLevel* level =
+            (order->side == Side::Buy) ? bids_.find_level(order->price) : asks_.find_level(order->price);
 
-        if (!level) return false;
+        if (!level)
+            return false;
 
         if (quantity >= order->quantity) {
             // Full execution - remove order
             remove_order_from_level(order, level);
-            PriceLevel* removed = (order->side == Side::Buy)
-                ? bids_.remove_level_if_empty(level)
-                : asks_.remove_level_if_empty(level);
+            PriceLevel* removed =
+                (order->side == Side::Buy) ? bids_.remove_level_if_empty(level) : asks_.remove_level_if_empty(level);
             if (removed) {
                 deallocate_level(removed);
             }
@@ -196,21 +190,13 @@ public:
     }
 
     // Queries - delegated to BookSide
-    inline Price best_bid() const {
-        return bids_.best_price();
-    }
+    inline Price best_bid() const { return bids_.best_price(); }
 
-    inline Price best_ask() const {
-        return asks_.best_price();
-    }
+    inline Price best_ask() const { return asks_.best_price(); }
 
-    inline Quantity bid_quantity_at(Price price) const {
-        return bids_.quantity_at(price);
-    }
+    inline Quantity bid_quantity_at(Price price) const { return bids_.quantity_at(price); }
 
-    inline Quantity ask_quantity_at(Price price) const {
-        return asks_.quantity_at(price);
-    }
+    inline Quantity ask_quantity_at(Price price) const { return asks_.quantity_at(price); }
 
 private:
     // Pre-allocated pools
@@ -230,7 +216,8 @@ private:
 
     // Order pool management
     inline Order* allocate_order() {
-        if (!free_orders_) return nullptr;
+        if (!free_orders_)
+            return nullptr;
         Order* order = free_orders_;
         free_orders_ = free_orders_->next;
         order->prev = nullptr;
@@ -245,7 +232,8 @@ private:
 
     // Level pool management
     inline PriceLevel* allocate_level() {
-        if (!free_levels_) return nullptr;
+        if (!free_levels_)
+            return nullptr;
         PriceLevel* level = free_levels_;
         free_levels_ = free_levels_->next;
         level->prev = nullptr;
@@ -294,12 +282,11 @@ private:
     }
 
     // Order index management
-    __attribute__((always_inline))
-    void clear_order_index(OrderId id) {
+    __attribute__((always_inline)) void clear_order_index(OrderId id) {
         if (id < MAX_ORDERS) {
             (*order_index_)[id] = nullptr;
         }
     }
 };
 
-}  // namespace hft
+} // namespace hft

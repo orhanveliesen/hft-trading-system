@@ -22,9 +22,9 @@ namespace util {
 // ============================================================================
 
 namespace detail {
-    inline std::atomic<bool>* g_running_flag = nullptr;
-    inline void (*g_pre_shutdown_callback)() = nullptr;
-}
+inline std::atomic<bool>* g_running_flag = nullptr;
+inline void (*g_pre_shutdown_callback)() = nullptr;
+} // namespace detail
 
 /**
  * Graceful shutdown signal handler.
@@ -69,7 +69,8 @@ inline void install_shutdown_handler(std::atomic<bool>& running, void (*pre_shut
  * @return true if pinning succeeded or was skipped, false on error
  */
 inline bool set_cpu_affinity(int cpu) {
-    if (cpu < 0) return true;  // No pinning requested
+    if (cpu < 0)
+        return true; // No pinning requested
 
     cpu_set_t cpuset;
     CPU_ZERO(&cpuset);
@@ -83,5 +84,5 @@ inline bool set_cpu_affinity(int cpu) {
     return true;
 }
 
-}  // namespace util
-}  // namespace hft
+} // namespace util
+} // namespace hft

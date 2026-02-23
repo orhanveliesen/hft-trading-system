@@ -10,10 +10,11 @@
 
 #include "../include/exchange/binance_rest.hpp"
 #include "../include/exchange/market_data.hpp"
-#include <iostream>
-#include <iomanip>
-#include <ctime>
+
 #include <cstring>
+#include <ctime>
+#include <iomanip>
+#include <iostream>
 #include <unistd.h>
 
 using namespace hft;
@@ -44,7 +45,7 @@ Timestamp parse_date(const std::string& date_str) {
     tm.tm_min = 0;
     tm.tm_sec = 0;
 
-    time_t t = timegm(&tm);  // UTC
+    time_t t = timegm(&tm); // UTC
     return static_cast<Timestamp>(t) * 1000;
 }
 
@@ -108,7 +109,7 @@ int main(int argc, char* argv[]) {
         // Parse dates
         Timestamp start_ts = parse_date(start_date);
         Timestamp end_ts = parse_date(end_date);
-        end_ts += 24 * 60 * 60 * 1000 - 1;  // End of day
+        end_ts += 24 * 60 * 60 * 1000 - 1; // End of day
 
         std::cout << "Fetching " << symbol << " " << interval << " klines\n";
         std::cout << "From: " << format_timestamp(start_ts) << " UTC\n";
@@ -116,7 +117,7 @@ int main(int argc, char* argv[]) {
         std::cout << "\n";
 
         // Create client
-        BinanceRest client(false);  // Use mainnet
+        BinanceRest client(false); // Use mainnet
 
         // Test connection
         std::cout << "Checking server time... ";
@@ -154,7 +155,7 @@ int main(int argc, char* argv[]) {
             }
 
             // Rate limiting
-            usleep(100000);  // 100ms
+            usleep(100000); // 100ms
         }
 
         std::cout << "\n\n";
@@ -175,8 +176,10 @@ int main(int argc, char* argv[]) {
         double total_volume = 0;
 
         for (const auto& k : klines) {
-            if (k.low < min_price) min_price = k.low;
-            if (k.high > max_price) max_price = k.high;
+            if (k.low < min_price)
+                min_price = k.low;
+            if (k.high > max_price)
+                max_price = k.high;
             total_volume += k.volume;
         }
 

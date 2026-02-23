@@ -8,19 +8,21 @@
  * 4. is_dangerous() helper
  */
 
-#include <cassert>
-#include <iostream>
-#include <cmath>
 #include "../include/strategy/regime_detector.hpp"
+
+#include <cassert>
+#include <cmath>
+#include <iostream>
 
 using namespace hft::strategy;
 
 #define TEST(name) void name()
-#define RUN_TEST(name) do { \
-    std::cout << "Running " << #name << "... "; \
-    name(); \
-    std::cout << "PASSED\n"; \
-} while(0)
+#define RUN_TEST(name)                                                                                                 \
+    do {                                                                                                               \
+        std::cout << "Running " << #name << "... ";                                                                    \
+        name();                                                                                                        \
+        std::cout << "PASSED\n";                                                                                       \
+    } while (0)
 
 #define ASSERT_EQ(a, b) assert((a) == (b))
 #define ASSERT_TRUE(x) assert(x)
@@ -31,10 +33,10 @@ using namespace hft::strategy;
 // Helper to create spike-tuned config
 RegimeConfig create_spike_config() {
     RegimeConfig config;
-    config.spike_threshold = 3.0;      // 3x average = spike
-    config.spike_lookback = 10;         // Use 10 bars for average
-    config.spike_min_move = 0.005;     // 0.5% minimum move
-    config.spike_cooldown = 5;          // 5 bars cooldown
+    config.spike_threshold = 3.0;  // 3x average = spike
+    config.spike_lookback = 10;    // Use 10 bars for average
+    config.spike_min_move = 0.005; // 0.5% minimum move
+    config.spike_cooldown = 5;     // 5 bars cooldown
     config.lookback = 10;
     return config;
 }
@@ -46,7 +48,7 @@ TEST(test_normal_movement_no_spike) {
     // Feed normal price movements (~0.1% each)
     double price = 100.0;
     for (int i = 0; i < 20; ++i) {
-        price *= 1.001;  // 0.1% move
+        price *= 1.001; // 0.1% move
         detector.update(price);
     }
 
@@ -63,13 +65,13 @@ TEST(test_spike_detection_on_large_move) {
     // Feed normal price movements to establish baseline
     double price = 100.0;
     for (int i = 0; i < 15; ++i) {
-        price *= 1.001;  // 0.1% normal moves
+        price *= 1.001; // 0.1% normal moves
         detector.update(price);
     }
 
     // Now simulate a spike (2% move when average is 0.1%)
     // This is 20x the average, should trigger spike
-    double spike_price = price * 1.02;  // 2% sudden move
+    double spike_price = price * 1.02; // 2% sudden move
     detector.update(spike_price);
 
     // Should be a spike
@@ -119,13 +121,13 @@ TEST(test_minimum_move_threshold) {
     // Feed some prices to establish baseline
     double price = 100.0;
     for (int i = 0; i < 15; ++i) {
-        price *= 1.0001;  // Very small 0.01% moves
+        price *= 1.0001; // Very small 0.01% moves
         detector.update(price);
     }
 
     // Even if relative move is 3x, if absolute move < 0.5%, no spike
     // Average move is ~0.01%, so 3x = 0.03% which is < 0.5% threshold
-    price *= 1.0003;  // 0.03% move (3x average but below min threshold)
+    price *= 1.0003; // 0.03% move (3x average but below min threshold)
     detector.update(price);
 
     ASSERT_FALSE(detector.is_spike());
@@ -138,7 +140,7 @@ TEST(test_downward_spike) {
     // Establish baseline
     double price = 100.0;
     for (int i = 0; i < 15; ++i) {
-        price *= 1.001;  // Upward 0.1% moves
+        price *= 1.001; // Upward 0.1% moves
         detector.update(price);
     }
 
@@ -153,7 +155,7 @@ TEST(test_downward_spike) {
 
 TEST(test_is_dangerous_includes_high_volatility) {
     RegimeConfig high_vol_config;
-    high_vol_config.high_vol_threshold = 0.005;  // Very low threshold
+    high_vol_config.high_vol_threshold = 0.005; // Very low threshold
     high_vol_config.lookback = 10;
 
     RegimeDetector detector(high_vol_config);

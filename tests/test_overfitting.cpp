@@ -1,9 +1,10 @@
+#include "../include/strategy/overfitted_strategy.hpp"
+
 #include <cassert>
+#include <cmath>
 #include <iostream>
 #include <random>
 #include <vector>
-#include <cmath>
-#include "../include/strategy/overfitted_strategy.hpp"
 
 using namespace hft::strategy;
 
@@ -15,8 +16,7 @@ using namespace hft::strategy;
  */
 
 // Generate synthetic price data with some patterns
-std::vector<double> generate_prices(int count, double start, double vol,
-                                     uint32_t seed, bool with_pattern) {
+std::vector<double> generate_prices(int count, double start, double vol, uint32_t seed, bool with_pattern) {
     std::mt19937 gen(seed);
     std::normal_distribution<> noise(0, vol);
 
@@ -33,7 +33,7 @@ std::vector<double> generate_prices(int count, double start, double vol,
             int hour = (i / 60) % 24;
             // The pattern: price tends to rise at hour 8-11
             if (hour >= 8 && hour <= 11) {
-                price *= 1.0001;  // Tiny upward bias
+                price *= 1.0001; // Tiny upward bias
             }
         }
 
@@ -50,8 +50,7 @@ struct SimResult {
     double max_drawdown = 0;
 };
 
-SimResult simulate_strategy(OverfittedStrategy& strat,
-                            const std::vector<double>& prices) {
+SimResult simulate_strategy(OverfittedStrategy& strat, const std::vector<double>& prices) {
     SimResult result;
     double position = 0;
     double entry_price = 0;
@@ -68,38 +67,41 @@ SimResult simulate_strategy(OverfittedStrategy& strat,
         if (signal.should_buy && position == 0) {
             position = 1;
             entry_price = prices[i];
-        }
-        else if (signal.should_sell && position == 1) {
+        } else if (signal.should_sell && position == 1) {
             double pnl = prices[i] - entry_price;
             equity += pnl;
             result.total_pnl += pnl;
             result.total_trades++;
 
-            if (pnl > 0) result.wins++;
-            else result.losses++;
+            if (pnl > 0)
+                result.wins++;
+            else
+                result.losses++;
 
             position = 0;
-        }
-        else if (signal.should_sell && position == 0) {
+        } else if (signal.should_sell && position == 0) {
             position = -1;
             entry_price = prices[i];
-        }
-        else if (signal.should_buy && position == -1) {
+        } else if (signal.should_buy && position == -1) {
             double pnl = entry_price - prices[i];
             equity += pnl;
             result.total_pnl += pnl;
             result.total_trades++;
 
-            if (pnl > 0) result.wins++;
-            else result.losses++;
+            if (pnl > 0)
+                result.wins++;
+            else
+                result.losses++;
 
             position = 0;
         }
 
         // Track drawdown
-        if (equity > peak_equity) peak_equity = equity;
+        if (equity > peak_equity)
+            peak_equity = equity;
         double dd = peak_equity - equity;
-        if (dd > result.max_drawdown) result.max_drawdown = dd;
+        if (dd > result.max_drawdown)
+            result.max_drawdown = dd;
     }
 
     return result;
@@ -121,15 +123,15 @@ void test_in_sample_vs_out_of_sample() {
 
     std::cout << "IN-SAMPLE (training period patterns):\n";
     std::cout << "  Trades: " << result_in.total_trades << "\n";
-    std::cout << "  Win Rate: " << (result_in.total_trades > 0 ?
-        100.0 * result_in.wins / result_in.total_trades : 0) << "%\n";
+    std::cout << "  Win Rate: " << (result_in.total_trades > 0 ? 100.0 * result_in.wins / result_in.total_trades : 0)
+              << "%\n";
     std::cout << "  Total PnL: $" << result_in.total_pnl << "\n";
     std::cout << "  Max Drawdown: $" << result_in.max_drawdown << "\n\n";
 
     std::cout << "OUT-OF-SAMPLE (new data, patterns don't exist):\n";
     std::cout << "  Trades: " << result_out.total_trades << "\n";
-    std::cout << "  Win Rate: " << (result_out.total_trades > 0 ?
-        100.0 * result_out.wins / result_out.total_trades : 0) << "%\n";
+    std::cout << "  Win Rate: " << (result_out.total_trades > 0 ? 100.0 * result_out.wins / result_out.total_trades : 0)
+              << "%\n";
     std::cout << "  Total PnL: $" << result_out.total_pnl << "\n";
     std::cout << "  Max Drawdown: $" << result_out.max_drawdown << "\n\n";
 
@@ -178,7 +180,7 @@ void test_filter_analysis() {
     std::cout << "============================================\n\n";
 
     // Overfitted strategies often have very low signal rates
-    assert(signals < prices.size() / 10);  // Less than 10% signal rate
+    assert(signals < prices.size() / 10); // Less than 10% signal rate
     std::cout << "[PASS] test_filter_analysis\n";
 }
 
