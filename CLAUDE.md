@@ -2,6 +2,42 @@
 
 Low-latency C++ trading system for HFT and crypto markets. Uses pre-allocated pools, lock-free IPC, and zero-copy UDP multicast parsing.
 
+## 🏗️ ARCHITECTURE FIRST - MANDATORY
+
+```
+BEFORE ANY TASK: READ ARCHITECTURE DOCS FIRST.
+UNDERSTAND THE SYSTEM BEFORE CHANGING IT.
+```
+
+### Architecture Documentation Location
+```
+docs/architecture/
+├── README.md              # Overview, design decisions, performance targets
+├── class-diagram.puml     # Static structure (50+ classes, 8 packages)
+├── sequence-diagrams.puml # Runtime behavior (6 diagrams)
+└── deployment-diagram.puml # Physical layout, memory pools, IPC
+```
+
+### Before Starting ANY Task
+1. **Read `docs/architecture/README.md`** - Understand the big picture
+2. **Check relevant diagram** - Class diagram for structure, sequence for flow
+3. **Identify affected components** - Which packages/classes are involved?
+4. **Then start thinking** about the implementation
+
+### I WILL:
+- ✅ Read architecture docs before proposing changes
+- ✅ Reference diagrams when discussing components
+- ✅ Update diagrams if architecture changes significantly
+- ✅ Keep mental model aligned with documented architecture
+
+### I WILL NOT:
+- ❌ Start coding without understanding system structure
+- ❌ Make assumptions about component relationships
+- ❌ Forget the pre-allocated pool architecture
+- ❌ Ignore the hot path constraints documented in diagrams
+
+---
+
 ## Architecture
 
 ### Entry Points
