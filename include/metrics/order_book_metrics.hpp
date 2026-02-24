@@ -101,20 +101,11 @@ private:
         metrics_.mid_price = mid_price * valid;
         metrics_.spread_bps = spread_bps * bps_valid;
 
-        // Depth calculations
-        metrics_.bid_depth_5 =
-            calculate_depth_within_bps(snapshot.bid_levels, snapshot.bid_level_count, snapshot.best_bid, 5, true);
-        metrics_.bid_depth_10 =
-            calculate_depth_within_bps(snapshot.bid_levels, snapshot.bid_level_count, snapshot.best_bid, 10, true);
-        metrics_.bid_depth_20 =
-            calculate_depth_within_bps(snapshot.bid_levels, snapshot.bid_level_count, snapshot.best_bid, 20, true);
-
-        metrics_.ask_depth_5 =
-            calculate_depth_within_bps(snapshot.ask_levels, snapshot.ask_level_count, snapshot.best_ask, 5, false);
-        metrics_.ask_depth_10 =
-            calculate_depth_within_bps(snapshot.ask_levels, snapshot.ask_level_count, snapshot.best_ask, 10, false);
-        metrics_.ask_depth_20 =
-            calculate_depth_within_bps(snapshot.ask_levels, snapshot.ask_level_count, snapshot.best_ask, 20, false);
+        // Depth calculations (single pass per side)
+        calculate_all_depths(snapshot.bid_levels, snapshot.bid_level_count, snapshot.best_bid, true,
+                             metrics_.bid_depth_5, metrics_.bid_depth_10, metrics_.bid_depth_20);
+        calculate_all_depths(snapshot.ask_levels, snapshot.ask_level_count, snapshot.best_ask, false,
+                             metrics_.ask_depth_5, metrics_.ask_depth_10, metrics_.ask_depth_20);
 
         // Imbalance ratios
         metrics_.imbalance_5 = calculate_imbalance(metrics_.bid_depth_5, metrics_.ask_depth_5);
@@ -124,47 +115,55 @@ private:
             calculate_imbalance(static_cast<double>(snapshot.best_bid_qty), static_cast<double>(snapshot.best_ask_qty));
     }
 
-    // Calculate depth within bps threshold
-    static double calculate_depth_within_bps(const LevelInfo* levels, int level_count, Price best_price, int bps,
-                                             bool is_bid) {
+    // Calculate all depth thresholds in a single pass
+    static void calculate_all_depths(const LevelInfo* levels, int level_count, Price best_price, bool is_bid,
+                                     double& depth_5, double& depth_10, double& depth_20) {
+        depth_5 = depth_10 = depth_20 = 0.0;
+
         if (best_price == INVALID_PRICE || level_count == 0) {
-            return 0.0;
+            return;
         }
 
-        // Calculate price threshold
-        Price threshold;
+        // Calculate thresholds once
+        Price threshold_5, threshold_10, threshold_20;
         if (is_bid) {
-            // For bid: threshold = best_bid - (best_bid * bps / 10000)
-            threshold = best_price - static_cast<Price>((static_cast<int64_t>(best_price) * bps) / 10000);
+            threshold_5 = best_price - static_cast<Price>((static_cast<int64_t>(best_price) * 5) / 10000);
+            threshold_10 = best_price - static_cast<Price>((static_cast<int64_t>(best_price) * 10) / 10000);
+            threshold_20 = best_price - static_cast<Price>((static_cast<int64_t>(best_price) * 20) / 10000);
         } else {
-            // For ask: threshold = best_ask + (best_ask * bps / 10000)
-            threshold = best_price + static_cast<Price>((static_cast<int64_t>(best_price) * bps) / 10000);
+            threshold_5 = best_price + static_cast<Price>((static_cast<int64_t>(best_price) * 5) / 10000);
+            threshold_10 = best_price + static_cast<Price>((static_cast<int64_t>(best_price) * 10) / 10000);
+            threshold_20 = best_price + static_cast<Price>((static_cast<int64_t>(best_price) * 20) / 10000);
         }
 
-        // Sum quantity within threshold
-        double total_depth = 0.0;
+        // Single pass: accumulate depths based on thresholds (branchless)
         for (int i = 0; i < level_count; ++i) {
             const auto& level = levels[i];
+            double qty = static_cast<double>(level.quantity);
 
+            // Branchless: use comparison results as 0/1 multipliers
+            bool within_5, within_10, within_20;
             if (is_bid) {
-                // Bid: include if price >= threshold
-                if (level.price >= threshold) {
-                    total_depth += static_cast<double>(level.quantity);
-                } else {
-                    break; // Levels are sorted, no need to check further
-                }
+                within_5 = level.price >= threshold_5;
+                within_10 = level.price >= threshold_10;
+                within_20 = level.price >= threshold_20;
             } else {
-                // Ask: include if price <= threshold
-                if (level.price <= threshold) {
-                    total_depth += static_cast<double>(level.quantity);
-                } else {
-                    break; // Levels are sorted, no need to check further
-                }
+                within_5 = level.price <= threshold_5;
+                within_10 = level.price <= threshold_10;
+                within_20 = level.price <= threshold_20;
+            }
+
+            depth_5 += qty * within_5;
+            depth_10 += qty * within_10;
+            depth_20 += qty * within_20;
+
+            // Early exit when beyond all thresholds (not branchless, but necessary)
+            if (!within_20) {
+                break;
             }
         }
-
-        return total_depth;
     }
+
 
     // Calculate imbalance ratio: (bid - ask) / (bid + ask) (branchless)
     static double calculate_imbalance(double bid_depth, double ask_depth) {
