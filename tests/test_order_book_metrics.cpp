@@ -13,8 +13,9 @@ bool approx_equal(double a, double b, double tol = 0.01) {
 }
 
 // Helper to create a simple order book
+// Base price 9000, range 200000 covers prices from 9000 to 209000
 OrderBook create_test_book() {
-    OrderBook book(90000, 200000);
+    OrderBook book(9000, 200000);
     return book;
 }
 
