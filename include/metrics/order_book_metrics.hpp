@@ -124,21 +124,21 @@ private:
             return;
         }
 
-        // Calculate thresholds once
-        Price threshold_5, threshold_10, threshold_20;
-        if (is_bid) {
-            threshold_5 = best_price - static_cast<Price>((static_cast<int64_t>(best_price) * 5) / 10000);
-            threshold_10 = best_price - static_cast<Price>((static_cast<int64_t>(best_price) * 10) / 10000);
-            threshold_20 = best_price - static_cast<Price>((static_cast<int64_t>(best_price) * 20) / 10000);
-        } else {
-            threshold_5 = best_price + static_cast<Price>((static_cast<int64_t>(best_price) * 5) / 10000);
-            threshold_10 = best_price + static_cast<Price>((static_cast<int64_t>(best_price) * 10) / 10000);
-            threshold_20 = best_price + static_cast<Price>((static_cast<int64_t>(best_price) * 20) / 10000);
-        }
+        // Calculate thresholds once (branchless using sign arithmetic)
+        // Compute sign: is_bid=1 → sign=1, is_bid=0 → sign=-1
+        int64_t sign = 2 * static_cast<int64_t>(is_bid) - 1;
+        int64_t bp = static_cast<int64_t>(best_price);
+        int64_t delta_5 = (bp * 5) / 10000;
+        int64_t delta_10 = (bp * 10) / 10000;
+        int64_t delta_20 = (bp * 20) / 10000;
+
+        // For bid (sign=1): bp - delta*1 = bp - delta
+        // For ask (sign=-1): bp - delta*-1 = bp + delta
+        Price threshold_5 = static_cast<Price>(bp - delta_5 * sign);
+        Price threshold_10 = static_cast<Price>(bp - delta_10 * sign);
+        Price threshold_20 = static_cast<Price>(bp - delta_20 * sign);
 
         // Single pass: accumulate depths based on thresholds (branchless)
-        // Compute sign once: is_bid=1 → sign=1, is_bid=0 → sign=-1
-        int64_t sign = 2 * static_cast<int64_t>(is_bid) - 1;
 
         for (int i = 0; i < level_count; ++i) {
             const auto& level = levels[i];
