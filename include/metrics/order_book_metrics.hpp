@@ -79,22 +79,27 @@ private:
         metrics_.best_bid_qty = snapshot.best_bid_qty;
         metrics_.best_ask_qty = snapshot.best_ask_qty;
 
-        // Spread
-        if (snapshot.best_bid != INVALID_PRICE && snapshot.best_ask != INVALID_PRICE) {
-            // Cast to signed before subtraction to handle crossed book (negative spread)
-            metrics_.spread =
-                static_cast<double>(static_cast<int64_t>(snapshot.best_ask) - static_cast<int64_t>(snapshot.best_bid));
-            metrics_.mid_price =
-                (static_cast<double>(snapshot.best_bid) + static_cast<double>(snapshot.best_ask)) / 2.0;
+        // Spread (branchless using conditional masks)
+        // Mask: 1.0 if both prices valid, 0.0 otherwise
+        double valid =
+            static_cast<double>((snapshot.best_bid != INVALID_PRICE) && (snapshot.best_ask != INVALID_PRICE));
 
-            if (metrics_.mid_price > 0.0) {
-                metrics_.spread_bps = (metrics_.spread / metrics_.mid_price) * 10000.0;
-            }
-        } else {
-            metrics_.spread = 0.0;
-            metrics_.spread_bps = 0.0;
-            metrics_.mid_price = 0.0;
-        }
+        // Compute spread and mid_price unconditionally
+        // Cast to signed before subtraction to handle crossed book (negative spread)
+        double spread =
+            static_cast<double>(static_cast<int64_t>(snapshot.best_ask) - static_cast<int64_t>(snapshot.best_bid));
+        double mid_price = (static_cast<double>(snapshot.best_bid) + static_cast<double>(snapshot.best_ask)) / 2.0;
+
+        // Compute spread_bps unconditionally (use max to avoid division by zero)
+        double spread_bps = (spread / std::max(mid_price, 1.0)) * 10000.0;
+
+        // Mask for spread_bps: only valid if prices are valid AND mid_price > 0
+        double bps_valid = valid * static_cast<double>(mid_price > 0.0);
+
+        // Apply masks to zero out invalid results
+        metrics_.spread = spread * valid;
+        metrics_.mid_price = mid_price * valid;
+        metrics_.spread_bps = spread_bps * bps_valid;
 
         // Depth calculations
         metrics_.bid_depth_5 =
@@ -161,13 +166,12 @@ private:
         return total_depth;
     }
 
-    // Calculate imbalance ratio: (bid - ask) / (bid + ask)
+    // Calculate imbalance ratio: (bid - ask) / (bid + ask) (branchless)
     static double calculate_imbalance(double bid_depth, double ask_depth) {
         double total = bid_depth + ask_depth;
-        if (total == 0.0) {
-            return 0.0;
-        }
-        return (bid_depth - ask_depth) / total;
+        // Branchless: use max(total, 1.0) to avoid division by zero
+        // When total=0, (0-0)/1.0 = 0 which is correct
+        return (bid_depth - ask_depth) / std::max(total, 1.0);
     }
 };
 
