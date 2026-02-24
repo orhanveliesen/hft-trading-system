@@ -22,11 +22,13 @@ flowchart TD
     MDHandler --> OrderBook[OrderBook<br/>Pre-allocated pools<br/>160MB per symbol]
 
     %% Metrics Layer
-    MDHandler --> Metrics[TradeStreamMetrics<br/>30 metrics × 5 windows]
+    MDHandler --> TradeMetrics[TradeStreamMetrics<br/>30 metrics × 5 windows]
+    OrderBook --> BookMetrics[OrderBookMetrics<br/>17 real-time metrics]
 
     %% Strategy Layer
     OrderBook --> Strategy[Strategy Layer<br/>MarketMaker / SmartStrategy]
-    Metrics --> Strategy
+    TradeMetrics --> Strategy
+    BookMetrics --> Strategy
     Strategy --> RiskMgr[RiskManager<br/>Position / drawdown limits]
 
     %% IPC Layer
@@ -408,6 +410,101 @@ classDiagram
 - Trades older than 1 minute automatically pruned
 - All metrics calculated on-demand with lazy caching
 - SIMD backend auto-selected at compile time (AVX-512/AVX2/SSE2/Scalar)
+
+---
+
+### OrderBookMetrics
+
+Real-time order book depth and imbalance metrics for market microstructure analysis.
+
+```mermaid
+classDiagram
+    class OrderBookMetrics {
+        -Metrics metrics_
+        -uint64_t last_update_us_
+        +on_order_book_update(book, timestamp_us) void
+        +get_metrics() Metrics
+        +reset() void
+        -calculate_metrics(snapshot) void
+        -calculate_depth_within_bps(levels, count, best_price, bps, is_bid)$ double
+        -calculate_imbalance(bid_depth, ask_depth)$ double
+    }
+
+    class Metrics {
+        +double spread
+        +double spread_bps
+        +double mid_price
+        +double bid_depth_5
+        +double bid_depth_10
+        +double bid_depth_20
+        +double ask_depth_5
+        +double ask_depth_10
+        +double ask_depth_20
+        +double imbalance_5
+        +double imbalance_10
+        +double imbalance_20
+        +double top_imbalance
+        +Price best_bid
+        +Price best_ask
+        +Quantity best_bid_qty
+        +Quantity best_ask_qty
+    }
+
+    class BookSnapshot {
+        +Price best_bid
+        +Price best_ask
+        +Quantity best_bid_qty
+        +Quantity best_ask_qty
+        +LevelInfo[20] bid_levels
+        +LevelInfo[20] ask_levels
+        +int bid_level_count
+        +int ask_level_count
+    }
+
+    class LevelInfo {
+        +Price price
+        +Quantity quantity
+    }
+
+    class OrderBook {
+        +get_snapshot(max_levels) BookSnapshot
+        +best_bid() Price
+        +best_ask() Price
+    }
+
+    OrderBookMetrics ..> Metrics : returns
+    OrderBookMetrics ..> OrderBook : reads via snapshot
+    OrderBook ..> BookSnapshot : returns
+    BookSnapshot *-- LevelInfo : contains
+```
+
+**Metrics (17 total):**
+- **Spread (3):** spread, spread_bps, mid_price
+- **Depth (6):** bid_depth_5, bid_depth_10, bid_depth_20, ask_depth_5, ask_depth_10, ask_depth_20
+  - Depth = total quantity within N basis points of best price
+  - 5 bps, 10 bps, 20 bps thresholds for each side
+- **Imbalance (4):** imbalance_5, imbalance_10, imbalance_20, top_imbalance
+  - Imbalance = (bid_depth - ask_depth) / (bid_depth + ask_depth)
+  - Ranges from -1 (all asks) to +1 (all bids)
+- **Top of Book (4):** best_bid, best_ask, best_bid_qty, best_ask_qty
+
+**Performance:**
+- on_order_book_update(): ~42 ns (100x better than 5 μs target)
+- get_snapshot(): O(N) where N = max_levels (typically 20)
+- calculate_depth_within_bps(): Single pass through sorted levels
+- Zero allocations (fixed-size arrays)
+
+**Data Flow:**
+1. OrderBook::get_snapshot() extracts top 20 levels (bid/ask)
+2. OrderBookMetrics::calculate_metrics() computes all 17 metrics
+3. Depth calculation: Single pass per side with 3 bps thresholds
+4. Imbalance: Simple ratio calculation from depth values
+
+**Key Constraints:**
+- Header-only (depends only on orderbook.hpp + types.hpp)
+- No virtual functions (zero overhead)
+- Fixed-size snapshot (no allocation)
+- Snapshot extraction via template iteration over BookSide levels
 
 ---
 

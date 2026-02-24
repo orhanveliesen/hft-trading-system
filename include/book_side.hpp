@@ -53,6 +53,21 @@ public:
 
     Price best_price() const { return best_level_ ? best_level_->price : INVALID_PRICE; }
 
+    // === Level Iteration ===
+
+    // Iterate through levels from best to worst
+    // Callback signature: void(Price price, Quantity quantity)
+    template <typename Callback>
+    void for_each_level(Callback&& callback, int max_levels = 20) const {
+        PriceLevel* level = best_level_;
+        int count = 0;
+        while (level && count < max_levels) {
+            callback(level->price, level->total_quantity);
+            level = level->next;
+            ++count;
+        }
+    }
+
     // === Level Management ===
 
     // Insert a pre-allocated and initialized level into the book

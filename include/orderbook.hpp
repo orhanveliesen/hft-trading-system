@@ -30,6 +30,27 @@
 
 namespace hft {
 
+// Level information for snapshot extraction
+struct LevelInfo {
+    Price price = INVALID_PRICE;
+    Quantity quantity = 0;
+};
+
+// Order book snapshot with fixed-size arrays (no allocation)
+struct BookSnapshot {
+    Price best_bid = INVALID_PRICE;
+    Price best_ask = INVALID_PRICE;
+    Quantity best_bid_qty = 0;
+    Quantity best_ask_qty = 0;
+
+    // Fixed-size arrays (no allocation)
+    static constexpr size_t MAX_LEVELS = 20;
+    LevelInfo bid_levels[MAX_LEVELS] = {};
+    LevelInfo ask_levels[MAX_LEVELS] = {};
+    int bid_level_count = 0;
+    int ask_level_count = 0;
+};
+
 class OrderBook {
 public:
     // Default values for backward compatibility
@@ -197,6 +218,37 @@ public:
     inline Quantity bid_quantity_at(Price price) const { return bids_.quantity_at(price); }
 
     inline Quantity ask_quantity_at(Price price) const { return asks_.quantity_at(price); }
+
+    // Extract book snapshot for metrics calculation
+    inline BookSnapshot get_snapshot(int max_levels = 20) const {
+        BookSnapshot snapshot;
+
+        // Get best bid/ask
+        snapshot.best_bid = best_bid();
+        snapshot.best_ask = best_ask();
+        snapshot.best_bid_qty = bid_quantity_at(snapshot.best_bid);
+        snapshot.best_ask_qty = ask_quantity_at(snapshot.best_ask);
+
+        // Extract bid levels
+        bids_.for_each_level(
+            [&snapshot](Price price, Quantity qty) {
+                snapshot.bid_levels[snapshot.bid_level_count].price = price;
+                snapshot.bid_levels[snapshot.bid_level_count].quantity = qty;
+                ++snapshot.bid_level_count;
+            },
+            max_levels);
+
+        // Extract ask levels
+        asks_.for_each_level(
+            [&snapshot](Price price, Quantity qty) {
+                snapshot.ask_levels[snapshot.ask_level_count].price = price;
+                snapshot.ask_levels[snapshot.ask_level_count].quantity = qty;
+                ++snapshot.ask_level_count;
+            },
+            max_levels);
+
+        return snapshot;
+    }
 
 private:
     // Pre-allocated pools
