@@ -9,7 +9,6 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
-#include <unordered_map>
 
 namespace hft {
 
@@ -121,6 +120,9 @@ private:
         bool is_bid;
     };
 
+    // Configuration
+    static constexpr size_t MAX_DEPTH_LEVELS = 20; // Max levels per side to track
+
     // Ring buffers (pre-allocated)
     static constexpr size_t MAX_FLOW_EVENTS = 1 << 14; // 16K events
     static constexpr size_t MAX_RECENT_TRADES = 256;   // 256 trades
@@ -143,13 +145,24 @@ private:
     size_t lifetime_head_ = 0;
     size_t lifetime_tail_ = 0;
 
-    // Previous book state for delta calculation
-    std::unordered_map<Price, Quantity> prev_bid_levels_;
-    std::unordered_map<Price, Quantity> prev_ask_levels_;
+    // Previous book state for delta calculation (flat arrays, cache-friendly)
+    struct PriceLevel {
+        Price price;
+        Quantity quantity;
+    };
+    struct PriceBirth {
+        Price price;
+        uint64_t birth_us;
+    };
+
+    std::array<PriceLevel, MAX_DEPTH_LEVELS> prev_bid_levels_{};
+    std::array<PriceLevel, MAX_DEPTH_LEVELS> prev_ask_levels_{};
+    int prev_bid_count_ = 0;
+    int prev_ask_count_ = 0;
 
     // Level lifetime tracking (birth times)
-    std::unordered_map<Price, uint64_t> bid_level_birth_;
-    std::unordered_map<Price, uint64_t> ask_level_birth_;
+    std::array<PriceBirth, MAX_DEPTH_LEVELS * 2> level_births_{}; // *2 for bid+ask
+    int birth_count_ = 0;
 
     // Depth tracking for velocity
     double prev_bid_depth_ = 0.0;
@@ -169,6 +182,13 @@ private:
     void add_flow_event(const FlowEvent& event);
     void add_lifetime(const LevelLifetime& lifetime);
     void cleanup_old_trades(uint64_t current_time);
+
+    // Flat array helpers (branchless where possible)
+    inline const PriceLevel* find_price(const std::array<PriceLevel, MAX_DEPTH_LEVELS>& levels, int count,
+                                        Price price) const;
+    inline void add_birth(Price price, uint64_t timestamp_us);
+    inline const PriceBirth* find_birth(Price price) const;
+    inline void remove_birth(Price price);
 };
 
 // ============================================================================
@@ -191,7 +211,7 @@ constexpr uint64_t OrderFlowMetrics::get_window_duration_us(Window w) {
     return 1'000'000; // Default 1s
 }
 
-void OrderFlowMetrics::on_trade(const ipc::TradeEvent& trade) {
+inline void OrderFlowMetrics::on_trade(const ipc::TradeEvent& trade) {
     // Extract price from trade event
     Price price = static_cast<Price>(trade.price);
     uint64_t timestamp_us = trade.timestamp_ns / 1000; // Convert ns to us
@@ -213,7 +233,7 @@ void OrderFlowMetrics::on_trade(const ipc::TradeEvent& trade) {
     trade_tail_ = new_tail;
 }
 
-void OrderFlowMetrics::cleanup_old_trades(uint64_t current_time) {
+inline void OrderFlowMetrics::cleanup_old_trades(uint64_t current_time) {
     // Remove trades older than correlation window
     while (trade_head_ != trade_tail_) {
         const auto& trade = recent_trades_[trade_head_];
@@ -224,67 +244,66 @@ void OrderFlowMetrics::cleanup_old_trades(uint64_t current_time) {
     }
 }
 
-void OrderFlowMetrics::on_order_book_update(const OrderBook& book, uint64_t timestamp_us) {
+inline void OrderFlowMetrics::on_order_book_update(const OrderBook& book, uint64_t timestamp_us) {
     // Get current book snapshot
-    auto snapshot = book.get_snapshot(20);
+    auto snapshot = book.get_snapshot(MAX_DEPTH_LEVELS);
 
-    // Current book state as maps
-    std::unordered_map<Price, Quantity> current_bid_levels;
-    std::unordered_map<Price, Quantity> current_ask_levels;
-
-    // Calculate total depth
+    // Calculate total depth and store current levels in flat arrays
     double current_bid_depth = 0.0;
     double current_ask_depth = 0.0;
+    int current_bid_count = snapshot.bid_level_count;
+    int current_ask_count = snapshot.ask_level_count;
+
+    std::array<PriceLevel, MAX_DEPTH_LEVELS> current_bid_levels{};
+    std::array<PriceLevel, MAX_DEPTH_LEVELS> current_ask_levels{};
 
     // Extract bid levels
-    for (int i = 0; i < snapshot.bid_level_count; i++) {
+    for (int i = 0; i < current_bid_count; i++) {
         const auto& level = snapshot.bid_levels[i];
-        current_bid_levels[level.price] = level.quantity;
+        current_bid_levels[i] = PriceLevel{level.price, level.quantity};
         current_bid_depth += static_cast<double>(level.quantity);
     }
 
     // Extract ask levels
-    for (int i = 0; i < snapshot.ask_level_count; i++) {
+    for (int i = 0; i < current_ask_count; i++) {
         const auto& level = snapshot.ask_levels[i];
-        current_ask_levels[level.price] = level.quantity;
+        current_ask_levels[i] = PriceLevel{level.price, level.quantity};
         current_ask_depth += static_cast<double>(level.quantity);
     }
 
     // Track level births
-    for (const auto& [price, qty] : current_bid_levels) {
-        if (bid_level_birth_.find(price) == bid_level_birth_.end()) {
-            bid_level_birth_[price] = timestamp_us;
-        }
+    for (int i = 0; i < current_bid_count; i++) {
+        add_birth(current_bid_levels[i].price, timestamp_us);
     }
-
-    for (const auto& [price, qty] : current_ask_levels) {
-        if (ask_level_birth_.find(price) == ask_level_birth_.end()) {
-            ask_level_birth_[price] = timestamp_us;
-        }
+    for (int i = 0; i < current_ask_count; i++) {
+        add_birth(current_ask_levels[i].price, timestamp_us);
     }
 
     // Compare with previous state and generate flow events
-    // Process bid levels
-    for (const auto& [price, current_qty] : current_bid_levels) {
-        auto prev_it = prev_bid_levels_.find(price);
-        if (prev_it == prev_bid_levels_.end()) {
+    // Process bid levels (current vs previous)
+    for (int i = 0; i < current_bid_count; i++) {
+        Price price = current_bid_levels[i].price;
+        Quantity current_qty = current_bid_levels[i].quantity;
+
+        const PriceLevel* prev = find_price(prev_bid_levels_, prev_bid_count_, price);
+        if (!prev) {
             // New level
             FlowEvent event;
             event.price = price;
             event.volume_delta = static_cast<double>(current_qty);
             event.cancel_volume = 0.0;
             event.is_bid = true;
-            event.is_cancel = false; // New level is always added
+            event.is_cancel = false;
             event.is_level_change = true;
             event.timestamp_us = timestamp_us;
             add_flow_event(event);
-        } else if (current_qty != prev_it->second) {
+        } else if (current_qty != prev->quantity) {
             // Quantity changed
             double delta =
-                static_cast<double>(static_cast<int64_t>(current_qty) - static_cast<int64_t>(prev_it->second));
+                static_cast<double>(static_cast<int64_t>(current_qty) - static_cast<int64_t>(prev->quantity));
 
             // Branchless cancel vs fill estimation
-            double removed = std::max(0.0, -delta); // 0 if added, |delta| if removed
+            double removed = std::max(0.0, -delta);
             Quantity traded = get_traded_quantity_at_price(price, timestamp_us);
             double fill_vol = std::min(removed, static_cast<double>(traded));
             double cancel_vol = removed - fill_vol;
@@ -297,14 +316,17 @@ void OrderFlowMetrics::on_order_book_update(const OrderBook& book, uint64_t time
             event.is_cancel = (cancel_vol > 0.0);
             event.is_level_change = true;
             event.timestamp_us = timestamp_us;
-
             add_flow_event(event);
         }
     }
 
     // Check for removed bid levels
-    for (const auto& [price, prev_qty] : prev_bid_levels_) {
-        if (current_bid_levels.find(price) == current_bid_levels.end()) {
+    for (int i = 0; i < prev_bid_count_; i++) {
+        Price price = prev_bid_levels_[i].price;
+        Quantity prev_qty = prev_bid_levels_[i].quantity;
+
+        const PriceLevel* current = find_price(current_bid_levels, current_bid_count, price);
+        if (!current) {
             // Level removed - branchless cancel vs fill estimation
             double removed = static_cast<double>(prev_qty);
             Quantity traded = get_traded_quantity_at_price(price, timestamp_us);
@@ -319,26 +341,28 @@ void OrderFlowMetrics::on_order_book_update(const OrderBook& book, uint64_t time
             event.is_cancel = (cancel_vol > 0.0);
             event.is_level_change = true;
             event.timestamp_us = timestamp_us;
-
             add_flow_event(event);
 
             // Record level lifetime
-            auto birth_it = bid_level_birth_.find(price);
-            if (birth_it != bid_level_birth_.end()) {
+            const PriceBirth* birth = find_birth(price);
+            if (birth) {
                 LevelLifetime lifetime;
-                lifetime.birth_us = birth_it->second;
+                lifetime.birth_us = birth->birth_us;
                 lifetime.death_us = timestamp_us;
                 lifetime.is_bid = true;
                 add_lifetime(lifetime);
-                bid_level_birth_.erase(birth_it);
+                remove_birth(price);
             }
         }
     }
 
-    // Process ask levels
-    for (const auto& [price, current_qty] : current_ask_levels) {
-        auto prev_it = prev_ask_levels_.find(price);
-        if (prev_it == prev_ask_levels_.end()) {
+    // Process ask levels (current vs previous)
+    for (int i = 0; i < current_ask_count; i++) {
+        Price price = current_ask_levels[i].price;
+        Quantity current_qty = current_ask_levels[i].quantity;
+
+        const PriceLevel* prev = find_price(prev_ask_levels_, prev_ask_count_, price);
+        if (!prev) {
             // New level
             FlowEvent event;
             event.price = price;
@@ -349,13 +373,13 @@ void OrderFlowMetrics::on_order_book_update(const OrderBook& book, uint64_t time
             event.is_level_change = true;
             event.timestamp_us = timestamp_us;
             add_flow_event(event);
-        } else if (current_qty != prev_it->second) {
+        } else if (current_qty != prev->quantity) {
             // Quantity changed
             double delta =
-                static_cast<double>(static_cast<int64_t>(current_qty) - static_cast<int64_t>(prev_it->second));
+                static_cast<double>(static_cast<int64_t>(current_qty) - static_cast<int64_t>(prev->quantity));
 
             // Branchless cancel vs fill estimation
-            double removed = std::max(0.0, -delta); // 0 if added, |delta| if removed
+            double removed = std::max(0.0, -delta);
             Quantity traded = get_traded_quantity_at_price(price, timestamp_us);
             double fill_vol = std::min(removed, static_cast<double>(traded));
             double cancel_vol = removed - fill_vol;
@@ -368,14 +392,17 @@ void OrderFlowMetrics::on_order_book_update(const OrderBook& book, uint64_t time
             event.is_cancel = (cancel_vol > 0.0);
             event.is_level_change = true;
             event.timestamp_us = timestamp_us;
-
             add_flow_event(event);
         }
     }
 
     // Check for removed ask levels
-    for (const auto& [price, prev_qty] : prev_ask_levels_) {
-        if (current_ask_levels.find(price) == current_ask_levels.end()) {
+    for (int i = 0; i < prev_ask_count_; i++) {
+        Price price = prev_ask_levels_[i].price;
+        Quantity prev_qty = prev_ask_levels_[i].quantity;
+
+        const PriceLevel* current = find_price(current_ask_levels, current_ask_count, price);
+        if (!current) {
             // Level removed - branchless cancel vs fill estimation
             double removed = static_cast<double>(prev_qty);
             Quantity traded = get_traded_quantity_at_price(price, timestamp_us);
@@ -390,31 +417,32 @@ void OrderFlowMetrics::on_order_book_update(const OrderBook& book, uint64_t time
             event.is_cancel = (cancel_vol > 0.0);
             event.is_level_change = true;
             event.timestamp_us = timestamp_us;
-
             add_flow_event(event);
 
             // Record level lifetime
-            auto birth_it = ask_level_birth_.find(price);
-            if (birth_it != ask_level_birth_.end()) {
+            const PriceBirth* birth = find_birth(price);
+            if (birth) {
                 LevelLifetime lifetime;
-                lifetime.birth_us = birth_it->second;
+                lifetime.birth_us = birth->birth_us;
                 lifetime.death_us = timestamp_us;
                 lifetime.is_bid = false;
                 add_lifetime(lifetime);
-                ask_level_birth_.erase(birth_it);
+                remove_birth(price);
             }
         }
     }
 
-    // Update previous state
-    prev_bid_levels_ = std::move(current_bid_levels);
-    prev_ask_levels_ = std::move(current_ask_levels);
+    // Update previous state (flat array copy, cache-friendly)
+    prev_bid_levels_ = current_bid_levels;
+    prev_ask_levels_ = current_ask_levels;
+    prev_bid_count_ = current_bid_count;
+    prev_ask_count_ = current_ask_count;
     prev_bid_depth_ = current_bid_depth;
     prev_ask_depth_ = current_ask_depth;
     prev_timestamp_us_ = timestamp_us;
 }
 
-void OrderFlowMetrics::add_flow_event(const FlowEvent& event) {
+inline void OrderFlowMetrics::add_flow_event(const FlowEvent& event) {
     // Remove events older than 1 minute (longest window)
     constexpr uint64_t ONE_MINUTE_US = 60'000'000;
     while (flow_head_ != flow_tail_) {
@@ -438,7 +466,7 @@ void OrderFlowMetrics::add_flow_event(const FlowEvent& event) {
     flow_tail_ = new_tail;
 }
 
-void OrderFlowMetrics::add_lifetime(const LevelLifetime& lifetime) {
+inline void OrderFlowMetrics::add_lifetime(const LevelLifetime& lifetime) {
     lifetimes_[lifetime_tail_] = lifetime;
 
     size_t new_tail = (lifetime_tail_ + 1) & LIFETIME_MASK;
@@ -451,7 +479,7 @@ void OrderFlowMetrics::add_lifetime(const LevelLifetime& lifetime) {
     lifetime_tail_ = new_tail;
 }
 
-bool OrderFlowMetrics::was_trade_at_price(Price price, uint64_t timestamp_us) const {
+inline bool OrderFlowMetrics::was_trade_at_price(Price price, uint64_t timestamp_us) const {
     // Check if there was a trade at this price within correlation window
     size_t idx = trade_head_;
     while (idx != trade_tail_) {
@@ -468,7 +496,7 @@ bool OrderFlowMetrics::was_trade_at_price(Price price, uint64_t timestamp_us) co
     return false;
 }
 
-Quantity OrderFlowMetrics::get_traded_quantity_at_price(Price price, uint64_t timestamp_us) const {
+inline Quantity OrderFlowMetrics::get_traded_quantity_at_price(Price price, uint64_t timestamp_us) const {
     // Sum all trades at this price within correlation window
     Quantity total = 0;
     size_t idx = trade_head_;
@@ -486,7 +514,7 @@ Quantity OrderFlowMetrics::get_traded_quantity_at_price(Price price, uint64_t ti
     return total;
 }
 
-size_t OrderFlowMetrics::find_window_start(uint64_t window_start_time) const {
+inline size_t OrderFlowMetrics::find_window_start(uint64_t window_start_time) const {
     // Linear search from head to find first event >= window_start_time
     // (Binary search not possible with ring buffer and non-contiguous indices)
     size_t idx = flow_head_;
@@ -504,7 +532,8 @@ size_t OrderFlowMetrics::find_window_start(uint64_t window_start_time) const {
     return count; // All events are before window
 }
 
-const OrderFlowMetrics::Metrics& OrderFlowMetrics::get_metrics(Window w) const {
+inline const OrderFlowMetrics::Metricsconst OrderFlowMetrics::Metrics&
+OrderFlowMetrics::OrderFlowMetrics::get_metrics(Window w) const {
     size_t window_idx = static_cast<size_t>(w);
 
     // Check cache validity
@@ -539,7 +568,7 @@ const OrderFlowMetrics::Metrics& OrderFlowMetrics::get_metrics(Window w) const {
     return cached_metrics_[window_idx];
 }
 
-OrderFlowMetrics::Metrics OrderFlowMetrics::calculate_metrics(size_t start_count, size_t end_count) const {
+inline OrderFlowMetrics::Metrics OrderFlowMetrics::calculate_metrics(size_t start_count, size_t end_count) const {
     if (start_count >= end_count) {
         return Metrics{};
     }
@@ -688,22 +717,65 @@ OrderFlowMetrics::Metrics OrderFlowMetrics::calculate_metrics(size_t start_count
     return m;
 }
 
-void OrderFlowMetrics::reset() {
+inline void OrderFlowMetrics::reset() {
     flow_head_ = 0;
     flow_tail_ = 0;
     trade_head_ = 0;
     trade_tail_ = 0;
     lifetime_head_ = 0;
     lifetime_tail_ = 0;
-    prev_bid_levels_.clear();
-    prev_ask_levels_.clear();
-    bid_level_birth_.clear();
-    ask_level_birth_.clear();
+    prev_bid_count_ = 0;
+    prev_ask_count_ = 0;
+    birth_count_ = 0;
     prev_bid_depth_ = 0.0;
     prev_ask_depth_ = 0.0;
     prev_timestamp_us_ = 0;
     cached_metrics_ = {};
     cache_tail_position_ = {};
+}
+
+// Flat array helpers - branchless linear search (cache-friendly for small N)
+inline const OrderFlowMetrics::PriceLevel*
+OrderFlowMetrics::find_price(const std::array<PriceLevel, MAX_DEPTH_LEVELS>& levels, int count, Price price) const {
+    for (int i = 0; i < count; i++) {
+        if (levels[i].price == price) {
+            return &levels[i];
+        }
+    }
+    return nullptr;
+}
+
+inline void OrderFlowMetrics::add_birth(Price price, uint64_t timestamp_us) {
+    // Check if already exists
+    for (int i = 0; i < birth_count_; i++) {
+        if (level_births_[i].price == price) {
+            return; // Already tracked
+        }
+    }
+    // Add new birth
+    if (birth_count_ < static_cast<int>(MAX_DEPTH_LEVELS * 2)) {
+        level_births_[birth_count_++] = PriceBirth{price, timestamp_us};
+    }
+}
+
+inline const OrderFlowMetrics::PriceBirth* OrderFlowMetrics::find_birth(Price price) const {
+    for (int i = 0; i < birth_count_; i++) {
+        if (level_births_[i].price == price) {
+            return &level_births_[i];
+        }
+    }
+    return nullptr;
+}
+
+inline void OrderFlowMetrics::remove_birth(Price price) {
+    for (int i = 0; i < birth_count_; i++) {
+        if (level_births_[i].price == price) {
+            // Swap with last and decrement count
+            level_births_[i] = level_births_[birth_count_ - 1];
+            birth_count_--;
+            return;
+        }
+    }
 }
 
 } // namespace hft
