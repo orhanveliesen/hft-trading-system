@@ -2,6 +2,7 @@
 
 #include "../ipc/trade_event.hpp"
 #include "../orderbook.hpp"
+#include "../simd/simd_ops.hpp"
 #include "../types.hpp"
 
 #include <algorithm>
@@ -9,6 +10,10 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+
+#if defined(__AVX2__)
+#include <immintrin.h>
+#endif
 
 namespace hft {
 
@@ -118,18 +123,18 @@ public:
         std::array<PriceLevel, MaxDepthLevels> current_bid_levels{};
         std::array<PriceLevel, MaxDepthLevels> current_ask_levels{};
 
-        // Extract bid levels
+        // Extract bid levels (SIMD-optimized accumulation)
+        current_bid_depth = simd_accumulate_quantities(&snapshot.bid_levels[0], current_bid_count);
         for (int i = 0; i < current_bid_count; i++) {
             const auto& level = snapshot.bid_levels[i];
             current_bid_levels[i] = PriceLevel{level.price, level.quantity};
-            current_bid_depth += static_cast<double>(level.quantity);
         }
 
-        // Extract ask levels
+        // Extract ask levels (SIMD-optimized accumulation)
+        current_ask_depth = simd_accumulate_quantities(&snapshot.ask_levels[0], current_ask_count);
         for (int i = 0; i < current_ask_count; i++) {
             const auto& level = snapshot.ask_levels[i];
             current_ask_levels[i] = PriceLevel{level.price, level.quantity};
-            current_ask_depth += static_cast<double>(level.quantity);
         }
 
         // Track level births
@@ -684,6 +689,50 @@ private:
         event.is_level_change = true;
         event.timestamp_us = timestamp_us;
         return event;
+    }
+
+    // SIMD helper: Accumulate quantities from level array
+    static inline double simd_accumulate_quantities(const LevelInfo* levels, int count) {
+        // For small counts (< 8), scalar is faster due to overhead
+        if (count < 8) {
+            double sum = 0.0;
+            for (int i = 0; i < count; i++) {
+                sum += static_cast<double>(levels[i].quantity);
+            }
+            return sum;
+        }
+
+        // Extract quantities into temporary aligned array for SIMD
+        alignas(32) double quantities[MaxDepthLevels];
+        for (int i = 0; i < count; i++) {
+            quantities[i] = static_cast<double>(levels[i].quantity);
+        }
+
+        // SIMD accumulation (AVX2: 4 doubles at a time)
+        double sum = 0.0;
+        int i = 0;
+
+#if defined(__AVX2__)
+        __m256d sum_vec = _mm256_setzero_pd();
+
+        // Process 4 doubles at a time
+        for (; i + 3 < count; i += 4) {
+            __m256d q = _mm256_load_pd(&quantities[i]);
+            sum_vec = _mm256_add_pd(sum_vec, q);
+        }
+
+        // Horizontal sum (reduce 4 doubles to 1)
+        alignas(32) double sum_arr[4];
+        _mm256_store_pd(sum_arr, sum_vec);
+        sum = sum_arr[0] + sum_arr[1] + sum_arr[2] + sum_arr[3];
+#endif
+
+        // Handle remaining elements (scalar fallback)
+        for (; i < count; i++) {
+            sum += quantities[i];
+        }
+
+        return sum;
     }
 
     // Flat array helpers - branchless linear search (cache-friendly for small N)
