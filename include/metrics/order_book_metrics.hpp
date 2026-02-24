@@ -137,21 +137,20 @@ private:
         }
 
         // Single pass: accumulate depths based on thresholds (branchless)
+        // Compute sign once: is_bid=1 → sign=1, is_bid=0 → sign=-1
+        int64_t sign = 2 * static_cast<int64_t>(is_bid) - 1;
+
         for (int i = 0; i < level_count; ++i) {
             const auto& level = levels[i];
             double qty = static_cast<double>(level.quantity);
+            int64_t price = static_cast<int64_t>(level.price);
 
-            // Branchless: use comparison results as 0/1 multipliers
-            bool within_5, within_10, within_20;
-            if (is_bid) {
-                within_5 = level.price >= threshold_5;
-                within_10 = level.price >= threshold_10;
-                within_20 = level.price >= threshold_20;
-            } else {
-                within_5 = level.price <= threshold_5;
-                within_10 = level.price <= threshold_10;
-                within_20 = level.price <= threshold_20;
-            }
+            // Branchless comparison using sign arithmetic
+            // For bid (sign=1): (price - threshold) * 1 >= 0 → price >= threshold
+            // For ask (sign=-1): (price - threshold) * -1 >= 0 → price <= threshold
+            bool within_5 = (price - static_cast<int64_t>(threshold_5)) * sign >= 0;
+            bool within_10 = (price - static_cast<int64_t>(threshold_10)) * sign >= 0;
+            bool within_20 = (price - static_cast<int64_t>(threshold_20)) * sign >= 0;
 
             depth_5 += qty * within_5;
             depth_10 += qty * within_10;
