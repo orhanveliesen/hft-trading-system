@@ -309,9 +309,11 @@ target_link_libraries(bench_simd trader_core)
 add_executable(bench_trade_stream_metrics benchmarks/bench_trade_stream_metrics.cpp)
 add_executable(bench_trade_stream_full benchmarks/bench_trade_stream_full.cpp)
 add_executable(bench_order_book_metrics benchmarks/bench_order_book_metrics.cpp)
+add_executable(bench_order_flow_metrics benchmarks/bench_order_flow_metrics.cpp)
 
 target_link_libraries(bench_trade_stream_full trader_core)
 target_link_libraries(bench_order_book_metrics trader_core)
+target_link_libraries(bench_order_flow_metrics trader_core)
 
 target_link_libraries(bench_trade_stream_metrics trader_core)
 

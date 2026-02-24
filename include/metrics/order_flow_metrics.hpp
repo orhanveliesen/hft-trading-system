@@ -32,11 +32,15 @@ enum class Window {
  * - Book velocity (rate of change)
  * - Level lifetime tracking
  *
+ * Template parameters:
+ * - MaxDepthLevels: Maximum order book levels per side to track (default: 20)
+ *
  * Performance:
  * - on_trade(): < 100 ns
  * - on_order_book_update(): < 5 μs
  * - get_metrics(): < 1 μs (cached) or < 5 μs (cache miss)
  */
+template <size_t MaxDepthLevels = 20>
 class OrderFlowMetrics {
 public:
     OrderFlowMetrics() = default;
@@ -77,7 +81,7 @@ public:
     /**
      * Process a trade (for cancel/fill correlation)
      */
-    void on_trade(const ipc::TradeEvent& trade) {
+    inline void on_trade(const ipc::TradeEvent& trade) {
         // Extract price from trade event
         Price price = static_cast<Price>(trade.price);
         uint64_t timestamp_us = trade.timestamp_ns / 1000; // Convert ns to us
@@ -91,10 +95,9 @@ public:
 
         size_t new_tail = (trade_tail_ + 1) & TRADE_MASK;
 
-        // If advancing tail would overwrite head, advance head too (buffer full)
-        if (new_tail == trade_head_) {
-            trade_head_ = (trade_head_ + 1) & TRADE_MASK;
-        }
+        // Branchless: If advancing tail would overwrite head, advance head too (buffer full)
+        size_t would_overflow = (new_tail == trade_head_);
+        trade_head_ = (trade_head_ + would_overflow) & TRADE_MASK;
 
         trade_tail_ = new_tail;
     }
@@ -102,9 +105,9 @@ public:
     /**
      * Process order book update (compare prev vs new state)
      */
-    void on_order_book_update(const OrderBook& book, uint64_t timestamp_us) {
+    inline void on_order_book_update(const OrderBook& book, uint64_t timestamp_us) {
         // Get current book snapshot
-        auto snapshot = book.get_snapshot(MAX_DEPTH_LEVELS);
+        auto snapshot = book.get_snapshot(MaxDepthLevels);
 
         // Calculate total depth and store current levels in flat arrays
         double current_bid_depth = 0.0;
@@ -112,8 +115,8 @@ public:
         int current_bid_count = snapshot.bid_level_count;
         int current_ask_count = snapshot.ask_level_count;
 
-        std::array<PriceLevel, MAX_DEPTH_LEVELS> current_bid_levels{};
-        std::array<PriceLevel, MAX_DEPTH_LEVELS> current_ask_levels{};
+        std::array<PriceLevel, MaxDepthLevels> current_bid_levels{};
+        std::array<PriceLevel, MaxDepthLevels> current_ask_levels{};
 
         // Extract bid levels
         for (int i = 0; i < current_bid_count; i++) {
@@ -139,24 +142,20 @@ public:
 
         // Compare with previous state and generate flow events
         // Process bid levels (current vs previous)
+        // Lambda-based approach: both paths prepared for pipeline
         for (int i = 0; i < current_bid_count; i++) {
             Price price = current_bid_levels[i].price;
             Quantity current_qty = current_bid_levels[i].quantity;
 
             const PriceLevel* prev = find_price(prev_bid_levels_, prev_bid_count_, price);
-            if (!prev) {
-                // New level
-                FlowEvent event;
-                event.price = price;
-                event.volume_delta = static_cast<double>(current_qty);
-                event.cancel_volume = 0.0;
-                event.is_bid = true;
-                event.is_cancel = false;
-                event.is_level_change = true;
-                event.timestamp_us = timestamp_us;
-                add_flow_event(event);
-            } else if (current_qty != prev->quantity) {
-                // Quantity changed
+
+            // Lambda for new level path
+            auto handle_new_level = [&]() {
+                add_flow_event(make_flow_event(price, static_cast<double>(current_qty), 0.0, true, timestamp_us));
+            };
+
+            // Lambda for quantity changed path
+            auto handle_qty_change = [&]() {
                 double delta =
                     static_cast<double>(static_cast<int64_t>(current_qty) - static_cast<int64_t>(prev->quantity));
 
@@ -166,15 +165,14 @@ public:
                 double fill_vol = std::min(removed, static_cast<double>(traded));
                 double cancel_vol = removed - fill_vol;
 
-                FlowEvent event;
-                event.price = price;
-                event.volume_delta = delta;
-                event.cancel_volume = cancel_vol;
-                event.is_bid = true;
-                event.is_cancel = (cancel_vol > 0.0);
-                event.is_level_change = true;
-                event.timestamp_us = timestamp_us;
-                add_flow_event(event);
+                add_flow_event(make_flow_event(price, delta, cancel_vol, true, timestamp_us));
+            };
+
+            // Pipeline-friendly: both lambdas loaded, condition selects which to call
+            if (!prev) {
+                handle_new_level();
+            } else if (current_qty != prev->quantity) {
+                handle_qty_change();
             }
         }
 
@@ -191,15 +189,7 @@ public:
                 double fill_vol = std::min(removed, static_cast<double>(traded));
                 double cancel_vol = removed - fill_vol;
 
-                FlowEvent event;
-                event.price = price;
-                event.volume_delta = -removed;
-                event.cancel_volume = cancel_vol;
-                event.is_bid = true;
-                event.is_cancel = (cancel_vol > 0.0);
-                event.is_level_change = true;
-                event.timestamp_us = timestamp_us;
-                add_flow_event(event);
+                add_flow_event(make_flow_event(price, -removed, cancel_vol, true, timestamp_us));
 
                 // Record level lifetime
                 const PriceBirth* birth = find_birth(price);
@@ -215,24 +205,20 @@ public:
         }
 
         // Process ask levels (current vs previous)
+        // Lambda-based approach: both paths prepared for pipeline
         for (int i = 0; i < current_ask_count; i++) {
             Price price = current_ask_levels[i].price;
             Quantity current_qty = current_ask_levels[i].quantity;
 
             const PriceLevel* prev = find_price(prev_ask_levels_, prev_ask_count_, price);
-            if (!prev) {
-                // New level
-                FlowEvent event;
-                event.price = price;
-                event.volume_delta = static_cast<double>(current_qty);
-                event.cancel_volume = 0.0;
-                event.is_bid = false;
-                event.is_cancel = false;
-                event.is_level_change = true;
-                event.timestamp_us = timestamp_us;
-                add_flow_event(event);
-            } else if (current_qty != prev->quantity) {
-                // Quantity changed
+
+            // Lambda for new level path
+            auto handle_new_level = [&]() {
+                add_flow_event(make_flow_event(price, static_cast<double>(current_qty), 0.0, false, timestamp_us));
+            };
+
+            // Lambda for quantity changed path
+            auto handle_qty_change = [&]() {
                 double delta =
                     static_cast<double>(static_cast<int64_t>(current_qty) - static_cast<int64_t>(prev->quantity));
 
@@ -242,15 +228,14 @@ public:
                 double fill_vol = std::min(removed, static_cast<double>(traded));
                 double cancel_vol = removed - fill_vol;
 
-                FlowEvent event;
-                event.price = price;
-                event.volume_delta = delta;
-                event.cancel_volume = cancel_vol;
-                event.is_bid = false;
-                event.is_cancel = (cancel_vol > 0.0);
-                event.is_level_change = true;
-                event.timestamp_us = timestamp_us;
-                add_flow_event(event);
+                add_flow_event(make_flow_event(price, delta, cancel_vol, false, timestamp_us));
+            };
+
+            // Pipeline-friendly: both lambdas loaded, condition selects which to call
+            if (!prev) {
+                handle_new_level();
+            } else if (current_qty != prev->quantity) {
+                handle_qty_change();
             }
         }
 
@@ -267,15 +252,7 @@ public:
                 double fill_vol = std::min(removed, static_cast<double>(traded));
                 double cancel_vol = removed - fill_vol;
 
-                FlowEvent event;
-                event.price = price;
-                event.volume_delta = -removed;
-                event.cancel_volume = cancel_vol;
-                event.is_bid = false;
-                event.is_cancel = (cancel_vol > 0.0);
-                event.is_level_change = true;
-                event.timestamp_us = timestamp_us;
-                add_flow_event(event);
+                add_flow_event(make_flow_event(price, -removed, cancel_vol, false, timestamp_us));
 
                 // Record level lifetime
                 const PriceBirth* birth = find_birth(price);
@@ -303,7 +280,7 @@ public:
     /**
      * Get metrics for a specific time window
      */
-    const Metrics& get_metrics(Window w) const {
+    inline const Metrics& get_metrics(Window w) const {
         size_t window_idx = static_cast<size_t>(w);
 
         // Check cache validity
@@ -342,7 +319,7 @@ public:
     /**
      * Reset all metrics and history
      */
-    void reset() {
+    inline void reset() {
         flow_head_ = 0;
         flow_tail_ = 0;
         trade_head_ = 0;
@@ -395,9 +372,6 @@ private:
         uint64_t birth_us;
     };
 
-    // Configuration
-    static constexpr size_t MAX_DEPTH_LEVELS = 20; // Max levels per side to track
-
     // Ring buffers (pre-allocated)
     static constexpr size_t MAX_FLOW_EVENTS = 1 << 14; // 16K events
     static constexpr size_t MAX_RECENT_TRADES = 256;   // 256 trades
@@ -420,13 +394,13 @@ private:
     size_t lifetime_head_ = 0;
     size_t lifetime_tail_ = 0;
 
-    std::array<PriceLevel, MAX_DEPTH_LEVELS> prev_bid_levels_{};
-    std::array<PriceLevel, MAX_DEPTH_LEVELS> prev_ask_levels_{};
+    std::array<PriceLevel, MaxDepthLevels> prev_bid_levels_{};
+    std::array<PriceLevel, MaxDepthLevels> prev_ask_levels_{};
     int prev_bid_count_ = 0;
     int prev_ask_count_ = 0;
 
     // Level lifetime tracking (birth times)
-    std::array<PriceBirth, MAX_DEPTH_LEVELS * 2> level_births_{}; // *2 for bid+ask
+    std::array<PriceBirth, MaxDepthLevels * 2> level_births_{}; // *2 for bid+ask
     int birth_count_ = 0;
 
     // Depth tracking for velocity
@@ -438,24 +412,19 @@ private:
     mutable std::array<Metrics, 5> cached_metrics_{};
     mutable std::array<size_t, 5> cache_tail_position_{SIZE_MAX, SIZE_MAX, SIZE_MAX, SIZE_MAX, SIZE_MAX};
 
-    // Helper methods
+    // Helper methods (branchless lookup table)
     static constexpr uint64_t get_window_duration_us(Window w) {
-        switch (w) {
-        case Window::SEC_1:
-            return 1'000'000;
-        case Window::SEC_5:
-            return 5'000'000;
-        case Window::SEC_10:
-            return 10'000'000;
-        case Window::SEC_30:
-            return 30'000'000;
-        case Window::MIN_1:
-            return 60'000'000;
-        }
-        return 1'000'000; // Default 1s
+        constexpr uint64_t durations[5] = {
+            1'000'000,  // SEC_1
+            5'000'000,  // SEC_5
+            10'000'000, // SEC_10
+            30'000'000, // SEC_30
+            60'000'000  // MIN_1
+        };
+        return durations[static_cast<size_t>(w)];
     }
 
-    void cleanup_old_trades(uint64_t current_time) {
+    inline void cleanup_old_trades(uint64_t current_time) {
         // Remove trades older than correlation window
         while (trade_head_ != trade_tail_) {
             const auto& trade = recent_trades_[trade_head_];
@@ -466,7 +435,7 @@ private:
         }
     }
 
-    void add_flow_event(const FlowEvent& event) {
+    inline void add_flow_event(const FlowEvent& event) {
         // Remove events older than 1 minute (longest window)
         constexpr uint64_t ONE_MINUTE_US = 60'000'000;
         while (flow_head_ != flow_tail_) {
@@ -482,23 +451,21 @@ private:
 
         size_t new_tail = (flow_tail_ + 1) & FLOW_MASK;
 
-        // If advancing tail would overwrite head, advance head too (buffer full)
-        if (new_tail == flow_head_) {
-            flow_head_ = (flow_head_ + 1) & FLOW_MASK;
-        }
+        // Branchless: If advancing tail would overwrite head, advance head too (buffer full)
+        size_t would_overflow = (new_tail == flow_head_);
+        flow_head_ = (flow_head_ + would_overflow) & FLOW_MASK;
 
         flow_tail_ = new_tail;
     }
 
-    void add_lifetime(const LevelLifetime& lifetime) {
+    inline void add_lifetime(const LevelLifetime& lifetime) {
         lifetimes_[lifetime_tail_] = lifetime;
 
         size_t new_tail = (lifetime_tail_ + 1) & LIFETIME_MASK;
 
-        // If advancing tail would overwrite head, advance head too (buffer full)
-        if (new_tail == lifetime_head_) {
-            lifetime_head_ = (lifetime_head_ + 1) & LIFETIME_MASK;
-        }
+        // Branchless: If advancing tail would overwrite head, advance head too (buffer full)
+        size_t would_overflow = (new_tail == lifetime_head_);
+        lifetime_head_ = (lifetime_head_ + would_overflow) & LIFETIME_MASK;
 
         lifetime_tail_ = new_tail;
     }
@@ -557,6 +524,7 @@ private:
     }
 
     Metrics calculate_metrics(size_t start_count, size_t end_count) const {
+        // Keep early return - beneficial branch prediction (rare case)
         if (start_count >= end_count) {
             return Metrics{};
         }
@@ -638,25 +606,25 @@ private:
         m.bid_level_changes = bid_changes;
         m.ask_level_changes = ask_changes;
 
-        // Cancel ratios (branchless)
-        m.cancel_ratio_bid = (bid_removed > 0.0) ? (bid_cancel / bid_removed) : 0.0;
-        m.cancel_ratio_ask = (ask_removed > 0.0) ? (ask_cancel / ask_removed) : 0.0;
+        // Cancel ratios (branchless div-by-zero using max)
+        m.cancel_ratio_bid = bid_cancel / std::max(bid_removed, 1e-10);
+        m.cancel_ratio_ask = ask_cancel / std::max(ask_removed, 1e-10);
 
-        // Velocity calculations
-        double time_span_s = (last_time > first_time) ? (static_cast<double>(last_time - first_time) / 1e6) : 0.0;
-        if (time_span_s > 0.0) {
-            // Depth velocity (net change per second)
-            double bid_net_change = bid_added - bid_removed;
-            double ask_net_change = ask_added - ask_removed;
-            m.bid_depth_velocity = bid_net_change / time_span_s;
-            m.ask_depth_velocity = ask_net_change / time_span_s;
+        // Velocity calculations (branchless div-by-zero using max)
+        double time_span_s = static_cast<double>(last_time - first_time) / 1e6;
+        double time_divisor = std::max(time_span_s, 1e-10);
 
-            // Event rates
-            m.bid_additions_per_sec = static_cast<double>(bid_addition_events) / time_span_s;
-            m.ask_additions_per_sec = static_cast<double>(ask_addition_events) / time_span_s;
-            m.bid_removals_per_sec = static_cast<double>(bid_removal_events) / time_span_s;
-            m.ask_removals_per_sec = static_cast<double>(ask_removal_events) / time_span_s;
-        }
+        // Depth velocity (net change per second)
+        double bid_net_change = bid_added - bid_removed;
+        double ask_net_change = ask_added - ask_removed;
+        m.bid_depth_velocity = bid_net_change / time_divisor;
+        m.ask_depth_velocity = ask_net_change / time_divisor;
+
+        // Event rates
+        m.bid_additions_per_sec = static_cast<double>(bid_addition_events) / time_divisor;
+        m.ask_additions_per_sec = static_cast<double>(ask_addition_events) / time_divisor;
+        m.bid_removals_per_sec = static_cast<double>(bid_removal_events) / time_divisor;
+        m.ask_removals_per_sec = static_cast<double>(ask_removal_events) / time_divisor;
 
         // Level lifetime metrics (from lifetime buffer)
         double bid_lifetime_sum = 0.0;
@@ -695,18 +663,31 @@ private:
             lt_idx = (lt_idx + 1) & LIFETIME_MASK;
         }
 
-        m.avg_bid_level_lifetime_us = (bid_lifetime_count > 0) ? (bid_lifetime_sum / bid_lifetime_count) : 0.0;
-        m.avg_ask_level_lifetime_us = (ask_lifetime_count > 0) ? (ask_lifetime_sum / ask_lifetime_count) : 0.0;
-        m.short_lived_bid_ratio =
-            (bid_lifetime_count > 0) ? (static_cast<double>(bid_short_lived) / bid_lifetime_count) : 0.0;
-        m.short_lived_ask_ratio =
-            (ask_lifetime_count > 0) ? (static_cast<double>(ask_short_lived) / ask_lifetime_count) : 0.0;
+        // Branchless div-by-zero using max
+        m.avg_bid_level_lifetime_us = bid_lifetime_sum / std::max(bid_lifetime_count, 1);
+        m.avg_ask_level_lifetime_us = ask_lifetime_sum / std::max(ask_lifetime_count, 1);
+        m.short_lived_bid_ratio = static_cast<double>(bid_short_lived) / std::max(bid_lifetime_count, 1);
+        m.short_lived_ask_ratio = static_cast<double>(ask_short_lived) / std::max(ask_lifetime_count, 1);
 
         return m;
     }
 
+    // Helper to build FlowEvent (DRY principle)
+    static inline FlowEvent make_flow_event(Price price, double volume_delta, double cancel_volume, bool is_bid,
+                                            uint64_t timestamp_us) {
+        FlowEvent event;
+        event.price = price;
+        event.volume_delta = volume_delta;
+        event.cancel_volume = cancel_volume;
+        event.is_bid = is_bid;
+        event.is_cancel = (cancel_volume > 0.0);
+        event.is_level_change = true;
+        event.timestamp_us = timestamp_us;
+        return event;
+    }
+
     // Flat array helpers - branchless linear search (cache-friendly for small N)
-    const PriceLevel* find_price(const std::array<PriceLevel, MAX_DEPTH_LEVELS>& levels, int count, Price price) const {
+    const PriceLevel* find_price(const std::array<PriceLevel, MaxDepthLevels>& levels, int count, Price price) const {
         for (int i = 0; i < count; i++) {
             if (levels[i].price == price) {
                 return &levels[i];
@@ -715,7 +696,7 @@ private:
         return nullptr;
     }
 
-    void add_birth(Price price, uint64_t timestamp_us) {
+    inline void add_birth(Price price, uint64_t timestamp_us) {
         // Check if already exists
         for (int i = 0; i < birth_count_; i++) {
             if (level_births_[i].price == price) {
@@ -723,7 +704,7 @@ private:
             }
         }
         // Add new birth
-        if (birth_count_ < static_cast<int>(MAX_DEPTH_LEVELS * 2)) {
+        if (birth_count_ < static_cast<int>(MaxDepthLevels * 2)) {
             level_births_[birth_count_++] = PriceBirth{price, timestamp_us};
         }
     }
@@ -737,7 +718,7 @@ private:
         return nullptr;
     }
 
-    void remove_birth(Price price) {
+    inline void remove_birth(Price price) {
         for (int i = 0; i < birth_count_; i++) {
             if (level_births_[i].price == price) {
                 // Swap with last and decrement count

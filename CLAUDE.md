@@ -244,15 +244,13 @@ No allocations, no virtual calls, no syscalls on hot path. Use C++20 concepts fo
 
 ### Hot Path Optimization Techniques
 
-**Branchless:** Use sign arithmetic (`sign = 2*is_bid - 1`), comparisons as multipliers (`qty * (price >= threshold)`), `std::max()` for div-by-zero.
+**Branchless:** Use branchless approaches where possible.
 
 **Pipelining:** Start independent ops first, minimize live variables, keep dependencies close together.
 
 **Single-Pass:** One traversal computing all metrics beats multiple passes. Cache locality > small perf cost.
 
-**Zero-Overhead:** Template callbacks (`template <typename Callback>`) are fully inlined at compile-time. No vtables.
-
-**Branches:** Eliminate unpredictable branches in loops. Keep beneficial early exits (`if (!done) break;`).
+**Zero-Overhead:** Template callbacks (`template <typename Callback>`) are fully inlined at compile-time. No vtables. Concepts if needed.
 
 **SIMD:** Use SIMD intrinsics (AVX2/AVX-512) for parallel data processing where possible. Vectorize loops operating on arrays.
 
