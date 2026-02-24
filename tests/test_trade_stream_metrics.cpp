@@ -337,7 +337,6 @@ void test_5s_window() {
     metrics.on_trade(10010, 200, false, ts + 3'000'000); // 3s later
 
     auto m5s = metrics.get_metrics(TradeWindow::W5s);
-    std::cerr << "DEBUG 5s: total_volume=" << m5s.total_volume << " total_trades=" << m5s.total_trades << std::endl;
     assert(m5s.total_volume == 300.0);
     assert(m5s.total_trades == 2);
 
@@ -418,18 +417,23 @@ void test_window_independence() {
     uint64_t ts = 1'000'000;
 
     // Add trades across different time ranges
-    metrics.on_trade(10000, 100, true, ts);
-    metrics.on_trade(10010, 100, true, ts + 2'000'000);
-    metrics.on_trade(10020, 100, true, ts + 6'000'000);
-    metrics.on_trade(10030, 100, true, ts + 15'000'000);
+    // Trades at: 1M, 3M, 7M, 16M microseconds
+    // Time from last: 15s, 13s, 9s, 0s
+    metrics.on_trade(10000, 100, true, ts);              // 15s before last
+    metrics.on_trade(10010, 100, true, ts + 2'000'000);  // 13s before last
+    metrics.on_trade(10020, 100, true, ts + 6'000'000);  // 9s before last
+    metrics.on_trade(10030, 100, true, ts + 15'000'000); // last trade
 
     auto m1s = metrics.get_metrics(TradeWindow::W1s);
     auto m5s = metrics.get_metrics(TradeWindow::W5s);
     auto m10s = metrics.get_metrics(TradeWindow::W10s);
 
-    assert(m1s.total_trades == 1);  // Only last trade
-    assert(m5s.total_trades == 2);  // Last 2 trades
-    assert(m10s.total_trades == 3); // Last 3 trades
+    // 1s window: only last trade (0s ago)
+    assert(m1s.total_trades == 1);
+    // 5s window: only last trade (trade at 9s ago is outside window)
+    assert(m5s.total_trades == 1);
+    // 10s window: last 2 trades (0s and 9s ago)
+    assert(m10s.total_trades == 2);
 
     std::cout << "✓ test_window_independence\n";
 }
