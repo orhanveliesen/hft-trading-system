@@ -5,15 +5,15 @@
  * Uses loopback for testing (enables IP_MULTICAST_LOOP).
  */
 
+#include "ipc/udp_telemetry.hpp"
+
+#include <atomic>
 #include <cassert>
+#include <chrono>
 #include <cstring>
 #include <iostream>
 #include <thread>
-#include <chrono>
-#include <atomic>
 #include <vector>
-
-#include "ipc/udp_telemetry.hpp"
 
 using namespace hft::ipc;
 
@@ -95,7 +95,7 @@ void test_publish_receive_quote() {
 
     int ttl = 1;
     setsockopt(sock, IPPROTO_IP, IP_MULTICAST_TTL, &ttl, sizeof(ttl));
-    int loop = 1;  // Enable loopback for testing
+    int loop = 1; // Enable loopback for testing
     setsockopt(sock, IPPROTO_IP, IP_MULTICAST_LOOP, &loop, sizeof(loop));
 
     sockaddr_in dest{};
@@ -107,15 +107,14 @@ void test_publish_receive_quote() {
     TelemetryPacket pkt{};
     pkt.type = TelemetryType::Quote;
     pkt.symbol_id = 42;
-    pkt.data.quote.bid_price = 91000'00000000LL;  // 91000.0 scaled
-    pkt.data.quote.ask_price = 91001'00000000LL;  // 91001.0 scaled
+    pkt.data.quote.bid_price = 91000'00000000LL; // 91000.0 scaled
+    pkt.data.quote.ask_price = 91001'00000000LL; // 91001.0 scaled
     pkt.data.quote.bid_size = 100;
     pkt.data.quote.ask_size = 150;
     pkt.timestamp_ns = TelemetryPublisher::now_ns();
     pkt.sequence = 1;
 
-    sendto(sock, &pkt, sizeof(pkt), 0,
-           reinterpret_cast<sockaddr*>(&dest), sizeof(dest));
+    sendto(sock, &pkt, sizeof(pkt), 0, reinterpret_cast<sockaddr*>(&dest), sizeof(dest));
 
     // Wait for reception
     auto start = std::chrono::steady_clock::now();
@@ -184,8 +183,7 @@ void test_sequence_tracking() {
         pkt.type = TelemetryType::Heartbeat;
         pkt.sequence = i;
         pkt.timestamp_ns = TelemetryPublisher::now_ns();
-        sendto(sock, &pkt, sizeof(pkt), 0,
-               reinterpret_cast<sockaddr*>(&dest), sizeof(dest));
+        sendto(sock, &pkt, sizeof(pkt), 0, reinterpret_cast<sockaddr*>(&dest), sizeof(dest));
     }
 
     // Wait for packets
@@ -234,7 +232,7 @@ void test_fire_and_forget() {
 
     // Should complete in < 100ms (non-blocking)
     // Note: WSL and virtualized environments may have higher UDP overhead
-    assert(us < 100000);  // 100ms max for 1000 packets (100us per packet)
+    assert(us < 100000); // 100ms max for 1000 packets (100us per packet)
 
     std::cout << "PASSED (" << us << " µs for 1000 packets)\n";
 }
@@ -274,9 +272,7 @@ void test_dropped_packet_detection() {
     }
 
     std::atomic<int> received_count{0};
-    sub.set_callback([&](const TelemetryPacket&) {
-        received_count.fetch_add(1);
-    });
+    sub.set_callback([&](const TelemetryPacket&) { received_count.fetch_add(1); });
     sub.start();
 
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
@@ -292,13 +288,12 @@ void test_dropped_packet_detection() {
     inet_pton(AF_INET, "239.255.0.1", &dest.sin_addr);
 
     // Send packets with gaps (simulating drops)
-    for (uint32_t seq : {0, 1, 5, 6, 10}) {  // Gaps at 2-4 and 7-9
+    for (uint32_t seq : {0, 1, 5, 6, 10}) { // Gaps at 2-4 and 7-9
         TelemetryPacket pkt{};
         pkt.type = TelemetryType::Heartbeat;
         pkt.sequence = seq;
         pkt.timestamp_ns = TelemetryPublisher::now_ns();
-        sendto(sock, &pkt, sizeof(pkt), 0,
-               reinterpret_cast<sockaddr*>(&dest), sizeof(dest));
+        sendto(sock, &pkt, sizeof(pkt), 0, reinterpret_cast<sockaddr*>(&dest), sizeof(dest));
     }
 
     // Wait

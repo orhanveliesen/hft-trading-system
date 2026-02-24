@@ -3,6 +3,7 @@
  */
 
 #include "../include/strategy/streak_tracker.hpp"
+
 #include <cassert>
 #include <iostream>
 
@@ -58,7 +59,7 @@ void test_streak_resets() {
     tracker.record_loss();
     assert(tracker.current_win_streak() == 0);
     assert(tracker.current_loss_streak() == 1);
-    assert(tracker.max_win_streak() == 3);  // Max preserved
+    assert(tracker.max_win_streak() == 3); // Max preserved
 
     // Build loss streak
     tracker.record_loss();
@@ -68,7 +69,7 @@ void test_streak_resets() {
     // Win resets loss streak
     tracker.record_win();
     assert(tracker.current_loss_streak() == 0);
-    assert(tracker.max_loss_streak() == 3);  // Max preserved
+    assert(tracker.max_loss_streak() == 3); // Max preserved
     std::cout << "  [PASS] streak_resets\n";
 }
 
@@ -92,23 +93,23 @@ void test_loss_streak_thresholds() {
     tracker.record_loss();
     assert(!tracker.is_loss_streak_cautious());
 
-    tracker.record_loss();  // 2
+    tracker.record_loss(); // 2
     assert(tracker.is_loss_streak_cautious());
     assert(!tracker.is_loss_streak_tighten_signal());
 
-    tracker.record_loss();  // 3
+    tracker.record_loss(); // 3
     assert(tracker.is_loss_streak_tighten_signal());
     assert(!tracker.is_loss_streak_defensive());
 
-    tracker.record_loss();  // 4
+    tracker.record_loss(); // 4
     assert(tracker.is_loss_streak_defensive());
     assert(!tracker.is_loss_streak_pause());
 
-    tracker.record_loss();  // 5
+    tracker.record_loss(); // 5
     assert(tracker.is_loss_streak_pause());
     assert(!tracker.is_loss_streak_exit_only());
 
-    tracker.record_loss();  // 6
+    tracker.record_loss(); // 6
     assert(tracker.is_loss_streak_exit_only());
     std::cout << "  [PASS] loss_streak_thresholds\n";
 }
@@ -122,7 +123,7 @@ void test_win_streak_threshold() {
     tracker.record_win();
     assert(!tracker.is_win_streak_aggressive());
 
-    tracker.record_win();  // 3
+    tracker.record_win(); // 3
     assert(tracker.is_win_streak_aggressive());
     std::cout << "  [PASS] win_streak_threshold\n";
 }

@@ -1,14 +1,15 @@
 #pragma once
 
-#include "regime_detector.hpp"
 #include "../backtest/kline_backtest.hpp"
 #include "../backtest/strategies.hpp"
 #include "../config/strategy_config.hpp"
 #include "../config/strategy_factory.hpp"
-#include <memory>
-#include <map>
-#include <iostream>
+#include "regime_detector.hpp"
+
 #include <iomanip>
+#include <iostream>
+#include <map>
+#include <memory>
 
 namespace hft {
 namespace strategy {
@@ -18,20 +19,26 @@ namespace strategy {
  */
 struct RegimeStrategyMap {
     config::StrategyType trending_up = config::StrategyType::Breakout;
-    config::StrategyType trending_down = config::StrategyType::Breakout;  // Or cash/short
+    config::StrategyType trending_down = config::StrategyType::Breakout; // Or cash/short
     config::StrategyType ranging = config::StrategyType::MeanReversion;
-    config::StrategyType high_volatility = config::StrategyType::RSI;  // More conservative
+    config::StrategyType high_volatility = config::StrategyType::RSI; // More conservative
     config::StrategyType low_volatility = config::StrategyType::MeanReversion;
-    config::StrategyType unknown = config::StrategyType::MeanReversion;  // Default
+    config::StrategyType unknown = config::StrategyType::MeanReversion; // Default
 
     config::StrategyType get(MarketRegime regime) const {
         switch (regime) {
-            case MarketRegime::TrendingUp: return trending_up;
-            case MarketRegime::TrendingDown: return trending_down;
-            case MarketRegime::Ranging: return ranging;
-            case MarketRegime::HighVolatility: return high_volatility;
-            case MarketRegime::LowVolatility: return low_volatility;
-            default: return unknown;
+        case MarketRegime::TrendingUp:
+            return trending_up;
+        case MarketRegime::TrendingDown:
+            return trending_down;
+        case MarketRegime::Ranging:
+            return ranging;
+        case MarketRegime::HighVolatility:
+            return high_volatility;
+        case MarketRegime::LowVolatility:
+            return low_volatility;
+        default:
+            return unknown;
         }
     }
 };
@@ -51,24 +58,21 @@ public:
     struct Config {
         RegimeConfig regime_config;
         RegimeStrategyMap strategy_map;
-        config::StrategyParams strategy_params;  // Shared params
+        config::StrategyParams strategy_params; // Shared params
 
-        int min_regime_bars = 5;      // Minimum bars before switching
-        double confidence_threshold = 0.3;  // Min confidence to switch
+        int min_regime_bars = 5;           // Minimum bars before switching
+        double confidence_threshold = 0.3; // Min confidence to switch
 
-        bool verbose = false;  // Print regime changes
+        bool verbose = false; // Print regime changes
     };
 
     AdaptiveStrategy() : AdaptiveStrategy(Config{}) {}
 
     explicit AdaptiveStrategy(const Config& config)
-        : config_(config)
-        , regime_detector_(config.regime_config)
-        , current_regime_(MarketRegime::Ranging)  // Start with ranging assumption
-        , bars_in_regime_(0)
-        , active_strategy_(nullptr)
-        , total_switches_(0)
-    {
+        : config_(config), regime_detector_(config.regime_config),
+          current_regime_(MarketRegime::Ranging) // Start with ranging assumption
+          ,
+          bars_in_regime_(0), active_strategy_(nullptr), total_switches_(0) {
         // Pre-create all strategies
         create_strategies();
 
@@ -82,7 +86,7 @@ public:
 
     void on_start(double capital) override {
         regime_detector_.reset();
-        current_regime_ = MarketRegime::Ranging;  // Start with default
+        current_regime_ = MarketRegime::Ranging; // Start with default
         bars_in_regime_ = 0;
         total_switches_ = 0;
 
@@ -99,8 +103,7 @@ public:
         }
     }
 
-    backtest::Signal on_kline(const exchange::Kline& kline,
-                               const backtest::BacktestPosition& position) override {
+    backtest::Signal on_kline(const exchange::Kline& kline, const backtest::BacktestPosition& position) override {
         // Update regime detector
         regime_detector_.update(kline);
 
@@ -143,7 +146,8 @@ public:
     int switches() const { return total_switches_; }
 
     std::string active_strategy_name() const {
-        if (current_regime_ == MarketRegime::Unknown) return "None";
+        if (current_regime_ == MarketRegime::Unknown)
+            return "None";
         auto type = config_.strategy_map.get(current_regime_);
         return config::StrategyFactory::get_name(type, config_.strategy_params);
     }
@@ -161,19 +165,13 @@ private:
     void create_strategies() {
         // Create one instance of each strategy type we might use
         std::vector<config::StrategyType> types = {
-            config_.strategy_map.trending_up,
-            config_.strategy_map.trending_down,
-            config_.strategy_map.ranging,
-            config_.strategy_map.high_volatility,
-            config_.strategy_map.low_volatility,
-            config_.strategy_map.unknown
-        };
+            config_.strategy_map.trending_up,     config_.strategy_map.trending_down,  config_.strategy_map.ranging,
+            config_.strategy_map.high_volatility, config_.strategy_map.low_volatility, config_.strategy_map.unknown};
 
         for (auto type : types) {
             if (strategies_.find(type) == strategies_.end()) {
                 try {
-                    auto strategy = config::StrategyFactory::create(
-                        type, config_.strategy_params);
+                    auto strategy = config::StrategyFactory::create(type, config_.strategy_params);
                     if (strategy) {
                         strategies_[type] = std::move(strategy);
                     }
@@ -186,24 +184,26 @@ private:
 
     bool should_switch_regime(MarketRegime new_regime) {
         // Don't switch if regime is unknown or same
-        if (new_regime == MarketRegime::Unknown) return false;
-        if (new_regime == current_regime_) return false;
+        if (new_regime == MarketRegime::Unknown)
+            return false;
+        if (new_regime == current_regime_)
+            return false;
 
         // Require minimum time in current regime (hysteresis)
-        if (bars_in_regime_ < config_.min_regime_bars) return false;
+        if (bars_in_regime_ < config_.min_regime_bars)
+            return false;
 
         // Require minimum confidence
-        if (regime_detector_.confidence() < config_.confidence_threshold) return false;
+        if (regime_detector_.confidence() < config_.confidence_threshold)
+            return false;
 
         return true;
     }
 
     void switch_to_regime(MarketRegime new_regime) {
         if (config_.verbose && current_regime_ != new_regime) {
-            std::cout << "[REGIME] " << regime_to_string(current_regime_)
-                      << " -> " << regime_to_string(new_regime)
-                      << " (confidence: " << std::fixed << std::setprecision(2)
-                      << regime_detector_.confidence()
+            std::cout << "[REGIME] " << regime_to_string(current_regime_) << " -> " << regime_to_string(new_regime)
+                      << " (confidence: " << std::fixed << std::setprecision(2) << regime_detector_.confidence()
                       << ", volatility: " << regime_detector_.volatility()
                       << ", trend: " << regime_detector_.trend_strength() << ")\n";
         }
@@ -230,10 +230,8 @@ public:
     /**
      * Build optimal regime mapping by testing strategies in different periods
      */
-    static AdaptiveStrategy::Config build_optimal_config(
-        const std::vector<exchange::Kline>& klines,
-        bool verbose = false)
-    {
+    static AdaptiveStrategy::Config build_optimal_config(const std::vector<exchange::Kline>& klines,
+                                                         bool verbose = false) {
         AdaptiveStrategy::Config config;
         config.verbose = verbose;
 
@@ -253,5 +251,5 @@ public:
     }
 };
 
-}  // namespace strategy
-}  // namespace hft
+} // namespace strategy
+} // namespace hft

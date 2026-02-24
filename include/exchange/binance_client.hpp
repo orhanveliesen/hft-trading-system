@@ -1,9 +1,10 @@
 #pragma once
 
 #include "../types.hpp"
-#include <string>
+
 #include <functional>
 #include <map>
+#include <string>
 
 namespace hft {
 namespace exchange {
@@ -20,13 +21,13 @@ struct BinanceEndpoints {
 enum class OrderType {
     Limit,
     Market,
-    LimitMaker  // Post-only
+    LimitMaker // Post-only
 };
 
 enum class TimeInForce {
-    GTC,  // Good Till Cancel
-    IOC,  // Immediate or Cancel
-    FOK   // Fill or Kill
+    GTC, // Good Till Cancel
+    IOC, // Immediate or Cancel
+    FOK  // Fill or Kill
 };
 
 // Order request
@@ -127,18 +128,24 @@ inline std::string side_to_string(Side side) {
 
 inline std::string order_type_to_string(OrderType type) {
     switch (type) {
-        case OrderType::Limit: return "LIMIT";
-        case OrderType::Market: return "MARKET";
-        case OrderType::LimitMaker: return "LIMIT_MAKER";
+    case OrderType::Limit:
+        return "LIMIT";
+    case OrderType::Market:
+        return "MARKET";
+    case OrderType::LimitMaker:
+        return "LIMIT_MAKER";
     }
     return "LIMIT";
 }
 
 inline std::string tif_to_string(TimeInForce tif) {
     switch (tif) {
-        case TimeInForce::GTC: return "GTC";
-        case TimeInForce::IOC: return "IOC";
-        case TimeInForce::FOK: return "FOK";
+    case TimeInForce::GTC:
+        return "GTC";
+    case TimeInForce::IOC:
+        return "IOC";
+    case TimeInForce::FOK:
+        return "FOK";
     }
     return "GTC";
 }
@@ -158,5 +165,5 @@ inline std::string quantity_to_string(Quantity qty, int decimals = 5) {
     return buf;
 }
 
-}  // namespace exchange
-}  // namespace hft
+} // namespace exchange
+} // namespace hft

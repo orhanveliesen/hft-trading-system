@@ -1,14 +1,15 @@
 #pragma once
 
 #include "../exchange/market_data.hpp"
-#include "../types.hpp"
 #include "../strategy/signal.hpp"
 #include "../strategy/trading_position.hpp"
-#include <vector>
-#include <string>
-#include <functional>
+#include "../types.hpp"
+
 #include <cmath>
+#include <functional>
 #include <iostream>
+#include <string>
+#include <vector>
 
 namespace hft {
 namespace backtest {
@@ -38,16 +39,16 @@ struct TradeRecord {
  * Backtest Configuration
  */
 struct BacktestConfig {
-    double initial_capital = 10000.0;    // Starting capital (USD)
-    double fee_rate = 0.001;             // 0.1% per trade
-    double slippage = 0.0005;            // 0.05% slippage
-    double max_position_pct = 0.5;       // Max 50% of capital per trade
-    bool allow_shorting = false;         // Allow short selling
+    double initial_capital = 10000.0; // Starting capital (USD)
+    double fee_rate = 0.001;          // 0.1% per trade
+    double slippage = 0.0005;         // 0.05% slippage
+    double max_position_pct = 0.5;    // Max 50% of capital per trade
+    bool allow_shorting = false;      // Allow short selling
 
     // Risk management
-    double stop_loss_pct = 0.02;         // 2% stop loss
-    double take_profit_pct = 0.04;       // 4% take profit
-    bool use_stops = true;               // Enable stop loss/take profit
+    double stop_loss_pct = 0.02;   // 2% stop loss
+    double take_profit_pct = 0.04; // 4% take profit
+    bool use_stops = true;         // Enable stop loss/take profit
 };
 
 /**
@@ -106,11 +107,7 @@ public:
 class KlineBacktester {
 public:
     explicit KlineBacktester(const BacktestConfig& config = BacktestConfig())
-        : config_(config)
-        , capital_(config.initial_capital)
-        , peak_capital_(config.initial_capital)
-        , max_drawdown_(0)
-    {}
+        : config_(config), capital_(config.initial_capital), peak_capital_(config.initial_capital), max_drawdown_(0) {}
 
     // Load klines from CSV
     bool load_klines(const std::string& filename) {
@@ -119,9 +116,7 @@ public:
     }
 
     // Set klines directly
-    void set_klines(const std::vector<exchange::Kline>& klines) {
-        klines_ = klines;
-    }
+    void set_klines(const std::vector<exchange::Kline>& klines) { klines_ = klines; }
 
     // Run backtest
     BacktestStats run(IStrategy& strategy) {
@@ -194,7 +189,8 @@ private:
     double total_fees_ = 0;
 
     void execute_signal(Signal signal, const exchange::Kline& kline) {
-        if (signal == Signal::None) return;
+        if (signal == Signal::None)
+            return;
 
         if (signal == Signal::Close && !position_.is_flat()) {
             close_position(kline);
@@ -203,14 +199,14 @@ private:
 
         if (signal == Signal::Buy) {
             if (position_.is_short()) {
-                close_position(kline);  // Close short first
+                close_position(kline); // Close short first
             }
             if (position_.is_flat()) {
                 open_long(kline);
             }
         } else if (signal == Signal::Sell) {
             if (position_.is_long()) {
-                close_position(kline);  // Close long first
+                close_position(kline); // Close long first
             }
             if (position_.is_flat() && config_.allow_shorting) {
                 open_short(kline);
@@ -247,13 +243,14 @@ private:
         capital_ -= fee;
         total_fees_ += fee;
 
-        position_.quantity = -qty;  // Negative for short
+        position_.quantity = -qty; // Negative for short
         position_.avg_price = price;
         position_.entry_time = kline.close_time;
     }
 
     void close_position(const exchange::Kline& kline) {
-        if (position_.is_flat()) return;
+        if (position_.is_flat())
+            return;
 
         double exit_price;
         double pnl;
@@ -288,7 +285,8 @@ private:
     }
 
     void check_stops(const exchange::Kline& kline) {
-        if (position_.is_flat()) return;
+        if (position_.is_flat())
+            return;
 
         double current_price = kline.close / 10000.0;
         double entry_price = position_.avg_price;
@@ -385,19 +383,22 @@ private:
     }
 
     double calculate_sharpe() const {
-        if (equity_curve_.size() < 2) return 0.0;
+        if (equity_curve_.size() < 2)
+            return 0.0;
 
         std::vector<double> returns;
         for (size_t i = 1; i < equity_curve_.size(); ++i) {
-            if (equity_curve_[i-1] != 0) {
-                returns.push_back((equity_curve_[i] - equity_curve_[i-1]) / equity_curve_[i-1]);
+            if (equity_curve_[i - 1] != 0) {
+                returns.push_back((equity_curve_[i] - equity_curve_[i - 1]) / equity_curve_[i - 1]);
             }
         }
 
-        if (returns.empty()) return 0.0;
+        if (returns.empty())
+            return 0.0;
 
         double mean = 0;
-        for (double r : returns) mean += r;
+        for (double r : returns)
+            mean += r;
         mean /= returns.size();
 
         double variance = 0;
@@ -407,21 +408,23 @@ private:
         variance /= returns.size();
 
         double std_dev = std::sqrt(variance);
-        if (std_dev == 0) return 0.0;
+        if (std_dev == 0)
+            return 0.0;
 
         // Annualize (assuming daily klines, 365 days)
         return (mean / std_dev) * std::sqrt(365.0);
     }
 
     double calculate_sortino() const {
-        if (equity_curve_.size() < 2) return 0.0;
+        if (equity_curve_.size() < 2)
+            return 0.0;
 
         std::vector<double> returns;
         std::vector<double> negative_returns;
 
         for (size_t i = 1; i < equity_curve_.size(); ++i) {
-            if (equity_curve_[i-1] != 0) {
-                double r = (equity_curve_[i] - equity_curve_[i-1]) / equity_curve_[i-1];
+            if (equity_curve_[i - 1] != 0) {
+                double r = (equity_curve_[i] - equity_curve_[i - 1]) / equity_curve_[i - 1];
                 returns.push_back(r);
                 if (r < 0) {
                     negative_returns.push_back(r);
@@ -429,14 +432,16 @@ private:
             }
         }
 
-        if (returns.empty()) return 0.0;
+        if (returns.empty())
+            return 0.0;
 
         double mean = 0;
-        for (double r : returns) mean += r;
+        for (double r : returns)
+            mean += r;
         mean /= returns.size();
 
         if (negative_returns.empty()) {
-            return mean > 0 ? 999.0 : 0.0;  // No downside risk
+            return mean > 0 ? 999.0 : 0.0; // No downside risk
         }
 
         double downside_variance = 0;
@@ -446,7 +451,8 @@ private:
         downside_variance /= negative_returns.size();
 
         double downside_dev = std::sqrt(downside_variance);
-        if (downside_dev == 0) return 0.0;
+        if (downside_dev == 0)
+            return 0.0;
 
         return (mean / downside_dev) * std::sqrt(365.0);
     }
@@ -480,5 +486,5 @@ inline void BacktestStats::print() const {
     std::cout << "Largest Loss: $" << largest_loss << "\n";
 }
 
-}  // namespace backtest
-}  // namespace hft
+} // namespace backtest
+} // namespace hft

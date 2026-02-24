@@ -25,9 +25,10 @@
 
 #include "../ipc/shared_portfolio_state.hpp"
 #include "../util/time_utils.hpp"
-#include <fstream>
+
 #include <cstdio>
 #include <cstring>
+#include <fstream>
 
 namespace hft {
 namespace strategy {
@@ -35,12 +36,9 @@ namespace strategy {
 class PositionStore {
 public:
     static constexpr const char* DEFAULT_PATH = "positions.json";
-    static constexpr uint64_t SAVE_INTERVAL_NS = 5'000'000'000ULL;  // 5 seconds
+    static constexpr uint64_t SAVE_INTERVAL_NS = 5'000'000'000ULL; // 5 seconds
 
-    explicit PositionStore(const char* path = DEFAULT_PATH)
-        : path_(path)
-        , last_save_ns_(0)
-    {}
+    explicit PositionStore(const char* path = DEFAULT_PATH) : path_(path), last_save_ns_(0) {}
 
     /**
      * Save portfolio state to JSON file
@@ -51,7 +49,7 @@ public:
 
         // Rate limit saves to avoid disk thrashing
         if (last_save_ns_ > 0 && (now - last_save_ns_) < SAVE_INTERVAL_NS) {
-            return true;  // Skip, too recent
+            return true; // Skip, too recent
         }
 
         bool success = write_json(portfolio);
@@ -65,7 +63,7 @@ public:
      * Force save immediately (for fill events)
      */
     bool save_immediate(const ipc::SharedPortfolioState& portfolio) {
-        last_save_ns_ = 0;  // Reset rate limit
+        last_save_ns_ = 0; // Reset rate limit
         return save(portfolio);
     }
 
@@ -73,9 +71,7 @@ public:
      * Restore portfolio state from JSON file
      * Returns true if restoration was successful
      */
-    bool restore(ipc::SharedPortfolioState& portfolio) {
-        return read_json(portfolio);
-    }
+    bool restore(ipc::SharedPortfolioState& portfolio) { return read_json(portfolio); }
 
     /**
      * Check if a position file exists
@@ -88,9 +84,7 @@ public:
     /**
      * Clear the position file (on graceful shutdown after closing positions)
      */
-    void clear() {
-        std::remove(path_);
-    }
+    void clear() { std::remove(path_); }
 
     /**
      * Get path to position file
@@ -105,7 +99,8 @@ private:
         // Write to temp file first, then rename (atomic on POSIX)
         std::string temp_path = std::string(path_) + ".tmp";
         std::ofstream out(temp_path);
-        if (!out.is_open()) return false;
+        if (!out.is_open())
+            return false;
 
         // Write JSON manually (no external JSON library needed)
         out << "{\n";
@@ -128,13 +123,16 @@ private:
         bool first = true;
         for (size_t i = 0; i < ipc::MAX_PORTFOLIO_SYMBOLS; ++i) {
             const auto& pos = portfolio.positions[i];
-            if (!pos.active.load()) continue;
+            if (!pos.active.load())
+                continue;
 
             double qty = pos.quantity();
             // Only save positions with non-zero quantity
-            if (qty == 0) continue;
+            if (qty == 0)
+                continue;
 
-            if (!first) out << ",\n";
+            if (!first)
+                out << ",\n";
             first = false;
 
             out << "    {\n";
@@ -165,14 +163,15 @@ private:
 
     bool read_json(ipc::SharedPortfolioState& portfolio) {
         std::ifstream in(path_);
-        if (!in.is_open()) return false;
+        if (!in.is_open())
+            return false;
 
         // Read entire file into string
-        std::string content((std::istreambuf_iterator<char>(in)),
-                            std::istreambuf_iterator<char>());
+        std::string content((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
         in.close();
 
-        if (content.empty()) return false;
+        if (content.empty())
+            return false;
 
         // Simple JSON parsing (minimal, no external library)
         // Parse global fields
@@ -205,12 +204,13 @@ private:
 
         // Parse positions array
         size_t positions_start = content.find("\"positions\"");
-        if (positions_start == std::string::npos) return true;  // No positions, OK
+        if (positions_start == std::string::npos)
+            return true; // No positions, OK
 
         size_t array_start = content.find('[', positions_start);
         size_t array_end = content.find(']', array_start);
         if (array_start == std::string::npos || array_end == std::string::npos) {
-            return true;  // Empty positions array, OK
+            return true; // Empty positions array, OK
         }
 
         std::string positions_str = content.substr(array_start, array_end - array_start + 1);
@@ -219,7 +219,8 @@ private:
         size_t pos = 0;
         while ((pos = positions_str.find('{', pos)) != std::string::npos) {
             size_t end = positions_str.find('}', pos);
-            if (end == std::string::npos) break;
+            if (end == std::string::npos)
+                break;
 
             std::string obj = positions_str.substr(pos, end - pos + 1);
 
@@ -260,12 +261,12 @@ private:
             }
         }
 
-        double calculated_cash = initial_capital - position_cost + total_realized_pnl
-                                - total_commissions - total_slippage;
+        double calculated_cash =
+            initial_capital - position_cost + total_realized_pnl - total_commissions - total_slippage;
 
         // Sanity check: if file cash differs significantly from calculated, use calculated
         double cash_diff = std::abs(cash - calculated_cash);
-        if (cash_diff > initial_capital * 0.01) {  // More than 1% discrepancy
+        if (cash_diff > initial_capital * 0.01) { // More than 1% discrepancy
             // Log warning would be nice, but avoid iostream in hot path compatible code
             // Just use the calculated (correct) value
             portfolio.cash_x8.store(static_cast<int64_t>(calculated_cash * 1e8));
@@ -282,18 +283,21 @@ private:
             search = std::string("\"") + key + "\": ";
             pos = json.find(search);
         }
-        if (pos == std::string::npos) return 0.0;
+        if (pos == std::string::npos)
+            return 0.0;
 
         pos = json.find(':', pos) + 1;
-        while (pos < json.size() && (json[pos] == ' ' || json[pos] == '\t')) ++pos;
+        while (pos < json.size() && (json[pos] == ' ' || json[pos] == '\t'))
+            ++pos;
 
         size_t end = pos;
-        while (end < json.size() && (std::isdigit(json[end]) || json[end] == '.' ||
-               json[end] == '-' || json[end] == '+' || json[end] == 'e' || json[end] == 'E')) {
+        while (end < json.size() && (std::isdigit(json[end]) || json[end] == '.' || json[end] == '-' ||
+                                     json[end] == '+' || json[end] == 'e' || json[end] == 'E')) {
             ++end;
         }
 
-        if (end == pos) return 0.0;
+        if (end == pos)
+            return 0.0;
         return std::stod(json.substr(pos, end - pos));
     }
 
@@ -304,20 +308,24 @@ private:
             search = std::string("\"") + key + "\": ";
             pos = json.find(search);
         }
-        if (pos == std::string::npos) return "";
+        if (pos == std::string::npos)
+            return "";
 
         pos = json.find(':', pos) + 1;
-        while (pos < json.size() && (json[pos] == ' ' || json[pos] == '\t')) ++pos;
+        while (pos < json.size() && (json[pos] == ' ' || json[pos] == '\t'))
+            ++pos;
 
-        if (pos >= json.size() || json[pos] != '"') return "";
-        ++pos;  // Skip opening quote
+        if (pos >= json.size() || json[pos] != '"')
+            return "";
+        ++pos; // Skip opening quote
 
         size_t end = json.find('"', pos);
-        if (end == std::string::npos) return "";
+        if (end == std::string::npos)
+            return "";
 
         return json.substr(pos, end - pos);
     }
 };
 
-}  // namespace strategy
-}  // namespace hft
+} // namespace strategy
+} // namespace hft

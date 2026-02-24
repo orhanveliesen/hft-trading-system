@@ -1,18 +1,20 @@
+#include "../include/trading_simulator.hpp"
+#include "../include/types.hpp"
+
 #include <cassert>
 #include <iostream>
 #include <vector>
-#include "../include/types.hpp"
-#include "../include/trading_simulator.hpp"
 
 using namespace hft;
 using namespace hft::strategy;
 
 #define TEST(name) void name()
-#define RUN_TEST(name) do { \
-    std::cout << "Running " << #name << "... "; \
-    name(); \
-    std::cout << "PASSED\n"; \
-} while(0)
+#define RUN_TEST(name)                                                                                                 \
+    do {                                                                                                               \
+        std::cout << "Running " << #name << "... ";                                                                    \
+        name();                                                                                                        \
+        std::cout << "PASSED\n";                                                                                       \
+    } while (0)
 
 #define ASSERT_EQ(a, b) assert((a) == (b))
 #define ASSERT_TRUE(x) assert(x)
@@ -31,7 +33,7 @@ struct MarketTick {
 // Test: Market maker places two-sided quotes
 TEST(test_market_maker_places_quotes) {
     SimulatorConfig config;
-    config.spread_bps = 20;    // 20 bps = 0.2%
+    config.spread_bps = 20; // 20 bps = 0.2%
     config.quote_size = 100;
     config.max_position = 500;
 
@@ -82,7 +84,7 @@ TEST(test_pnl_tracking) {
 
     // Sell 100 at 10050 (profit of 50 per share)
     sim.on_fill(Side::Sell, 100, 10050);
-    ASSERT_EQ(sim.realized_pnl(), 100 * 50);  // 5000 profit
+    ASSERT_EQ(sim.realized_pnl(), 100 * 50); // 5000 profit
 
     // Should be flat now
     ASSERT_EQ(sim.position(), 0);
@@ -91,7 +93,7 @@ TEST(test_pnl_tracking) {
 // Test: Risk manager halts trading on max loss
 TEST(test_risk_halt_on_loss) {
     SimulatorConfig config;
-    config.daily_loss_limit_pct = 0.01;  // 1% of 100k = 1000 max daily loss
+    config.daily_loss_limit_pct = 0.01; // 1% of 100k = 1000 max daily loss
 
     TradingSimulator sim(config);
 
@@ -99,7 +101,7 @@ TEST(test_risk_halt_on_loss) {
     sim.on_fill(Side::Buy, 100, 10000);
 
     // Sell at huge loss: 10000 - 9000 = 1000 loss per share
-    sim.on_fill(Side::Sell, 100, 8990);  // Loss = 100 * 1010 = 101000
+    sim.on_fill(Side::Sell, 100, 8990); // Loss = 100 * 1010 = 101000
 
     // Should be halted
     ASSERT_TRUE(sim.is_halted());
@@ -126,7 +128,7 @@ TEST(test_position_limit_reduces_size) {
     // Bid size should be reduced (only 50 more room)
     ASSERT_EQ(quotes.bid_size, 50);
     // Ask size should be full (can sell all 100 + 150 more = 250)
-    ASSERT_EQ(quotes.ask_size, 100);  // Capped at quote_size
+    ASSERT_EQ(quotes.ask_size, 100); // Capped at quote_size
 }
 
 // Test: Inventory skew adjusts prices
@@ -134,7 +136,7 @@ TEST(test_inventory_skew) {
     SimulatorConfig config;
     config.quote_size = 100;
     config.max_position = 200;
-    config.skew_factor = 1.0;  // Full skew
+    config.skew_factor = 1.0; // Full skew
 
     TradingSimulator sim(config);
 
@@ -163,11 +165,10 @@ TEST(test_backtest_simple) {
 
     // Simulate a simple up-down-up market
     std::vector<MarketTick> ticks = {
-        {10000, 10010, 1000, 1000},
-        {10005, 10015, 1000, 1000},  // Market moves up
-        {10000, 10010, 1000, 1000},  // Back down
-        {10010, 10020, 1000, 1000},  // Up again
-        {10005, 10015, 1000, 1000},  // Settle
+        {10000, 10010, 1000, 1000}, {10005, 10015, 1000, 1000}, // Market moves up
+        {10000, 10010, 1000, 1000},                             // Back down
+        {10010, 10020, 1000, 1000},                             // Up again
+        {10005, 10015, 1000, 1000},                             // Settle
     };
 
     for (const auto& tick : ticks) {
@@ -181,7 +182,7 @@ TEST(test_backtest_simple) {
 // Test: Full simulation with order execution
 TEST(test_full_simulation_with_execution) {
     SimulatorConfig config;
-    config.spread_bps = 50;  // Wide spread for easier fills
+    config.spread_bps = 50; // Wide spread for easier fills
     config.quote_size = 10;
     config.max_position = 100;
 

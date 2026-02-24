@@ -7,16 +7,16 @@
  * 3. std::string vs char[16] copy
  */
 
-#include <iostream>
-#include <iomanip>
-#include <chrono>
-#include <map>
 #include <array>
-#include <mutex>
-#include <string>
+#include <chrono>
 #include <cstring>
-#include <random>
+#include <iomanip>
+#include <iostream>
+#include <map>
 #include <memory>
+#include <mutex>
+#include <random>
+#include <string>
 
 constexpr size_t MAX_SYMBOLS = 64;
 constexpr size_t ITERATIONS = 10'000'000;
@@ -93,7 +93,7 @@ private:
 };
 
 // Timing helper
-template<typename Func>
+template <typename Func>
 double measure_ns(Func&& f, size_t iterations) {
     auto start = std::chrono::high_resolution_clock::now();
     for (size_t i = 0; i < iterations; ++i) {
@@ -113,10 +113,8 @@ int main() {
     OldApproach old_app;
     NewApproach new_app;
 
-    const char* symbols[] = {
-        "BTCUSDT", "ETHUSDT", "BNBUSDT", "XRPUSDT", "SOLUSDT",
-        "ADAUSDT", "DOGEUSDT", "TRXUSDT", "DOTUSDT", "MATICUSDT"
-    };
+    const char* symbols[] = {"BTCUSDT", "ETHUSDT",  "BNBUSDT", "XRPUSDT", "SOLUSDT",
+                             "ADAUSDT", "DOGEUSDT", "TRXUSDT", "DOTUSDT", "MATICUSDT"};
 
     for (uint32_t i = 0; i < 10; ++i) {
         old_app.add_symbol(i, symbols[i]);
@@ -145,46 +143,49 @@ int main() {
     // Benchmark OLD (map + mutex)
     std::cout << "Benchmarking OLD (map + mutex)...\n";
     size_t idx = 0;
-    double old_ns = measure_ns([&]() {
-        old_app.on_quote(symbol_ids[idx % ITERATIONS], prices[idx % ITERATIONS]);
-        ++idx;
-    }, ITERATIONS);
+    double old_ns = measure_ns(
+        [&]() {
+            old_app.on_quote(symbol_ids[idx % ITERATIONS], prices[idx % ITERATIONS]);
+            ++idx;
+        },
+        ITERATIONS);
 
     // Benchmark NEW (array, no mutex)
     std::cout << "Benchmarking NEW (array, no lock)...\n";
     idx = 0;
-    double new_ns = measure_ns([&]() {
-        new_app.on_quote(symbol_ids[idx % ITERATIONS], prices[idx % ITERATIONS]);
-        ++idx;
-    }, ITERATIONS);
+    double new_ns = measure_ns(
+        [&]() {
+            new_app.on_quote(symbol_ids[idx % ITERATIONS], prices[idx % ITERATIONS]);
+            ++idx;
+        },
+        ITERATIONS);
 
     // Results
     std::cout << "\n";
     std::cout << "┌────────────────────────────────────────────────────┐\n";
     std::cout << "│                    RESULTS                         │\n";
     std::cout << "├────────────────────────────────────────────────────┤\n";
-    std::cout << "│  OLD (map + mutex):    " << std::fixed << std::setprecision(1)
-              << std::setw(8) << old_ns << " ns/op             │\n";
+    std::cout << "│  OLD (map + mutex):    " << std::fixed << std::setprecision(1) << std::setw(8) << old_ns
+              << " ns/op             │\n";
     std::cout << "│  NEW (array, no lock): " << std::setw(8) << new_ns << " ns/op             │\n";
     std::cout << "├────────────────────────────────────────────────────┤\n";
 
     double speedup = old_ns / new_ns;
     double saved_ns = old_ns - new_ns;
 
-    std::cout << "│  Speedup:              " << std::setw(8) << std::setprecision(2)
-              << speedup << "x                  │\n";
-    std::cout << "│  Saved per tick:       " << std::setw(8) << std::setprecision(1)
-              << saved_ns << " ns               │\n";
+    std::cout << "│  Speedup:              " << std::setw(8) << std::setprecision(2) << speedup
+              << "x                  │\n";
+    std::cout << "│  Saved per tick:       " << std::setw(8) << std::setprecision(1) << saved_ns
+              << " ns               │\n";
     std::cout << "├────────────────────────────────────────────────────┤\n";
 
     // Throughput
     double old_throughput = 1e9 / old_ns;
     double new_throughput = 1e9 / new_ns;
 
-    std::cout << "│  OLD throughput:       " << std::setw(8) << std::setprecision(2)
-              << old_throughput / 1e6 << " M/sec            │\n";
-    std::cout << "│  NEW throughput:       " << std::setw(8)
-              << new_throughput / 1e6 << " M/sec            │\n";
+    std::cout << "│  OLD throughput:       " << std::setw(8) << std::setprecision(2) << old_throughput / 1e6
+              << " M/sec            │\n";
+    std::cout << "│  NEW throughput:       " << std::setw(8) << new_throughput / 1e6 << " M/sec            │\n";
     std::cout << "└────────────────────────────────────────────────────┘\n";
 
     // Extra: isolated benchmarks
@@ -193,23 +194,29 @@ int main() {
 
     // Map lookup only
     std::map<uint32_t, int> test_map;
-    for (uint32_t i = 0; i < 10; ++i) test_map[i] = i;
+    for (uint32_t i = 0; i < 10; ++i)
+        test_map[i] = i;
 
     idx = 0;
-    double map_ns = measure_ns([&]() {
-        volatile auto it = test_map.find(symbol_ids[idx++ % ITERATIONS] % 10);
-        (void)it;
-    }, ITERATIONS);
+    double map_ns = measure_ns(
+        [&]() {
+            volatile auto it = test_map.find(symbol_ids[idx++ % ITERATIONS] % 10);
+            (void)it;
+        },
+        ITERATIONS);
 
     // Array access only
     std::array<int, MAX_SYMBOLS> test_array{};
-    for (size_t i = 0; i < 10; ++i) test_array[i] = i;
+    for (size_t i = 0; i < 10; ++i)
+        test_array[i] = i;
 
     idx = 0;
-    double arr_ns = measure_ns([&]() {
-        volatile auto val = test_array[symbol_ids[idx++ % ITERATIONS] % 10];
-        (void)val;
-    }, ITERATIONS);
+    double arr_ns = measure_ns(
+        [&]() {
+            volatile auto val = test_array[symbol_ids[idx++ % ITERATIONS] % 10];
+            (void)val;
+        },
+        ITERATIONS);
 
     std::cout << "  map.find():      " << std::setw(6) << map_ns << " ns\n";
     std::cout << "  array[]:         " << std::setw(6) << arr_ns << " ns\n";
@@ -217,9 +224,7 @@ int main() {
 
     // Mutex overhead
     std::mutex mtx;
-    double mutex_ns = measure_ns([&]() {
-        std::lock_guard<std::mutex> lock(mtx);
-    }, ITERATIONS);
+    double mutex_ns = measure_ns([&]() { std::lock_guard<std::mutex> lock(mtx); }, ITERATIONS);
 
     std::cout << "  mutex lock/unlock: " << std::setw(4) << mutex_ns << " ns\n";
 

@@ -1,17 +1,18 @@
 #pragma once
 
 #include "types.hpp"
-#include <array>
+
 #include <algorithm>
+#include <array>
 #include <cstring>
 
 namespace hft {
 
 // Book state for snapshot handling
 enum class BookState : uint8_t {
-    Empty,      // No data
-    Building,   // Receiving snapshot
-    Ready       // Ready for trading
+    Empty,    // No data
+    Building, // Receiving snapshot
+    Ready     // Ready for trading
 };
 
 // L1 Snapshot - just BBO
@@ -24,7 +25,7 @@ struct L1Snapshot {
 };
 
 // L2 Snapshot - top N levels
-template<size_t N = 10>
+template <size_t N = 10>
 struct L2Snapshot {
     struct Level {
         Price price = 0;
@@ -34,8 +35,8 @@ struct L2Snapshot {
     std::array<Level, N> bids{};
     std::array<Level, N> asks{};
     uint64_t sequence = 0;
-    uint8_t bid_count = 0;  // Actual number of bid levels
-    uint8_t ask_count = 0;  // Actual number of ask levels
+    uint8_t bid_count = 0; // Actual number of bid levels
+    uint8_t ask_count = 0; // Actual number of ask levels
 };
 
 /**
@@ -62,42 +63,33 @@ public:
         Quantity size = 0;
 
         bool empty() const { return size == 0; }
-        void clear() { price = 0; size = 0; }
+        void clear() {
+            price = 0;
+            size = 0;
+        }
     };
 
     TopOfBook() = default;
 
     // === BBO Access (hot path - inlined) ===
 
-    __attribute__((always_inline))
-    Price best_bid() const {
-        return bids_[0].price;
-    }
+    __attribute__((always_inline)) Price best_bid() const { return bids_[0].price; }
 
-    __attribute__((always_inline))
-    Price best_ask() const {
-        return asks_[0].price;
-    }
+    __attribute__((always_inline)) Price best_ask() const { return asks_[0].price; }
 
-    __attribute__((always_inline))
-    Quantity best_bid_size() const {
-        return bids_[0].size;
-    }
+    __attribute__((always_inline)) Quantity best_bid_size() const { return bids_[0].size; }
 
-    __attribute__((always_inline))
-    Quantity best_ask_size() const {
-        return asks_[0].size;
-    }
+    __attribute__((always_inline)) Quantity best_ask_size() const { return asks_[0].size; }
 
-    __attribute__((always_inline))
-    Price mid_price() const {
-        if (bids_[0].price == 0 || asks_[0].price == 0) return 0;
+    __attribute__((always_inline)) Price mid_price() const {
+        if (bids_[0].price == 0 || asks_[0].price == 0)
+            return 0;
         return (bids_[0].price + asks_[0].price) / 2;
     }
 
-    __attribute__((always_inline))
-    Price spread() const {
-        if (bids_[0].price == 0 || asks_[0].price == 0) return INVALID_PRICE;
+    __attribute__((always_inline)) Price spread() const {
+        if (bids_[0].price == 0 || asks_[0].price == 0)
+            return INVALID_PRICE;
         return asks_[0].price - bids_[0].price;
     }
 
@@ -109,7 +101,8 @@ public:
     size_t bid_levels() const {
         size_t count = 0;
         for (const auto& lvl : bids_) {
-            if (lvl.empty()) break;
+            if (lvl.empty())
+                break;
             ++count;
         }
         return count;
@@ -118,7 +111,8 @@ public:
     size_t ask_levels() const {
         size_t count = 0;
         for (const auto& lvl : asks_) {
-            if (lvl.empty()) break;
+            if (lvl.empty())
+                break;
             ++count;
         }
         return count;
@@ -148,7 +142,8 @@ public:
         double bid_depth = static_cast<double>(total_bid_depth());
         double ask_depth = static_cast<double>(total_ask_depth());
         double total = bid_depth + ask_depth;
-        if (total == 0) return 0.0;
+        if (total == 0)
+            return 0.0;
         return (bid_depth - ask_depth) / total;
     }
 
@@ -166,8 +161,10 @@ public:
 
     // Clear the entire book
     void clear() {
-        for (auto& lvl : bids_) lvl.clear();
-        for (auto& lvl : asks_) lvl.clear();
+        for (auto& lvl : bids_)
+            lvl.clear();
+        for (auto& lvl : asks_)
+            lvl.clear();
         last_update_ = 0;
         sequence_ = 0;
         state_ = BookState::Empty;
@@ -202,7 +199,7 @@ public:
     }
 
     // Apply L2 snapshot (multiple levels)
-    template<size_t N>
+    template <size_t N>
     void apply_snapshot(const L2Snapshot<N>& snap) {
         clear();
 
@@ -330,8 +327,8 @@ private:
         }
     }
 
-    std::array<Level, DEPTH> bids_{};   // 40 bytes
-    std::array<Level, DEPTH> asks_{};   // 40 bytes
+    std::array<Level, DEPTH> bids_{};    // 40 bytes
+    std::array<Level, DEPTH> asks_{};    // 40 bytes
     Timestamp last_update_ = 0;          // 8 bytes
     uint64_t sequence_ = 0;              // 8 bytes
     BookState state_ = BookState::Empty; // 1 byte
@@ -342,4 +339,4 @@ private:
 static_assert(sizeof(TopOfBook::Level) == 8, "Level should be 8 bytes");
 static_assert(sizeof(TopOfBook) <= 128, "TopOfBook should fit in 2 cache lines");
 
-}  // namespace hft
+} // namespace hft

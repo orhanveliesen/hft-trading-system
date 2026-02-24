@@ -17,9 +17,12 @@ namespace util {
  * Returns 0 for invalid characters.
  */
 constexpr uint32_t hex_char_to_val(char c) {
-    if (c >= '0' && c <= '9') return c - '0';
-    if (c >= 'a' && c <= 'f') return 10 + (c - 'a');
-    if (c >= 'A' && c <= 'F') return 10 + (c - 'A');
+    if (c >= '0' && c <= '9')
+        return c - '0';
+    if (c >= 'a' && c <= 'f')
+        return 10 + (c - 'a');
+    if (c >= 'A' && c <= 'F')
+        return 10 + (c - 'A');
     return 0;
 }
 
@@ -38,5 +41,5 @@ constexpr uint32_t hex_to_u32(const char* s) {
     return result;
 }
 
-}  // namespace util
-}  // namespace hft
+} // namespace util
+} // namespace hft

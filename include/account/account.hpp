@@ -1,9 +1,10 @@
 #pragma once
 
 #include "../types.hpp"
+
 #include <atomic>
-#include <string>
 #include <functional>
+#include <string>
 
 namespace hft {
 namespace account {
@@ -15,45 +16,41 @@ namespace account {
  * Example: $1,000,000.00 = 100000000
  */
 struct AccountInfo {
-    int64_t cash_balance = 0;       // Available cash (not in positions)
-    int64_t buying_power = 0;       // Max can buy (includes margin)
-    int64_t margin_used = 0;        // Margin currently in use
-    int64_t margin_available = 0;   // Margin still available
-    int64_t unrealized_pnl = 0;     // Open position P&L
-    int64_t realized_pnl = 0;       // Closed position P&L (today)
-    uint64_t sequence = 0;          // Update sequence number
-    Timestamp last_update = 0;      // Last update timestamp
+    int64_t cash_balance = 0;     // Available cash (not in positions)
+    int64_t buying_power = 0;     // Max can buy (includes margin)
+    int64_t margin_used = 0;      // Margin currently in use
+    int64_t margin_available = 0; // Margin still available
+    int64_t unrealized_pnl = 0;   // Open position P&L
+    int64_t realized_pnl = 0;     // Closed position P&L (today)
+    uint64_t sequence = 0;        // Update sequence number
+    Timestamp last_update = 0;    // Last update timestamp
 
     // Equity = cash + unrealized P&L
-    int64_t equity() const {
-        return cash_balance + unrealized_pnl;
-    }
+    int64_t equity() const { return cash_balance + unrealized_pnl; }
 
     // Net liquidation value
-    int64_t net_liq() const {
-        return equity();
-    }
+    int64_t net_liq() const { return equity(); }
 };
 
 /**
  * MarginRequirement - Per-symbol margin rules
  */
 struct MarginRequirement {
-    double initial_margin = 0.25;    // 25% = 4x leverage
+    double initial_margin = 0.25;     // 25% = 4x leverage
     double maintenance_margin = 0.20; // 20% maintenance
-    int64_t min_equity = 2500000;    // $25,000 minimum (PDT rule)
+    int64_t min_equity = 2500000;     // $25,000 minimum (PDT rule)
 };
 
 /**
  * OrderCost - Pre-trade cost calculation
  */
 struct OrderCost {
-    int64_t notional = 0;           // Price * Quantity
-    int64_t margin_required = 0;    // Initial margin needed
-    int64_t commission = 0;         // Estimated commission
-    int64_t total_cost = 0;         // Total buying power needed
-    bool can_afford = false;        // Have enough buying power?
-    std::string reject_reason;      // Why rejected (if any)
+    int64_t notional = 0;        // Price * Quantity
+    int64_t margin_required = 0; // Initial margin needed
+    int64_t commission = 0;      // Estimated commission
+    int64_t total_cost = 0;      // Total buying power needed
+    bool can_afford = false;     // Have enough buying power?
+    std::string reject_reason;   // Why rejected (if any)
 };
 
 // Callback for account updates from broker
@@ -72,8 +69,7 @@ class AccountManager {
 public:
     AccountManager() = default;
 
-    explicit AccountManager(const MarginRequirement& margin_req)
-        : margin_req_(margin_req) {}
+    explicit AccountManager(const MarginRequirement& margin_req) : margin_req_(margin_req) {}
 
     // ========================================
     // Account State Updates (from broker)
@@ -111,9 +107,7 @@ public:
     }
 
     // Set update callback
-    void set_update_callback(AccountUpdateCallback cb) {
-        on_update_ = std::move(cb);
-    }
+    void set_update_callback(AccountUpdateCallback cb) { on_update_ = std::move(cb); }
 
     // ========================================
     // Account State Queries
@@ -127,9 +121,7 @@ public:
     int64_t equity() const { return account_.equity(); }
 
     // Check if account meets minimum equity requirement
-    bool meets_minimum_equity() const {
-        return account_.equity() >= margin_req_.min_equity;
-    }
+    bool meets_minimum_equity() const { return account_.equity() >= margin_req_.min_equity; }
 
     // ========================================
     // Pre-Trade Checks
@@ -143,12 +135,11 @@ public:
         cost.notional = static_cast<int64_t>(qty) * price;
 
         // Calculate margin required (for buys and short sells)
-        cost.margin_required = static_cast<int64_t>(
-            cost.notional * margin_req_.initial_margin);
+        cost.margin_required = static_cast<int64_t>(cost.notional * margin_req_.initial_margin);
 
         // Estimate commission (example: $0.005 per share, min $1)
-        int64_t comm = static_cast<int64_t>(qty) * 50;  // 50 cents per 100 shares
-        cost.commission = (comm > 100) ? comm : 100;    // min $1
+        int64_t comm = static_cast<int64_t>(qty) * 50; // 50 cents per 100 shares
+        cost.commission = (comm > 100) ? comm : 100;   // min $1
 
         // Total cost
         if (side == Side::Buy) {
@@ -164,9 +155,8 @@ public:
         cost.can_afford = (cost.total_cost <= available_bp);
 
         if (!cost.can_afford) {
-            cost.reject_reason = "Insufficient buying power: need " +
-                std::to_string(cost.total_cost / 100) + " have " +
-                std::to_string(available_bp / 100);
+            cost.reject_reason = "Insufficient buying power: need " + std::to_string(cost.total_cost / 100) + " have " +
+                                 std::to_string(available_bp / 100);
         }
 
         // Check minimum equity (PDT rule)
@@ -181,8 +171,7 @@ public:
     // Quick check without full calculation
     bool can_afford(Quantity qty, Price price) const {
         int64_t notional = static_cast<int64_t>(qty) * price;
-        int64_t margin_needed = static_cast<int64_t>(
-            notional * margin_req_.initial_margin);
+        int64_t margin_needed = static_cast<int64_t>(notional * margin_req_.initial_margin);
         return margin_needed <= (account_.buying_power - reserved_bp_);
     }
 
@@ -212,20 +201,16 @@ public:
     // Margin Configuration
     // ========================================
 
-    void set_margin_requirement(const MarginRequirement& req) {
-        margin_req_ = req;
-    }
+    void set_margin_requirement(const MarginRequirement& req) { margin_req_ = req; }
 
-    const MarginRequirement& margin_requirement() const {
-        return margin_req_;
-    }
+    const MarginRequirement& margin_requirement() const { return margin_req_; }
 
 private:
     AccountInfo account_;
     MarginRequirement margin_req_;
-    int64_t reserved_bp_ = 0;  // Reserved for pending orders
+    int64_t reserved_bp_ = 0; // Reserved for pending orders
     AccountUpdateCallback on_update_;
 };
 
-}  // namespace account
-}  // namespace hft
+} // namespace account
+} // namespace hft

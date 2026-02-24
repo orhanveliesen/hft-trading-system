@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 
 namespace hft {
@@ -31,19 +32,9 @@ class MarketHealthMonitor {
 public:
     static constexpr size_t MAX_SYMBOLS = 64;
 
-    explicit MarketHealthMonitor(
-        size_t num_symbols,
-        double crash_threshold = 0.5,
-        int cooldown_ticks = 60
-    )
-        : num_symbols_(num_symbols)
-        , crash_threshold_(crash_threshold)
-        , cooldown_ticks_(cooldown_ticks)
-        , cooldown_remaining_(0)
-        , spike_count_(0)
-        , active_count_(0)
-        , liquidation_triggered_(false)
-    {
+    explicit MarketHealthMonitor(size_t num_symbols, double crash_threshold = 0.5, int cooldown_ticks = 60)
+        : num_symbols_(num_symbols), crash_threshold_(crash_threshold), cooldown_ticks_(cooldown_ticks),
+          cooldown_remaining_(0), spike_count_(0), active_count_(0), liquidation_triggered_(false) {
         symbol_is_spike_.fill(false);
         symbol_is_active_.fill(false);
     }
@@ -52,7 +43,8 @@ public:
      * Update spike state for a symbol
      */
     void update_symbol(size_t symbol_id, bool is_spike) {
-        if (symbol_id >= MAX_SYMBOLS) return;
+        if (symbol_id >= MAX_SYMBOLS)
+            return;
 
         // Track if symbol was previously spiking
         bool was_spike = symbol_is_spike_[symbol_id];
@@ -97,16 +89,15 @@ public:
      * Crash = spike_ratio >= crash_threshold
      */
     bool is_crash() const {
-        if (active_count_ == 0) return false;
+        if (active_count_ == 0)
+            return false;
         return spike_ratio() >= crash_threshold_;
     }
 
     /**
      * Check if in cooldown period after crash
      */
-    bool in_cooldown() const {
-        return cooldown_remaining_ > 0;
-    }
+    bool in_cooldown() const { return cooldown_remaining_ > 0; }
 
     /**
      * Check if emergency liquidation should be triggered
@@ -135,7 +126,8 @@ public:
      * Get spike ratio (spike_count / active_count)
      */
     double spike_ratio() const {
-        if (active_count_ == 0) return 0.0;
+        if (active_count_ == 0)
+            return 0.0;
         return static_cast<double>(spike_count_) / active_count_;
     }
 
@@ -169,5 +161,5 @@ private:
     std::array<bool, MAX_SYMBOLS> symbol_is_active_;
 };
 
-}  // namespace strategy
-}  // namespace hft
+} // namespace strategy
+} // namespace hft

@@ -2,46 +2,51 @@
  * Test SharedLedger - Shared memory ledger for IPC
  */
 
-#include <iostream>
+#include "../include/ipc/shared_ledger.hpp"
+
 #include <cassert>
 #include <cmath>
 #include <cstring>
-
-#include "../include/ipc/shared_ledger.hpp"
+#include <iostream>
 
 #define TEST(name) void name()
 
-#define RUN_TEST(name) do { \
-    std::cout << "  " << #name << "... "; \
-    try { \
-        name(); \
-        std::cout << "PASSED\n"; \
-    } catch (...) { \
-        std::cout << "FAILED (exception)\n"; \
-        return 1; \
-    } \
-} while(0)
+#define RUN_TEST(name)                                                                                                 \
+    do {                                                                                                               \
+        std::cout << "  " << #name << "... ";                                                                          \
+        try {                                                                                                          \
+            name();                                                                                                    \
+            std::cout << "PASSED\n";                                                                                   \
+        } catch (...) {                                                                                                \
+            std::cout << "FAILED (exception)\n";                                                                       \
+            return 1;                                                                                                  \
+        }                                                                                                              \
+    } while (0)
 
-#define ASSERT_EQ(a, b) do { \
-    if ((a) != (b)) { \
-        std::cerr << "\nFAIL: " << #a << " (" << (a) << ") != " << #b << " (" << (b) << ")\n"; \
-        assert(false); \
-    } \
-} while(0)
+#define ASSERT_EQ(a, b)                                                                                                \
+    do {                                                                                                               \
+        if ((a) != (b)) {                                                                                              \
+            std::cerr << "\nFAIL: " << #a << " (" << (a) << ") != " << #b << " (" << (b) << ")\n";                     \
+            assert(false);                                                                                             \
+        }                                                                                                              \
+    } while (0)
 
-#define ASSERT_NEAR(a, b, tol) do { \
-    if (std::abs((a) - (b)) > (tol)) { \
-        std::cerr << "\nFAIL: " << #a << " (" << (a) << ") != " << #b << " (" << (b) << ") within " << (tol) << "\n"; \
-        assert(false); \
-    } \
-} while(0)
+#define ASSERT_NEAR(a, b, tol)                                                                                         \
+    do {                                                                                                               \
+        if (std::abs((a) - (b)) > (tol)) {                                                                             \
+            std::cerr << "\nFAIL: " << #a << " (" << (a) << ") != " << #b << " (" << (b) << ") within " << (tol)       \
+                      << "\n";                                                                                         \
+            assert(false);                                                                                             \
+        }                                                                                                              \
+    } while (0)
 
-#define ASSERT_TRUE(expr) do { \
-    if (!(expr)) { \
-        std::cerr << "\nFAIL: " << #expr << " is false\n"; \
-        assert(false); \
-    } \
-} while(0)
+#define ASSERT_TRUE(expr)                                                                                              \
+    do {                                                                                                               \
+        if (!(expr)) {                                                                                                 \
+            std::cerr << "\nFAIL: " << #expr << " is false\n";                                                         \
+            assert(false);                                                                                             \
+        }                                                                                                              \
+    } while (0)
 
 // Helper to populate entry
 void populate_entry(hft::ipc::SharedLedgerEntry* e, bool is_buy, double price, double qty, double pnl) {
@@ -190,13 +195,13 @@ TEST(shared_ledger_mismatch_detection) {
 
     // Entry with balance mismatch
     auto* e2 = ledger->append();
-    e2->balance_ok.store(0);  // MISMATCH!
+    e2->balance_ok.store(0); // MISMATCH!
     e2->pnl_ok.store(1);
 
     // Entry with pnl mismatch
     auto* e3 = ledger->append();
     e3->balance_ok.store(1);
-    e3->pnl_ok.store(0);  // MISMATCH!
+    e3->pnl_ok.store(0); // MISMATCH!
 
     ASSERT_EQ(ledger->check_mismatches(), 2u);
     ASSERT_TRUE(!ledger->entry(0)->has_mismatch());

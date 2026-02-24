@@ -16,9 +16,9 @@
  * - Uses QueueFillDetector to determine when orders would fill
  */
 
-#include "../types.hpp"
 #include "../ipc/shared_config.hpp"
 #include "../risk/enhanced_risk_manager.hpp"
+#include "../types.hpp"
 #include "queue_fill_detector.hpp"
 
 #include <algorithm>
@@ -33,30 +33,26 @@ namespace paper {
 class PaperOrderSender {
 public:
     static constexpr OrderId PAPER_ID_MASK = 0x8000000000000000ULL;
-    static constexpr double DEFAULT_SLIPPAGE_BPS = 5.0;  // 5 bps = 0.05%
+    static constexpr double DEFAULT_SLIPPAGE_BPS = 5.0; // 5 bps = 0.05%
 
     enum class Event { Accepted, Filled, Cancelled, Rejected };
 
     // NOTE: qty is double (not Quantity/uint32_t) because crypto trades use
     // fractional quantities (e.g., 0.01 BTC). Using uint32_t would truncate to 0.
     using FillCallback = std::function<void(Symbol, OrderId, Side, double qty, Price)>;
-    using SlippageCallback = std::function<void(double)>;  // Track slippage cost
+    using SlippageCallback = std::function<void(double)>; // Track slippage cost
 
-    PaperOrderSender() : next_id_(1), total_orders_(0), total_fills_(0),
-                         config_(nullptr), total_slippage_(0),
-                         use_queue_sim_(false), default_queue_depth_(0) {}
+    PaperOrderSender()
+        : next_id_(1), total_orders_(0), total_fills_(0), config_(nullptr), total_slippage_(0), use_queue_sim_(false),
+          default_queue_depth_(0) {}
 
     // Set config for reading slippage_bps
     void set_config(const ipc::SharedConfig* config) { config_ = config; }
 
     // Queue simulation configuration
-    void enable_queue_simulation(bool enable) {
-        use_queue_sim_ = enable;
-    }
+    void enable_queue_simulation(bool enable) { use_queue_sim_ = enable; }
 
-    void set_default_queue_depth(Quantity depth) {
-        default_queue_depth_ = depth;
-    }
+    void set_default_queue_depth(Quantity depth) { default_queue_depth_ = depth; }
 
     // Feed trade data to queue detector (for queue position updates)
     void on_trade(Symbol symbol, Price price, Quantity qty, Side aggressor_side, uint64_t timestamp_ns) {
@@ -75,12 +71,11 @@ public:
 
         // Register limit orders with QueueFillDetector if queue simulation enabled
         if (!is_market && use_queue_sim_) {
-            queue_detector_.register_order(id, symbol, side, expected_price,
-                                          static_cast<Quantity>(qty), current_time_ns());
+            queue_detector_.register_order(id, symbol, side, expected_price, static_cast<Quantity>(qty),
+                                           current_time_ns());
 
             if (default_queue_depth_ > 0) {
-                queue_detector_.set_initial_queue_depth(symbol, side, expected_price,
-                                                       default_queue_depth_);
+                queue_detector_.set_initial_queue_depth(symbol, side, expected_price, default_queue_depth_);
             }
         }
 
@@ -90,12 +85,11 @@ public:
 
     // 4-param backward-compatible version (satisfies OrderSender concept)
     bool send_order(Symbol symbol, Side side, double qty, bool is_market) {
-        return send_order(symbol, side, qty, 0, is_market);  // No expected_price tracking
+        return send_order(symbol, side, qty, 0, is_market); // No expected_price tracking
     }
 
     bool cancel_order(Symbol /*symbol*/, OrderId id) {
-        auto it = std::find_if(pending_.begin(), pending_.end(),
-            [id](const Order& o) { return o.id == id; });
+        auto it = std::find_if(pending_.begin(), pending_.end(), [id](const Order& o) { return o.id == id; });
         if (it != pending_.end()) {
             if (use_queue_sim_) {
                 queue_detector_.cancel_order(id);
@@ -115,7 +109,7 @@ public:
                 slippage_bps = cfg_slippage;
             }
         }
-        double slippage_rate = slippage_bps / 10000.0;  // Convert bps to decimal
+        double slippage_rate = slippage_bps / 10000.0; // Convert bps to decimal
 
         std::vector<Order> remaining;
         for (auto& o : pending_) {
@@ -145,9 +139,11 @@ public:
 
                 slippage_cost = slippage_amount * o.qty / risk::PRICE_SCALE;
                 total_slippage_ += slippage_cost;
-                if (on_slippage_) on_slippage_(slippage_cost);
+                if (on_slippage_)
+                    on_slippage_(slippage_cost);
 
-                if (on_fill_) on_fill_(o.symbol, o.id, o.side, o.qty, fill_price);
+                if (on_fill_)
+                    on_fill_(o.symbol, o.id, o.side, o.qty, fill_price);
                 total_fills_++;
             } else if (use_queue_sim_) {
                 // LIMIT ORDER WITH QUEUE SIMULATION: Check if queue cleared
@@ -155,7 +151,8 @@ public:
                 if (result.filled && result.confidence == FillConfidence::Confirmed) {
                     // Queue cleared, fill at limit price
                     fill_price = o.expected_price;
-                    if (on_fill_) on_fill_(o.symbol, o.id, o.side, o.qty, fill_price);
+                    if (on_fill_)
+                        on_fill_(o.symbol, o.id, o.side, o.qty, fill_price);
                     total_fills_++;
                 } else {
                     // Still in queue, keep pending
@@ -173,19 +170,20 @@ public:
                 if (o.side == Side::Buy) {
                     // Buy limit: fills when ask <= limit_price
                     if (ask <= limit_price) {
-                        fill_price = limit_price;  // Fill at limit price (no slippage)
+                        fill_price = limit_price; // Fill at limit price (no slippage)
                         can_fill = true;
                     }
                 } else {
                     // Sell limit: fills when bid >= limit_price
                     if (bid >= limit_price) {
-                        fill_price = limit_price;  // Fill at limit price (no slippage)
+                        fill_price = limit_price; // Fill at limit price (no slippage)
                         can_fill = true;
                     }
                 }
 
                 if (can_fill) {
-                    if (on_fill_) on_fill_(o.symbol, o.id, o.side, o.qty, fill_price);
+                    if (on_fill_)
+                        on_fill_(o.symbol, o.id, o.side, o.qty, fill_price);
                     total_fills_++;
                 } else {
                     // Limit order not yet fillable, keep pending
@@ -207,15 +205,14 @@ private:
         Symbol symbol;
         OrderId id;
         Side side;
-        double qty;            // double to support fractional crypto quantities (e.g., 0.01 BTC)
-        Price expected_price;  // For limit: limit price, for market: expected fill
-        bool is_market;        // true = market (slippage), false = limit (no slippage)
+        double qty;           // double to support fractional crypto quantities (e.g., 0.01 BTC)
+        Price expected_price; // For limit: limit price, for market: expected fill
+        bool is_market;       // true = market (slippage), false = limit (no slippage)
     };
 
     uint64_t current_time_ns() const {
         auto now = std::chrono::steady_clock::now();
-        return std::chrono::duration_cast<std::chrono::nanoseconds>(
-            now.time_since_epoch()).count();
+        return std::chrono::duration_cast<std::chrono::nanoseconds>(now.time_since_epoch()).count();
     }
 
     OrderId next_id_;
@@ -233,5 +230,5 @@ private:
     QueueFillDetector queue_detector_;
 };
 
-}  // namespace paper
-}  // namespace hft
+} // namespace paper
+} // namespace hft

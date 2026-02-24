@@ -1,8 +1,8 @@
-#include <cassert>
-#include <iostream>
-#include <cstring>
-
 #include "../include/risk/enhanced_risk_manager.hpp"
+
+#include <cassert>
+#include <cstring>
+#include <iostream>
 
 using namespace hft;
 using namespace hft::risk;
@@ -12,11 +12,12 @@ using namespace hft::risk;
 // ============================================
 
 #define TEST(name) void name()
-#define RUN_TEST(name) do { \
-    std::cout << "Running " << #name << "... "; \
-    name(); \
-    std::cout << "PASSED\n"; \
-} while(0)
+#define RUN_TEST(name)                                                                                                 \
+    do {                                                                                                               \
+        std::cout << "Running " << #name << "... ";                                                                    \
+        name();                                                                                                        \
+        std::cout << "PASSED\n";                                                                                       \
+    } while (0)
 
 // ============================================
 // Daily P&L Limit Tests
@@ -25,7 +26,7 @@ using namespace hft::risk;
 TEST(test_daily_pnl_limit_not_exceeded) {
     EnhancedRiskConfig config;
     config.initial_capital = 100000;
-    config.daily_loss_limit_pct = 0.10;  // 10% = 10k max loss per day
+    config.daily_loss_limit_pct = 0.10; // 10% = 10k max loss per day
 
     EnhancedRiskManager rm(config);
 
@@ -40,7 +41,7 @@ TEST(test_daily_pnl_limit_not_exceeded) {
 TEST(test_daily_pnl_limit_exceeded) {
     EnhancedRiskConfig config;
     config.initial_capital = 100000;
-    config.daily_loss_limit_pct = 0.10;  // 10% = 10k max loss
+    config.daily_loss_limit_pct = 0.10; // 10% = 10k max loss
 
     EnhancedRiskManager rm(config);
 
@@ -55,8 +56,8 @@ TEST(test_daily_pnl_limit_exceeded) {
 TEST(test_daily_pnl_reset_on_new_day) {
     EnhancedRiskConfig config;
     config.initial_capital = 100000;
-    config.daily_loss_limit_pct = 0.10;  // 10% = 10k max loss
-    config.max_drawdown_pct = 0.20;      // 20% max drawdown (to not interfere with daily test)
+    config.daily_loss_limit_pct = 0.10; // 10% = 10k max loss
+    config.max_drawdown_pct = 0.20;     // 20% max drawdown (to not interfere with daily test)
 
     EnhancedRiskManager rm(config);
 
@@ -69,9 +70,9 @@ TEST(test_daily_pnl_reset_on_new_day) {
 
     // Now at -8000 total, but daily loss is 0
     // Lose another 5k today
-    rm.update_pnl(-13000);  // Total -13k, but today only -5k
+    rm.update_pnl(-13000); // Total -13k, but today only -5k
 
-    assert(rm.can_trade());  // Today's loss (5k) < limit (10k)
+    assert(rm.can_trade()); // Today's loss (5k) < limit (10k)
 }
 
 // ============================================
@@ -81,7 +82,7 @@ TEST(test_daily_pnl_reset_on_new_day) {
 TEST(test_drawdown_from_peak) {
     EnhancedRiskConfig config;
     config.max_drawdown_pct = 0.10;  // 10% max drawdown
-    config.initial_capital = 100000;  // 100k starting capital
+    config.initial_capital = 100000; // 100k starting capital
 
     EnhancedRiskManager rm(config);
 
@@ -95,14 +96,14 @@ TEST(test_drawdown_from_peak) {
     assert(!rm.is_drawdown_breached());
 
     // Large drawdown (15k from peak = 13.6% > 10%)
-    rm.update_pnl(-5000);  // Now at 95k, peak was 110k
+    rm.update_pnl(-5000); // Now at 95k, peak was 110k
     assert(!rm.can_trade());
     assert(rm.is_drawdown_breached());
 }
 
 TEST(test_drawdown_updates_peak) {
     EnhancedRiskConfig config;
-    config.max_drawdown_pct = 0.20;  // 20% max drawdown
+    config.max_drawdown_pct = 0.20; // 20% max drawdown
     config.initial_capital = 100000;
 
     EnhancedRiskManager rm(config);
@@ -113,11 +114,11 @@ TEST(test_drawdown_updates_peak) {
 
     // Drawdown: 120k -> 110k (8.3% drawdown)
     rm.update_pnl(10000);
-    assert(rm.peak_equity() == 120000);  // Peak unchanged
+    assert(rm.peak_equity() == 120000); // Peak unchanged
 
     // New high: 110k -> 130k (new peak)
     rm.update_pnl(30000);
-    assert(rm.peak_equity() == 130000);  // New peak
+    assert(rm.peak_equity() == 130000); // New peak
 }
 
 // ============================================
@@ -126,7 +127,7 @@ TEST(test_drawdown_updates_peak) {
 
 TEST(test_symbol_position_limit_hot_path) {
     EnhancedRiskConfig config;
-    config.initial_capital = 1000000;  // Need capital for notional checks
+    config.initial_capital = 1000000; // Need capital for notional checks
     EnhancedRiskManager rm(config);
 
     // Register symbol and get index for hot path
@@ -149,7 +150,7 @@ TEST(test_symbol_position_limit_hot_path) {
 
 TEST(test_symbol_position_limit_cold_path) {
     EnhancedRiskConfig config;
-    config.initial_capital = 1000000;  // Need capital for notional checks
+    config.initial_capital = 1000000; // Need capital for notional checks
     EnhancedRiskManager rm(config);
 
     // Use string-based API (convenience, not for hot path)
@@ -171,7 +172,7 @@ TEST(test_symbol_position_limit_cold_path) {
 
 TEST(test_symbol_position_both_sides) {
     EnhancedRiskConfig config;
-    config.initial_capital = 1000000;  // Need capital for notional checks
+    config.initial_capital = 1000000; // Need capital for notional checks
     EnhancedRiskManager rm(config);
 
     SymbolIndex idx = rm.register_symbol("AAPL", 1000, 0);
@@ -191,7 +192,7 @@ TEST(test_symbol_position_both_sides) {
 
 TEST(test_symbol_notional_limit) {
     EnhancedRiskConfig config;
-    config.initial_capital = 10000000;  // $10M capital for BTC tests
+    config.initial_capital = 10000000; // $10M capital for BTC tests
     EnhancedRiskManager rm(config);
 
     // Register BTC with max notional 1M
@@ -211,8 +212,8 @@ TEST(test_symbol_notional_limit) {
 
 TEST(test_global_notional_limit) {
     EnhancedRiskConfig config;
-    config.initial_capital = 5000000;  // 5M capital
-    config.max_notional_pct = 1.0;     // 100% = 5M max notional
+    config.initial_capital = 5000000; // 5M capital
+    config.max_notional_pct = 1.0;    // 100% = 5M max notional
 
     EnhancedRiskManager rm(config);
 
@@ -240,7 +241,7 @@ TEST(test_global_notional_limit) {
 
 TEST(test_max_order_size) {
     EnhancedRiskConfig config;
-    config.initial_capital = 1000000;  // Need capital for notional checks
+    config.initial_capital = 1000000; // Need capital for notional checks
     config.max_order_size = 1000;
 
     EnhancedRiskManager rm(config);
@@ -263,10 +264,10 @@ TEST(test_max_order_size) {
 TEST(test_multiple_risk_checks) {
     EnhancedRiskConfig config;
     config.initial_capital = 200000;
-    config.daily_loss_limit_pct = 0.25;  // 25% = 50k max loss
+    config.daily_loss_limit_pct = 0.25; // 25% = 50k max loss
     config.max_drawdown_pct = 0.15;
     config.max_order_size = 500;
-    config.max_notional_pct = 5.0;       // 500% = 1M max notional
+    config.max_notional_pct = 5.0; // 500% = 1M max notional
 
     EnhancedRiskManager rm(config);
     SymbolIndex idx = rm.register_symbol("AAPL", 2000, 500000);
@@ -281,7 +282,7 @@ TEST(test_multiple_risk_checks) {
 TEST(test_risk_state_summary) {
     EnhancedRiskConfig config;
     config.initial_capital = 100000;
-    config.daily_loss_limit_pct = 0.10;  // 10% = 10k max loss
+    config.daily_loss_limit_pct = 0.10; // 10% = 10k max loss
     config.max_drawdown_pct = 0.10;
 
     EnhancedRiskManager rm(config);
@@ -304,7 +305,7 @@ TEST(test_risk_state_summary) {
 TEST(test_hot_path_performance) {
     EnhancedRiskConfig config;
     config.initial_capital = 1000000;
-    config.daily_loss_limit_pct = 0.10;  // 10% = 100k max loss
+    config.daily_loss_limit_pct = 0.10; // 10% = 100k max loss
     config.max_drawdown_pct = 0.20;
     config.max_order_size = 10000;
 
@@ -373,7 +374,7 @@ TEST(test_itch_style_symbol_mapping) {
 TEST(test_config_based_initialization) {
     EnhancedRiskConfig config;
     config.initial_capital = 500000;
-    config.daily_loss_limit_pct = 0.05;  // 5% = 25k max loss
+    config.daily_loss_limit_pct = 0.05; // 5% = 25k max loss
     config.max_drawdown_pct = 0.08;
     config.max_order_size = 5000;
 

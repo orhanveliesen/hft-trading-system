@@ -9,26 +9,29 @@
  * 4. Tuner-RAG integration
  */
 
+#include "../include/tuner/rag_client.hpp"
+
 #include <cassert>
+#include <chrono>
+#include <cstdlib>
 #include <iostream>
 #include <string>
 #include <thread>
-#include <chrono>
-#include <cstdlib>
-#include "../include/tuner/rag_client.hpp"
 
 using namespace hft::tuner;
 
 #define TEST(name) void name()
-#define RUN_TEST(name) do { \
-    std::cout << "  " << #name << "... "; \
-    name(); \
-    std::cout << "PASSED\n"; \
-} while(0)
+#define RUN_TEST(name)                                                                                                 \
+    do {                                                                                                               \
+        std::cout << "  " << #name << "... ";                                                                          \
+        name();                                                                                                        \
+        std::cout << "PASSED\n";                                                                                       \
+    } while (0)
 
-#define SKIP_TEST(name, reason) do { \
-    std::cout << "  " << #name << "... SKIPPED (" << reason << ")\n"; \
-} while(0)
+#define SKIP_TEST(name, reason)                                                                                        \
+    do {                                                                                                               \
+        std::cout << "  " << #name << "... SKIPPED (" << reason << ")\n";                                              \
+    } while (0)
 
 #define ASSERT_EQ(a, b) assert((a) == (b))
 #define ASSERT_NE(a, b) assert((a) != (b))
@@ -129,8 +132,8 @@ TEST(handles_missing_fields) {
     // Should handle gracefully - context is present
     ASSERT_TRUE(success);
     ASSERT_EQ(response.context, "some text");
-    ASSERT_EQ(response.sources.size(), 0u);  // Default empty
-    ASSERT_EQ(response.n_chunks, 0);         // Default 0
+    ASSERT_EQ(response.sources.size(), 0u); // Default empty
+    ASSERT_EQ(response.n_chunks, 0);        // Default 0
 }
 
 // =============================================================================
@@ -196,7 +199,7 @@ TEST(health_check_returns_status) {
 
     ASSERT_TRUE(result.success);
     ASSERT_TRUE(result.is_healthy);
-    ASSERT_GT(result.collection_size, 0);  // Knowledge base should have documents
+    ASSERT_GT(result.collection_size, 0); // Knowledge base should have documents
     ASSERT_FALSE(result.model.empty());
 }
 
@@ -260,13 +263,12 @@ TEST(query_returns_source_references) {
     auto result = client.query(request);
 
     ASSERT_TRUE(result.success);
-    ASSERT_GT(result.sources.size(), 0u);  // Should return source references
+    ASSERT_GT(result.sources.size(), 0u); // Should return source references
 
     // Verify sources are valid paths
     for (const auto& source : result.sources) {
         ASSERT_FALSE(source.empty());
-        bool valid_path = source.find("knowledge/") == 0 ||
-                          source.find("include/") == 0;
+        bool valid_path = source.find("knowledge/") == 0 || source.find("include/") == 0;
         ASSERT_TRUE(valid_path);
     }
 }
@@ -291,7 +293,7 @@ TEST(measures_query_latency) {
 
     ASSERT_TRUE(result.success);
     ASSERT_GT(result.latency_ms, 0u);
-    ASSERT_LT(result.latency_ms, 5000u);  // Query should complete within 5 seconds
+    ASSERT_LT(result.latency_ms, 5000u); // Query should complete within 5 seconds
 }
 
 TEST(builds_tuner_context_from_rag) {
@@ -303,21 +305,17 @@ TEST(builds_tuner_context_from_rag) {
     RagClient client("http://localhost:9528");
 
     // Simulate tuner requesting context for a specific scenario
-    std::string tuner_context = client.build_tuner_context(
-        "BTCUSDT",
-        "TRENDING_UP",
-        3,     // consecutive losses
-        45.0   // win rate
+    std::string tuner_context = client.build_tuner_context("BTCUSDT", "TRENDING_UP",
+                                                           3,   // consecutive losses
+                                                           45.0 // win rate
     );
 
     ASSERT_FALSE(tuner_context.empty());
 
     // Context should include relevant tuning advice
     bool has_relevant_content =
-        tuner_context.find("position") != std::string::npos ||
-        tuner_context.find("EMA") != std::string::npos ||
-        tuner_context.find("loss") != std::string::npos ||
-        tuner_context.find("Regime") != std::string::npos;
+        tuner_context.find("position") != std::string::npos || tuner_context.find("EMA") != std::string::npos ||
+        tuner_context.find("loss") != std::string::npos || tuner_context.find("Regime") != std::string::npos;
 
     ASSERT_TRUE(has_relevant_content);
 }
@@ -339,12 +337,11 @@ TEST(handles_high_volatility_regime_query) {
     ASSERT_TRUE(result.success);
 
     // In high volatility, knowledge base should recommend defensive settings
-    bool has_volatility_advice =
-        result.context.find("volatility") != std::string::npos ||
-        result.context.find("Volatility") != std::string::npos ||
-        result.context.find("position") != std::string::npos ||
-        result.context.find("reduce") != std::string::npos ||
-        result.context.find("defensive") != std::string::npos;
+    bool has_volatility_advice = result.context.find("volatility") != std::string::npos ||
+                                 result.context.find("Volatility") != std::string::npos ||
+                                 result.context.find("position") != std::string::npos ||
+                                 result.context.find("reduce") != std::string::npos ||
+                                 result.context.find("defensive") != std::string::npos;
 
     ASSERT_TRUE(has_volatility_advice);
 }
@@ -354,7 +351,7 @@ TEST(handles_high_volatility_regime_query) {
 // =============================================================================
 
 TEST(handles_connection_refused) {
-    RagClient client("http://localhost:9999");  // Non-existent server
+    RagClient client("http://localhost:9999"); // Non-existent server
 
     auto result = client.health_check();
 

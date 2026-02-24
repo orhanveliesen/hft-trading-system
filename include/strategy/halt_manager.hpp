@@ -1,57 +1,73 @@
 #pragma once
 
 #include "../types.hpp"
+
 #include <atomic>
-#include <functional>
-#include <vector>
-#include <string>
 #include <chrono>
+#include <functional>
 #include <iostream>
+#include <string>
+#include <vector>
 
 namespace hft {
 namespace strategy {
 
 enum class HaltReason : uint8_t {
     None = 0,
-    PoolExhausted,      // Order pool ran out
-    PoolCritical,       // Pool below critical threshold
-    MaxLossExceeded,    // Risk limit hit
-    ManualHalt,         // Operator initiated (kill switch)
-    SystemError,        // Unexpected error
-    ConnectionLost,     // Market data/exchange connection lost
-    ExchangeHalt,       // Exchange halted trading
-    CircuitBreaker      // Internal circuit breaker triggered
+    PoolExhausted,   // Order pool ran out
+    PoolCritical,    // Pool below critical threshold
+    MaxLossExceeded, // Risk limit hit
+    ManualHalt,      // Operator initiated (kill switch)
+    SystemError,     // Unexpected error
+    ConnectionLost,  // Market data/exchange connection lost
+    ExchangeHalt,    // Exchange halted trading
+    CircuitBreaker   // Internal circuit breaker triggered
 };
 
 inline const char* halt_reason_to_string(HaltReason reason) {
     switch (reason) {
-        case HaltReason::None: return "None";
-        case HaltReason::PoolExhausted: return "PoolExhausted";
-        case HaltReason::PoolCritical: return "PoolCritical";
-        case HaltReason::MaxLossExceeded: return "MaxLossExceeded";
-        case HaltReason::ManualHalt: return "ManualHalt";
-        case HaltReason::SystemError: return "SystemError";
-        case HaltReason::ConnectionLost: return "ConnectionLost";
-        case HaltReason::ExchangeHalt: return "ExchangeHalt";
-        case HaltReason::CircuitBreaker: return "CircuitBreaker";
-        default: return "Unknown";
+    case HaltReason::None:
+        return "None";
+    case HaltReason::PoolExhausted:
+        return "PoolExhausted";
+    case HaltReason::PoolCritical:
+        return "PoolCritical";
+    case HaltReason::MaxLossExceeded:
+        return "MaxLossExceeded";
+    case HaltReason::ManualHalt:
+        return "ManualHalt";
+    case HaltReason::SystemError:
+        return "SystemError";
+    case HaltReason::ConnectionLost:
+        return "ConnectionLost";
+    case HaltReason::ExchangeHalt:
+        return "ExchangeHalt";
+    case HaltReason::CircuitBreaker:
+        return "CircuitBreaker";
+    default:
+        return "Unknown";
     }
 }
 
 enum class HaltState : uint8_t {
-    Running = 0,        // Normal trading
-    Halting,            // Flatten in progress
-    Halted,             // Safe state, all positions closed
-    Error               // Flatten failed, manual intervention needed
+    Running = 0, // Normal trading
+    Halting,     // Flatten in progress
+    Halted,      // Safe state, all positions closed
+    Error        // Flatten failed, manual intervention needed
 };
 
 inline const char* halt_state_to_string(HaltState state) {
     switch (state) {
-        case HaltState::Running: return "Running";
-        case HaltState::Halting: return "Halting";
-        case HaltState::Halted: return "Halted";
-        case HaltState::Error: return "Error";
-        default: return "Unknown";
+    case HaltState::Running:
+        return "Running";
+    case HaltState::Halting:
+        return "Halting";
+    case HaltState::Halted:
+        return "Halted";
+    case HaltState::Error:
+        return "Error";
+    default:
+        return "Unknown";
     }
 }
 
@@ -60,7 +76,7 @@ struct PositionInfo {
     Symbol symbol;
     std::string ticker;
     int64_t position;
-    Price last_price;  // For logging
+    Price last_price; // For logging
 };
 
 // Callback types
@@ -83,11 +99,7 @@ using LogCallback = std::function<void(const std::string& message)>;
 class HaltManager {
 public:
     HaltManager()
-        : state_(HaltState::Running)
-        , reason_(HaltReason::None)
-        , flatten_attempts_(0)
-        , max_flatten_attempts_(3)
-    {
+        : state_(HaltState::Running), reason_(HaltReason::None), flatten_attempts_(0), max_flatten_attempts_(3) {
         // Default logger to stdout
         log_callback_ = [](const std::string& msg) {
             auto now = std::chrono::system_clock::now();
@@ -102,48 +114,32 @@ public:
     // Callback Registration
     // ========================================
 
-    void set_get_positions_callback(GetPositionsCallback cb) {
-        get_positions_callback_ = std::move(cb);
-    }
+    void set_get_positions_callback(GetPositionsCallback cb) { get_positions_callback_ = std::move(cb); }
 
-    void set_cancel_all_callback(CancelAllOrdersCallback cb) {
-        cancel_all_callback_ = std::move(cb);
-    }
+    void set_cancel_all_callback(CancelAllOrdersCallback cb) { cancel_all_callback_ = std::move(cb); }
 
-    void set_send_order_callback(SendOrderCallback cb) {
-        send_order_callback_ = std::move(cb);
-    }
+    void set_send_order_callback(SendOrderCallback cb) { send_order_callback_ = std::move(cb); }
 
-    void set_alert_callback(AlertCallback cb) {
-        alert_callback_ = std::move(cb);
-    }
+    void set_alert_callback(AlertCallback cb) { alert_callback_ = std::move(cb); }
 
-    void set_log_callback(LogCallback cb) {
-        log_callback_ = std::move(cb);
-    }
+    void set_log_callback(LogCallback cb) { log_callback_ = std::move(cb); }
 
     // ========================================
     // State Queries (hot path safe)
     // ========================================
 
-    __attribute__((always_inline))
-    bool is_halted() const {
+    __attribute__((always_inline)) bool is_halted() const {
         HaltState s = state_.load(std::memory_order_acquire);
         return s != HaltState::Running;
     }
 
-    __attribute__((always_inline))
-    bool can_trade() const {
+    __attribute__((always_inline)) bool can_trade() const {
         return state_.load(std::memory_order_acquire) == HaltState::Running;
     }
 
-    HaltState state() const {
-        return state_.load(std::memory_order_acquire);
-    }
+    HaltState state() const { return state_.load(std::memory_order_acquire); }
 
-    HaltReason reason() const {
-        return reason_.load(std::memory_order_acquire);
-    }
+    HaltReason reason() const { return reason_.load(std::memory_order_acquire); }
 
     // ========================================
     // Halt Control
@@ -164,10 +160,8 @@ public:
     bool halt(HaltReason reason, const std::string& message = "") {
         // Atomic state transition: Running -> Halting
         HaltState expected = HaltState::Running;
-        if (!state_.compare_exchange_strong(expected, HaltState::Halting,
-                                            std::memory_order_acq_rel)) {
-            log("Halt requested but already in state: " +
-                std::string(halt_state_to_string(expected)));
+        if (!state_.compare_exchange_strong(expected, HaltState::Halting, std::memory_order_acq_rel)) {
+            log("Halt requested but already in state: " + std::string(halt_state_to_string(expected)));
             return false;
         }
 
@@ -233,13 +227,11 @@ public:
         }
 
         if (flatten_attempts_ >= max_flatten_attempts_) {
-            log("Max flatten attempts reached (" +
-                std::to_string(max_flatten_attempts_) + ")");
+            log("Max flatten attempts reached (" + std::to_string(max_flatten_attempts_) + ")");
             return false;
         }
 
-        log("Retrying flatten (attempt " +
-            std::to_string(flatten_attempts_ + 1) + "/" +
+        log("Retrying flatten (attempt " + std::to_string(flatten_attempts_ + 1) + "/" +
             std::to_string(max_flatten_attempts_) + ")...");
 
         state_.store(HaltState::Halting, std::memory_order_release);
@@ -275,9 +267,7 @@ public:
     // Configuration
     // ========================================
 
-    void set_max_flatten_attempts(uint32_t attempts) {
-        max_flatten_attempts_ = attempts;
-    }
+    void set_max_flatten_attempts(uint32_t attempts) { max_flatten_attempts_ = attempts; }
 
 private:
     void log(const std::string& message) {
@@ -302,14 +292,14 @@ private:
         bool all_success = true;
 
         for (const auto& pos : positions) {
-            if (pos.position == 0) continue;
+            if (pos.position == 0)
+                continue;
 
             Side side = (pos.position > 0) ? Side::Sell : Side::Buy;
             Quantity qty = static_cast<Quantity>(std::abs(pos.position));
             const char* side_str = (side == Side::Buy) ? "BUY" : "SELL";
 
-            log("  Flattening " + pos.ticker + ": " + side_str + " " +
-                std::to_string(qty) + " @ MARKET");
+            log("  Flattening " + pos.ticker + ": " + side_str + " " + std::to_string(qty) + " @ MARKET");
 
             bool success = send_order_callback_(pos.symbol, side, qty, true);
 
@@ -337,5 +327,5 @@ private:
     LogCallback log_callback_;
 };
 
-}  // namespace strategy
-}  // namespace hft
+} // namespace strategy
+} // namespace hft

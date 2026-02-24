@@ -9,8 +9,8 @@
  * All methods inline to eliminate function call overhead.
  */
 
-#include <cstdint>
 #include <chrono>
+#include <cstdint>
 #include <thread>
 #include <x86intrin.h>
 
@@ -20,9 +20,7 @@ namespace benchmark {
 class RdtscTimer {
 public:
     // Get current timestamp (CPU cycles)
-    static inline uint64_t now() {
-        return __rdtsc();
-    }
+    static inline uint64_t now() { return __rdtsc(); }
 
     // Get current timestamp with memory fence (more accurate for benchmarks)
     static inline uint64_t now_serialized() {
@@ -44,8 +42,7 @@ public:
         uint64_t end_cycles = now_serialized();
         auto end_time = std::chrono::steady_clock::now();
 
-        auto duration_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
-            end_time - start_time).count();
+        auto duration_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(end_time - start_time).count();
 
         uint64_t cycles = end_cycles - start_cycles;
 
@@ -64,17 +61,13 @@ class ScopedTimer {
 public:
     ScopedTimer() : start_(RdtscTimer::now_serialized()) {}
 
-    uint64_t elapsed_cycles() const {
-        return RdtscTimer::now_serialized() - start_;
-    }
+    uint64_t elapsed_cycles() const { return RdtscTimer::now_serialized() - start_; }
 
-    void reset() {
-        start_ = RdtscTimer::now_serialized();
-    }
+    void reset() { start_ = RdtscTimer::now_serialized(); }
 
 private:
     uint64_t start_;
 };
 
-}  // namespace benchmark
-}  // namespace hft
+} // namespace benchmark
+} // namespace hft

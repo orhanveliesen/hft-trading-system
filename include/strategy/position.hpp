@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../types.hpp"
+
 #include <cstdint>
 #include <cstdlib>
 
@@ -11,13 +12,7 @@ namespace strategy {
 // All values in fixed-point (4 decimal places for price)
 class PositionTracker {
 public:
-    PositionTracker()
-        : position_(0)
-        , avg_price_(0)
-        , realized_pnl_(0)
-        , total_bought_(0)
-        , total_sold_(0)
-    {}
+    PositionTracker() : position_(0), avg_price_(0), realized_pnl_(0), total_bought_(0), total_sold_(0) {}
 
     // Called when a fill is received
     void on_fill(Side side, Quantity qty, Price price) {
@@ -43,14 +38,13 @@ public:
 
     // Unrealized P&L at given mark price
     int64_t unrealized_pnl(Price mark_price) const {
-        if (position_ == 0) return 0;
+        if (position_ == 0)
+            return 0;
         return position_ * (static_cast<int64_t>(mark_price) - static_cast<int64_t>(avg_price_));
     }
 
     // Total P&L
-    int64_t total_pnl(Price mark_price) const {
-        return realized_pnl_ + unrealized_pnl(mark_price);
-    }
+    int64_t total_pnl(Price mark_price) const { return realized_pnl_ + unrealized_pnl(mark_price); }
 
     bool is_flat() const { return position_ == 0; }
     bool is_long() const { return position_ > 0; }
@@ -74,9 +68,7 @@ private:
             int64_t new_position = position_ + qty;
             // Weighted average: (old_pos * old_price + qty * price) / new_pos
             if (new_position > 0) {
-                avg_price_ = static_cast<Price>(
-                    (position_ * avg_price_ + qty * price) / new_position
-                );
+                avg_price_ = static_cast<Price>((position_ * avg_price_ + qty * price) / new_position);
             }
             position_ = new_position;
         } else {
@@ -107,9 +99,7 @@ private:
             if (new_position < 0) {
                 int64_t abs_old = -position_;
                 int64_t abs_new = -new_position;
-                avg_price_ = static_cast<Price>(
-                    (abs_old * avg_price_ + qty * price) / abs_new
-                );
+                avg_price_ = static_cast<Price>((abs_old * avg_price_ + qty * price) / abs_new);
             }
             position_ = new_position;
         } else {
@@ -140,5 +130,5 @@ private:
     uint64_t total_sold_;
 };
 
-}  // namespace strategy
-}  // namespace hft
+} // namespace strategy
+} // namespace hft

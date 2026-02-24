@@ -1,0 +1,32 @@
+# Build artifacts
+build/
+build-coverage/
+cmake-build-debug/
+Testing/
+
+# IDE
+.idea/
+.vscode/
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Git - DO NOT IGNORE (needed for CMake commit hash)
+# .git
+
+# Local configs
+.env.local
+
+# Documentation
+*.md
+tasks/
+
+# GitHub Actions
+.github/
+
+# Docker
+docker/
+
+# Note: .git is NOT ignored - required for CMake commit hash embedding

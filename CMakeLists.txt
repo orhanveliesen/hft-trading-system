@@ -39,6 +39,16 @@ if(LWS_VERSION VERSION_GREATER_EQUAL "4.3")
     message(STATUS "Using lws 4.3+ callback enum compatibility")
 endif()
 
+# Fetch cpp-httplib (header-only HTTP library)
+include(FetchContent)
+FetchContent_Declare(
+    httplib
+    GIT_REPOSITORY https://github.com/yhirose/cpp-httplib.git
+    GIT_TAG v0.15.3  # Latest stable version
+    GIT_SHALLOW TRUE
+)
+FetchContent_MakeAvailable(httplib)
+
 # === Library (Header-only) ===
 # All core classes are header-only for maximum inlining on hot path.
 # This eliminates function call overhead (~15-25 cycles per call).
@@ -68,6 +78,10 @@ add_test(NAME IntegrationTests COMMAND test_integration)
 add_executable(test_strategy tests/test_strategy.cpp)
 target_link_libraries(test_strategy trader_core)
 add_test(NAME StrategyTests COMMAND test_strategy)
+
+add_executable(test_simd tests/test_simd.cpp)
+target_link_libraries(test_simd trader_core)
+add_test(NAME SimdTests COMMAND test_simd)
 
 add_executable(test_symbol_config tests/test_symbol_config.cpp)
 target_link_libraries(test_symbol_config trader_core)
@@ -149,6 +163,9 @@ add_test(NAME UdpTelemetryTests COMMAND test_udp_telemetry)
 
 add_executable(test_rolling_sharpe tests/test_rolling_sharpe.cpp)
 add_test(NAME RollingSharpeTests COMMAND test_rolling_sharpe)
+
+add_executable(test_smart_strategy tests/test_smart_strategy.cpp)
+add_test(NAME SmartStrategyTests COMMAND test_smart_strategy)
 
 add_executable(test_concepts tests/test_concepts.cpp)
 target_link_libraries(test_concepts trader_core)
@@ -232,6 +249,10 @@ add_executable(test_portfolio_equity tests/test_portfolio_equity.cpp)
 target_link_libraries(test_portfolio_equity pthread rt)
 add_test(NAME PortfolioEquityTests COMMAND test_portfolio_equity)
 
+add_executable(test_trade_stream_metrics tests/test_trade_stream_metrics.cpp)
+target_link_libraries(test_trade_stream_metrics trader_core)
+add_test(NAME TradeStreamMetricsTests COMMAND test_trade_stream_metrics)
+
 # === Tools ===
 add_executable(trader tools/trader.cpp)
 target_link_libraries(trader trader_core websockets pthread rt curl)
@@ -252,7 +273,7 @@ add_executable(trader_tuner tools/trader_tuner.cpp)
 target_link_libraries(trader_tuner pthread rt curl)
 
 add_executable(trader_web_api tools/trader_web_api.cpp)
-target_include_directories(trader_web_api PRIVATE ${CMAKE_SOURCE_DIR}/external)
+target_include_directories(trader_web_api PRIVATE ${httplib_SOURCE_DIR})
 target_link_libraries(trader_web_api pthread rt)
 
 add_executable(dump_portfolio tools/dump_portfolio.cpp)
@@ -274,8 +295,28 @@ target_link_libraries(bench_orderbook trader_core)
 add_executable(bench_lockfree benchmarks/bench_lockfree.cpp)
 target_link_libraries(bench_lockfree pthread)
 
+add_executable(bench_simd benchmarks/bench_simd.cpp)
+target_link_libraries(bench_simd trader_core)
+
+add_executable(bench_trade_stream_metrics benchmarks/bench_trade_stream_metrics.cpp)
+add_executable(bench_trade_stream_full benchmarks/bench_trade_stream_full.cpp)
+
+target_link_libraries(bench_trade_stream_full trader_core)
+
+target_link_libraries(bench_trade_stream_metrics trader_core)
+
 # === ImGui Dashboard ===
-set(IMGUI_DIR ${CMAKE_SOURCE_DIR}/external/imgui)
+# Fetch Dear ImGui from GitHub
+include(FetchContent)
+FetchContent_Declare(
+    imgui
+    GIT_REPOSITORY https://github.com/ocornut/imgui.git
+    GIT_TAG v1.91.8  # Latest stable version as of 2024
+    GIT_SHALLOW TRUE
+)
+FetchContent_MakeAvailable(imgui)
+
+set(IMGUI_DIR ${imgui_SOURCE_DIR})
 add_executable(trader_dashboard
     tools/trader_dashboard.cpp
     ${IMGUI_DIR}/imgui.cpp

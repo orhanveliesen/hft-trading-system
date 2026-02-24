@@ -2,12 +2,12 @@
  * Rolling Sharpe Ratio Tests
  */
 
-#include <cassert>
-#include <iostream>
-#include <cmath>
-#include <random>
-
 #include "strategy/rolling_sharpe.hpp"
+
+#include <cassert>
+#include <cmath>
+#include <iostream>
+#include <random>
 
 using namespace hft::strategy;
 
@@ -22,7 +22,7 @@ bool approx_equal(double a, double b, double eps = 0.01) {
 void test_basic_stats() {
     std::cout << "  test_basic_stats... ";
 
-    RollingSharpe<10> sharpe(0);  // No risk-free rate for simplicity
+    RollingSharpe<10> sharpe(0); // No risk-free rate for simplicity
 
     // Add known returns: 1%, 2%, 3%, 4%, 5%
     sharpe.add_return(0.01);
@@ -39,8 +39,8 @@ void test_basic_stats() {
     // Variance of [0.01, 0.02, 0.03, 0.04, 0.05] with mean=0.03
     // Squared diffs: (0.01-0.03)^2=0.0004, (0.02-0.03)^2=0.0001, 0, 0.0001, 0.0004
     // Sum = 0.001, sample variance = 0.001/4 = 0.00025
-    double expected_var = 0.0004 + 0.0001 + 0 + 0.0001 + 0.0004;  // Sum of squared diffs
-    expected_var /= 4;  // n-1
+    double expected_var = 0.0004 + 0.0001 + 0 + 0.0001 + 0.0004; // Sum of squared diffs
+    expected_var /= 4;                                           // n-1
     assert(approx_equal(sharpe.variance(), expected_var, 0.00001));
 
     std::cout << "PASSED\n";
@@ -61,7 +61,7 @@ void test_rolling_window() {
 
     assert(sharpe.is_ready());
     assert(approx_equal(sharpe.mean(), 0.01));
-    assert(approx_equal(sharpe.std_dev(), 0, 0.0001));  // All same = 0 std
+    assert(approx_equal(sharpe.std_dev(), 0, 0.0001)); // All same = 0 std
 
     // Now add a 6% return - oldest (1%) should be removed
     sharpe.add_return(0.06);
@@ -84,7 +84,7 @@ void test_sharpe_ratio() {
 
     // Add consistent positive returns (good strategy)
     for (int i = 0; i < 50; ++i) {
-        sharpe.add_return(0.005);  // 0.5% per trade
+        sharpe.add_return(0.005); // 0.5% per trade
     }
 
     // With zero variance, Sharpe is undefined (returns 0)
@@ -92,12 +92,12 @@ void test_sharpe_ratio() {
 
     // Add some variance
     for (int i = 0; i < 50; ++i) {
-        sharpe.add_return(i % 2 == 0 ? 0.008 : 0.002);  // Alternating
+        sharpe.add_return(i % 2 == 0 ? 0.008 : 0.002); // Alternating
     }
 
     // Now we have variance, Sharpe should be positive
     double s = sharpe.sharpe_ratio();
-    assert(s > 0);  // Positive returns = positive Sharpe
+    assert(s > 0); // Positive returns = positive Sharpe
 
     std::cout << "PASSED (Sharpe=" << s << ")\n";
 }
@@ -119,7 +119,7 @@ void test_negative_sharpe() {
     }
 
     double s = sharpe.sharpe_ratio();
-    assert(s < 0);  // Negative mean = negative Sharpe
+    assert(s < 0); // Negative mean = negative Sharpe
 
     // Should recommend not trading
     assert(!sharpe.should_trade());
@@ -138,15 +138,14 @@ void test_position_sizing() {
 
     // Start with neutral
     for (int i = 0; i < 30; ++i) {
-        sharpe.add_return(0.001 + 0.001 * (i % 3));  // Small positive, some variance
+        sharpe.add_return(0.001 + 0.001 * (i % 3)); // Small positive, some variance
     }
 
     double mult = sharpe.position_multiplier();
     assert(mult >= 0 && mult <= 1.5);
 
     auto stats = sharpe.get_stats();
-    std::cout << "PASSED (Sharpe=" << stats.sharpe
-              << ", mult=" << stats.position_mult << ")\n";
+    std::cout << "PASSED (Sharpe=" << stats.sharpe << ", mult=" << stats.position_mult << ")\n";
 }
 
 // ============================================================================

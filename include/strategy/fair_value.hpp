@@ -19,27 +19,20 @@ namespace strategy {
  *   Market Price > Fair Value + threshold → SAT
  */
 
-enum class FVSignal : uint8_t {
-    Hold = 0,
-    Buy  = 1,
-    Sell = 2
-};
+enum class FVSignal : uint8_t { Hold = 0, Buy = 1, Sell = 2 };
 
 struct FairValueConfig {
-    uint32_t threshold_bps = 3;      // Fair value'dan sapma eşiği (bps)
-    double ema_alpha = 0.1;          // EMA smoothing factor
+    uint32_t threshold_bps = 3; // Fair value'dan sapma eşiği (bps)
+    double ema_alpha = 0.1;     // EMA smoothing factor
     Quantity order_size = 100;
     int64_t max_position = 1000;
-    bool use_microprice = true;      // Micro-price kullan
+    bool use_microprice = true; // Micro-price kullan
 };
 
 class FairValueStrategy {
 public:
     explicit FairValueStrategy(const FairValueConfig& config = {})
-        : config_(config)
-        , fair_value_ema_(0.0)
-        , initialized_(false)
-    {}
+        : config_(config), fair_value_ema_(0.0), initialized_(false) {}
 
     // Micro-price hesapla
     // Bid/ask size'a göre ağırlıklı ortalama
@@ -59,14 +52,12 @@ public:
             initialized_ = true;
         } else {
             // Exponential Moving Average
-            fair_value_ema_ = config_.ema_alpha * new_value +
-                              (1.0 - config_.ema_alpha) * fair_value_ema_;
+            fair_value_ema_ = config_.ema_alpha * new_value + (1.0 - config_.ema_alpha) * fair_value_ema_;
         }
     }
 
     // Sinyal üret
-    FVSignal operator()(Price bid, Price ask, Quantity bid_size, Quantity ask_size,
-                        int64_t position) {
+    FVSignal operator()(Price bid, Price ask, Quantity bid_size, Quantity ask_size, int64_t position) {
         if (bid == INVALID_PRICE || ask == INVALID_PRICE || bid >= ask) {
             return FVSignal::Hold;
         }
@@ -152,17 +143,15 @@ private:
  * Sapma varsa arbitraj fırsatı
  */
 struct IndexArbConfig {
-    double futures_multiplier = 1.0;  // Futures → Spot dönüşüm çarpanı
-    double cost_of_carry_bps = 5;     // Taşıma maliyeti
-    uint32_t threshold_bps = 2;       // Arbitraj eşiği
+    double futures_multiplier = 1.0; // Futures → Spot dönüşüm çarpanı
+    double cost_of_carry_bps = 5;    // Taşıma maliyeti
+    uint32_t threshold_bps = 2;      // Arbitraj eşiği
     Quantity order_size = 100;
 };
 
 class IndexArbitrage {
 public:
-    explicit IndexArbitrage(const IndexArbConfig& config = {})
-        : config_(config)
-    {}
+    explicit IndexArbitrage(const IndexArbConfig& config = {}) : config_(config) {}
 
     // Futures fiyatından teorik spot hesapla
     Price theoretical_spot(Price futures_price) const {
@@ -174,8 +163,7 @@ public:
 
     // Sinyal üret
     FVSignal operator()(Price spot_bid, Price spot_ask, Price futures_price) {
-        if (spot_bid == INVALID_PRICE || spot_ask == INVALID_PRICE ||
-            futures_price == INVALID_PRICE) {
+        if (spot_bid == INVALID_PRICE || spot_ask == INVALID_PRICE || futures_price == INVALID_PRICE) {
             return FVSignal::Hold;
         }
 
@@ -201,5 +189,5 @@ private:
     IndexArbConfig config_;
 };
 
-}  // namespace strategy
-}  // namespace hft
+} // namespace strategy
+} // namespace hft

@@ -16,11 +16,12 @@
 
 #include "../include/ipc/shared_config.hpp"
 #include "../include/ipc/shared_paper_config.hpp"
-#include <iostream>
-#include <iomanip>
-#include <string>
-#include <cstring>
+
 #include <chrono>
+#include <cstring>
+#include <iomanip>
+#include <iostream>
+#include <string>
 
 using namespace hft::ipc;
 
@@ -111,19 +112,23 @@ void print_params(const SharedConfig* config, const char* shm_name) {
     std::cout << "  target_pct:        " << std::setw(8) << config->target_pct() << "%   Profit target\n";
     std::cout << "  stop_pct:          " << std::setw(8) << config->stop_pct() << "%   Stop loss\n";
     std::cout << "  pullback_pct:      " << std::setw(8) << config->pullback_pct() << "%   Trend exit pullback\n";
-    std::cout << "  commission:        " << std::setw(8) << (config->commission_rate() * PCT_TO_DECIMAL) << "%   Commission rate\n";
+    std::cout << "  commission:        " << std::setw(8) << (config->commission_rate() * PCT_TO_DECIMAL)
+              << "%   Commission rate\n";
 
     std::cout << "\n[ Trade Filtering ]\n";
     std::cout << "  min_trade_value:   " << std::setw(8) << config->min_trade_value() << "$   Minimum trade\n";
     std::cout << "  cooldown_ms:       " << std::setw(8) << config->get_cooldown_ms() << "ms  Trade cooldown\n";
     std::cout << "  signal_strength:   " << std::setw(8) << config->get_signal_strength() << "    (1=Med, 2=Strong)\n";
-    std::cout << "  auto_tune:         " << std::setw(8) << (!config->is_tuner_off() ? "ON" : "OFF") << "    Adaptive tuning\n";
+    std::cout << "  auto_tune:         " << std::setw(8) << (!config->is_tuner_off() ? "ON" : "OFF")
+              << "    Adaptive tuning\n";
 
     std::cout << "\n[ Position Sizing ]\n";
-    std::cout << "  sizing_mode:       " << std::setw(8) << (config->is_percentage_based_sizing() ? "Percent" : "Units") << "    (0=%, 1=units)\n";
+    std::cout << "  sizing_mode:       " << std::setw(8) << (config->is_percentage_based_sizing() ? "Percent" : "Units")
+              << "    (0=%, 1=units)\n";
     std::cout << "  base_position_pct: " << std::setw(8) << config->base_position_pct() << "%   Base position\n";
     std::cout << "  max_position_pct:  " << std::setw(8) << config->max_position_pct() << "%   Max position\n";
-    std::cout << "  max_position_units:" << std::setw(8) << config->get_max_position_units() << "    (unit mode only)\n";
+    std::cout << "  max_position_units:" << std::setw(8) << config->get_max_position_units()
+              << "    (unit mode only)\n";
 
     std::cout << "\n[ Risk Management ]\n";
     std::cout << "  drawdown_threshold:" << std::setw(8) << config->drawdown_threshold() << "%   Drawdown limit\n";
@@ -169,8 +174,8 @@ void print_status(const SharedConfig* config, const SharedPaperConfig* paper_con
     std::cout << "[ Trade Filtering ]\n";
     std::cout << "  min_trade_value: $" << config->min_trade_value() << "\n";
     std::cout << "  cooldown_ms:     " << config->get_cooldown_ms() << "ms\n";
-    std::cout << "  signal_strength: " << config->get_signal_strength()
-              << " (" << (config->get_signal_strength() >= 2 ? "Strong" : "Medium") << " required)\n";
+    std::cout << "  signal_strength: " << config->get_signal_strength() << " ("
+              << (config->get_signal_strength() >= 2 ? "Strong" : "Medium") << " required)\n";
     std::cout << "  auto_tune:       " << (!config->is_tuner_off() ? "ON" : "OFF") << "\n\n";
 
     if (!config->is_tuner_off()) {
@@ -226,11 +231,13 @@ void print_status(const SharedConfig* config, const SharedPaperConfig* paper_con
 
     // AI Tuner & Order Type
     std::cout << "[ AI Tuner & Order Execution ]\n";
-    std::cout << "  tuner_mode:       " << ((config->is_tuner_on() || config->is_tuner_paused()) ? "ON (AI unified)" : "OFF (traditional)") << "\n";
+    std::cout << "  tuner_mode:       "
+              << ((config->is_tuner_on() || config->is_tuner_paused()) ? "ON (AI unified)" : "OFF (traditional)")
+              << "\n";
     const char* order_type_names[] = {"Auto", "MarketOnly", "LimitOnly", "Adaptive"};
     uint8_t ot = config->get_order_type_default();
-    std::cout << "  order_type:       " << (ot <= 3 ? order_type_names[ot] : "Unknown")
-              << " (" << static_cast<int>(ot) << ")\n";
+    std::cout << "  order_type:       " << (ot <= 3 ? order_type_names[ot] : "Unknown") << " (" << static_cast<int>(ot)
+              << ")\n";
     std::cout << "  limit_offset_bps: " << config->get_limit_offset_bps() << " bps\n";
     std::cout << "  limit_timeout_ms: " << config->get_limit_timeout_ms() << " ms\n\n";
 
@@ -240,8 +247,8 @@ void print_status(const SharedConfig* config, const SharedPaperConfig* paper_con
     const char* strategy_names[] = {"NONE", "MOMENTUM", "MEAN_REV", "MKT_MAKER", "DEFENSIVE", "CAUTIOUS", "SMART"};
     for (int i = 0; i <= 6; ++i) {
         uint8_t st = config->get_strategy_for_regime(i);
-        std::cout << "  " << std::setw(12) << std::left << regime_names[i]
-                  << " -> " << (st <= 6 ? strategy_names[st] : "?") << "\n";
+        std::cout << "  " << std::setw(12) << std::left << regime_names[i] << " -> "
+                  << (st <= 6 ? strategy_names[st] : "?") << "\n";
     }
     std::cout << "\n";
 
@@ -254,8 +261,8 @@ void print_status(const SharedConfig* config, const SharedPaperConfig* paper_con
     std::cout << "[ WebSocket Status ]\n";
     const char* ws_status_names[] = {"DISCONNECTED", "DEGRADED", "HEALTHY"};
     uint8_t ws_status = config->get_ws_market_status();
-    std::cout << "  ws_market_status:   " << (ws_status <= 2 ? ws_status_names[ws_status] : "UNKNOWN")
-              << " (" << static_cast<int>(ws_status) << ")\n";
+    std::cout << "  ws_market_status:   " << (ws_status <= 2 ? ws_status_names[ws_status] : "UNKNOWN") << " ("
+              << static_cast<int>(ws_status) << ")\n";
     std::cout << "  ws_reconnect_count: " << config->get_ws_reconnect_count() << "\n";
 
     // Calculate time since last message
@@ -298,11 +305,9 @@ int main(int argc, char* argv[]) {
     // Commands
     if (cmd == "status") {
         print_status(config, paper_config, shm_name);
-    }
-    else if (cmd == "list") {
+    } else if (cmd == "list") {
         print_params(config, shm_name);
-    }
-    else if (cmd == "get" && argc > 2) {
+    } else if (cmd == "get" && argc > 2) {
         std::string param = argv[2];
         std::cout << std::fixed << std::setprecision(4);
 
@@ -367,7 +372,7 @@ int main(int argc, char* argv[]) {
             std::cout << config->get_limit_offset_bps() << "\n";
         } else if (param == "limit_timeout_ms") {
             std::cout << config->get_limit_timeout_ms() << "\n";
-        // SmartStrategy streak thresholds
+            // SmartStrategy streak thresholds
         } else if (param == "losses_to_cautious") {
             std::cout << config->get_losses_to_cautious() << "\n";
         } else if (param == "losses_to_tighten") {
@@ -382,7 +387,7 @@ int main(int argc, char* argv[]) {
             std::cout << config->get_wins_to_aggressive() << "\n";
         } else if (param == "wins_max_aggressive") {
             std::cout << config->get_wins_max_aggressive() << "\n";
-        // SmartStrategy thresholds
+            // SmartStrategy thresholds
         } else if (param == "min_confidence") {
             std::cout << config->min_confidence() << "\n";
         } else if (param == "min_position_pct") {
@@ -414,8 +419,7 @@ int main(int argc, char* argv[]) {
             munmap(config, sizeof(SharedConfig));
             return 1;
         }
-    }
-    else if (cmd == "set" && argc > 3) {
+    } else if (cmd == "set" && argc > 3) {
         std::string param = argv[2];
         double value = std::stod(argv[3]);
 
@@ -429,7 +433,7 @@ int main(int argc, char* argv[]) {
             config->set_pullback_pct(value);
             std::cout << "pullback_pct = " << value << "% (trend exit)\n";
         } else if (param == "commission") {
-            config->set_commission_rate(value / PCT_TO_DECIMAL);  // Convert % to decimal
+            config->set_commission_rate(value / PCT_TO_DECIMAL); // Convert % to decimal
             std::cout << "commission = " << value << "% (" << (value * 10) << " bps)\n";
         } else if (param == "slippage_bps" || param == "slippage") {
             if (paper_config) {
@@ -448,8 +452,8 @@ int main(int argc, char* argv[]) {
             std::cout << "cooldown_ms = " << static_cast<int>(value) << "ms\n";
         } else if (param == "signal_strength") {
             config->set_signal_strength(static_cast<int32_t>(value));
-            std::cout << "signal_strength = " << static_cast<int>(value)
-                      << " (" << (value >= 2 ? "Strong" : "Medium") << " signals required)\n";
+            std::cout << "signal_strength = " << static_cast<int>(value) << " (" << (value >= 2 ? "Strong" : "Medium")
+                      << " signals required)\n";
         } else if (param == "auto_tune") {
             bool enabled = (value > 0);
             config->set_tuner_state(enabled ? hft::ipc::TunerState::ON : hft::ipc::TunerState::OFF);
@@ -502,7 +506,7 @@ int main(int argc, char* argv[]) {
             config->set_spike_lookback(static_cast<int32_t>(value));
             std::cout << "spike_lookback = " << static_cast<int32_t>(value) << " bars\n";
         } else if (param == "spike_min_move") {
-            config->set_spike_min_move(value / PCT_TO_DECIMAL);  // Convert % to decimal
+            config->set_spike_min_move(value / PCT_TO_DECIMAL); // Convert % to decimal
             std::cout << "spike_min_move = " << value << "% (minimum move filter)\n";
         } else if (param == "spike_cooldown") {
             config->set_spike_cooldown(static_cast<int32_t>(value));
@@ -510,20 +514,21 @@ int main(int argc, char* argv[]) {
         } else if (param == "tuner_mode") {
             bool enabled = (value > 0);
             config->set_tuner_state(enabled ? hft::ipc::TunerState::ON : hft::ipc::TunerState::OFF);
-            std::cout << "tuner_mode = " << (enabled ? "ON (AI unified strategy)" : "OFF (traditional strategies)") << "\n";
+            std::cout << "tuner_mode = " << (enabled ? "ON (AI unified strategy)" : "OFF (traditional strategies)")
+                      << "\n";
         } else if (param == "order_type") {
             uint8_t type = static_cast<uint8_t>(value);
             config->set_order_type_default(type);
             const char* names[] = {"Auto", "MarketOnly", "LimitOnly", "Adaptive"};
-            std::cout << "order_type = " << static_cast<int>(type)
-                      << " (" << (type <= 3 ? names[type] : "Unknown") << ")\n";
+            std::cout << "order_type = " << static_cast<int>(type) << " (" << (type <= 3 ? names[type] : "Unknown")
+                      << ")\n";
         } else if (param == "limit_offset_bps") {
             config->set_limit_offset_bps(value);
             std::cout << "limit_offset_bps = " << value << " bps (limit order offset)\n";
         } else if (param == "limit_timeout_ms") {
             config->set_limit_timeout_ms(static_cast<int32_t>(value));
             std::cout << "limit_timeout_ms = " << static_cast<int>(value) << "ms (adaptive timeout)\n";
-        // SmartStrategy streak thresholds
+            // SmartStrategy streak thresholds
         } else if (param == "losses_to_cautious") {
             config->set_losses_to_cautious(static_cast<int32_t>(value));
             std::cout << "losses_to_cautious = " << static_cast<int>(value) << " (losses -> CAUTIOUS)\n";
@@ -545,7 +550,7 @@ int main(int argc, char* argv[]) {
         } else if (param == "wins_max_aggressive") {
             config->set_wins_max_aggressive(static_cast<int32_t>(value));
             std::cout << "wins_max_aggressive = " << static_cast<int>(value) << " (cap on aggression)\n";
-        // SmartStrategy thresholds
+            // SmartStrategy thresholds
         } else if (param == "min_confidence") {
             config->set_min_confidence(value);
             std::cout << "min_confidence = " << value << " (minimum for signal)\n";
@@ -556,10 +561,10 @@ int main(int argc, char* argv[]) {
             config->set_min_risk_reward(value);
             std::cout << "min_risk_reward = " << value << " (risk/reward ratio)\n";
         } else if (param == "drawdown_to_defensive") {
-            config->set_drawdown_to_defensive(value / 100.0);  // Convert % to decimal
+            config->set_drawdown_to_defensive(value / 100.0); // Convert % to decimal
             std::cout << "drawdown_to_defensive = " << value << "% -> DEFENSIVE mode\n";
         } else if (param == "drawdown_to_exit") {
-            config->set_drawdown_to_exit(value / 100.0);  // Convert % to decimal
+            config->set_drawdown_to_exit(value / 100.0); // Convert % to decimal
             std::cout << "drawdown_to_exit = " << value << "% -> EXIT_ONLY mode\n";
         } else if (param == "win_rate_aggressive") {
             config->set_win_rate_aggressive(value);
@@ -591,16 +596,13 @@ int main(int argc, char* argv[]) {
             return 1;
         }
         std::cout << "Config updated (sequence=" << config->sequence.load() << ")\n";
-    }
-    else if (cmd == "disable") {
+    } else if (cmd == "disable") {
         config->set_trading_enabled(false);
         std::cout << "Trading DISABLED\n";
-    }
-    else if (cmd == "enable") {
+    } else if (cmd == "enable") {
         config->set_trading_enabled(true);
         std::cout << "Trading enabled\n";
-    }
-    else if (cmd == "regime_strategy" && argc > 3) {
+    } else if (cmd == "regime_strategy" && argc > 3) {
         int regime = std::stoi(argv[2]);
         int strategy = std::stoi(argv[3]);
 
@@ -624,8 +626,7 @@ int main(int argc, char* argv[]) {
 
         std::cout << regime_names[regime] << " -> " << strategy_names[strategy] << "\n";
         std::cout << "Regime strategy mapping updated (sequence=" << config->sequence.load() << ")\n";
-    }
-    else {
+    } else {
         print_usage(argv[0]);
         munmap(config, sizeof(SharedConfig));
         return 1;

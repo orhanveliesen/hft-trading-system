@@ -17,16 +17,17 @@
  *   ./optimize_strategies --download -d 180 BTCUSDT ETHUSDT
  */
 
+#include "../include/backtest/kline_backtest.hpp"
 #include "../include/config/strategy_config.hpp"
 #include "../include/config/strategy_factory.hpp"
-#include "../include/backtest/kline_backtest.hpp"
 #include "../include/exchange/market_data.hpp"
-#include <iostream>
-#include <iomanip>
-#include <vector>
-#include <string>
+
 #include <algorithm>
 #include <cstring>
+#include <iomanip>
+#include <iostream>
+#include <string>
+#include <vector>
 
 using namespace hft;
 using namespace hft::config;
@@ -37,7 +38,7 @@ struct OptimizationResult {
     StrategyType strategy;
     StrategyParams params;
     BacktestStats stats;
-    double score;  // Combined score for ranking
+    double score; // Combined score for ranking
 };
 
 // Calculate a combined score from backtest stats
@@ -49,21 +50,19 @@ double calculate_score(const BacktestStats& stats) {
     // - Win rate gives consistency
     // - Low drawdown is critical
 
-    double return_score = stats.total_return_pct;  // Can be negative
-    double sharpe_score = stats.sharpe_ratio * 10; // Scale up
-    double win_rate_score = (stats.win_rate - 50) * 0.5;  // Bonus for >50%
-    double drawdown_penalty = -stats.max_drawdown_pct * 2;  // Penalize drawdown
-    double profit_factor_bonus = (stats.profit_factor > 1.0) ?
-        (stats.profit_factor - 1.0) * 20 : (stats.profit_factor - 1.0) * 40;
+    double return_score = stats.total_return_pct;          // Can be negative
+    double sharpe_score = stats.sharpe_ratio * 10;         // Scale up
+    double win_rate_score = (stats.win_rate - 50) * 0.5;   // Bonus for >50%
+    double drawdown_penalty = -stats.max_drawdown_pct * 2; // Penalize drawdown
+    double profit_factor_bonus =
+        (stats.profit_factor > 1.0) ? (stats.profit_factor - 1.0) * 20 : (stats.profit_factor - 1.0) * 40;
 
-    return return_score + sharpe_score + win_rate_score +
-           drawdown_penalty + profit_factor_bonus;
+    return return_score + sharpe_score + win_rate_score + drawdown_penalty + profit_factor_bonus;
 }
 
 // Test a single strategy on data
-OptimizationResult test_strategy(StrategyType type, const StrategyParams& params,
-                                  const std::vector<Kline>& klines,
-                                  const BacktestConfig& bt_config) {
+OptimizationResult test_strategy(StrategyType type, const StrategyParams& params, const std::vector<Kline>& klines,
+                                 const BacktestConfig& bt_config) {
     OptimizationResult result;
     result.strategy = type;
     result.params = params;
@@ -78,21 +77,18 @@ OptimizationResult test_strategy(StrategyType type, const StrategyParams& params
 }
 
 // Test all strategies and find the best one
-OptimizationResult find_best_strategy(const std::string& symbol,
-                                       const std::vector<Kline>& klines,
-                                       const BacktestConfig& bt_config) {
+OptimizationResult find_best_strategy(const std::string& symbol, const std::vector<Kline>& klines,
+                                      const BacktestConfig& bt_config) {
     std::vector<OptimizationResult> results;
 
     auto strategy_types = StrategyFactory::get_all_types();
 
     std::cout << "\n  Testing strategies for " << symbol << ":\n";
     std::cout << "  " << std::string(60, '-') << "\n";
-    std::cout << "  " << std::left << std::setw(20) << "Strategy"
-              << std::right << std::setw(10) << "Return"
-              << std::setw(10) << "Sharpe"
-              << std::setw(10) << "WinRate"
-              << std::setw(10) << "MaxDD"
-              << std::setw(10) << "Score" << "\n";
+    std::cout << "  " << std::left << std::setw(20) << "Strategy" << std::right << std::setw(10) << "Return"
+              << std::setw(10) << "Sharpe" << std::setw(10) << "WinRate" << std::setw(10) << "MaxDD" << std::setw(10)
+              << "Score"
+              << "\n";
     std::cout << "  " << std::string(60, '-') << "\n";
 
     for (auto type : strategy_types) {
@@ -101,24 +97,20 @@ OptimizationResult find_best_strategy(const std::string& symbol,
         results.push_back(result);
 
         std::string name = StrategyFactory::get_name(type, params);
-        std::cout << "  " << std::left << std::setw(20) << name
-                  << std::right << std::fixed << std::setprecision(2)
-                  << std::setw(9) << result.stats.total_return_pct << "%"
-                  << std::setw(10) << result.stats.sharpe_ratio
-                  << std::setw(9) << result.stats.win_rate << "%"
-                  << std::setw(9) << result.stats.max_drawdown_pct << "%"
-                  << std::setw(10) << result.score << "\n";
+        std::cout << "  " << std::left << std::setw(20) << name << std::right << std::fixed << std::setprecision(2)
+                  << std::setw(9) << result.stats.total_return_pct << "%" << std::setw(10) << result.stats.sharpe_ratio
+                  << std::setw(9) << result.stats.win_rate << "%" << std::setw(9) << result.stats.max_drawdown_pct
+                  << "%" << std::setw(10) << result.score << "\n";
     }
 
     // Find best by score
-    auto best = std::max_element(results.begin(), results.end(),
-        [](const OptimizationResult& a, const OptimizationResult& b) {
-            return a.score < b.score;
-        });
+    auto best =
+        std::max_element(results.begin(), results.end(),
+                         [](const OptimizationResult& a, const OptimizationResult& b) { return a.score < b.score; });
 
     std::cout << "  " << std::string(60, '-') << "\n";
-    std::cout << "  Best: " << StrategyFactory::get_name(best->strategy, best->params)
-              << " (score: " << std::fixed << std::setprecision(2) << best->score << ")\n";
+    std::cout << "  Best: " << StrategyFactory::get_name(best->strategy, best->params) << " (score: " << std::fixed
+              << std::setprecision(2) << best->score << ")\n";
 
     return *best;
 }
@@ -149,17 +141,13 @@ int main(int argc, char* argv[]) {
         if (arg == "-h" || arg == "--help") {
             print_usage(argv[0]);
             return 0;
-        }
-        else if ((arg == "-o" || arg == "--output") && i + 1 < argc) {
+        } else if ((arg == "-o" || arg == "--output") && i + 1 < argc) {
             output_file = argv[++i];
-        }
-        else if ((arg == "-d" || arg == "--data-dir") && i + 1 < argc) {
+        } else if ((arg == "-d" || arg == "--data-dir") && i + 1 < argc) {
             data_dir = argv[++i];
-        }
-        else if ((arg == "-c" || arg == "--capital") && i + 1 < argc) {
+        } else if ((arg == "-c" || arg == "--capital") && i + 1 < argc) {
             initial_capital = std::stod(argv[++i]);
-        }
-        else if (arg[0] != '-') {
+        } else if (arg[0] != '-') {
             // Assume it's a symbol
             symbols.push_back(arg);
         }
@@ -173,7 +161,8 @@ int main(int argc, char* argv[]) {
 
     std::cout << "=== Strategy Optimizer ===\n";
     std::cout << "Symbols: ";
-    for (const auto& s : symbols) std::cout << s << " ";
+    for (const auto& s : symbols)
+        std::cout << s << " ";
     std::cout << "\n";
     std::cout << "Initial Capital: $" << initial_capital << "\n";
     std::cout << "Output: " << output_file << "\n";
@@ -198,16 +187,12 @@ int main(int argc, char* argv[]) {
     for (const auto& symbol : symbols) {
         // Try to find data file
         std::string lower_symbol = symbol;
-        std::transform(lower_symbol.begin(), lower_symbol.end(),
-                       lower_symbol.begin(), ::tolower);
+        std::transform(lower_symbol.begin(), lower_symbol.end(), lower_symbol.begin(), ::tolower);
 
         std::vector<std::string> possible_files = {
-            data_dir + "/" + lower_symbol + "_1h.csv",
-            data_dir + "/" + lower_symbol + "_hourly.csv",
-            data_dir + "/" + lower_symbol + "_3m_hourly.csv",
-            data_dir + "/" + symbol + "_1h.csv",
-            data_dir + "/" + symbol + ".csv"
-        };
+            data_dir + "/" + lower_symbol + "_1h.csv", data_dir + "/" + lower_symbol + "_hourly.csv",
+            data_dir + "/" + lower_symbol + "_3m_hourly.csv", data_dir + "/" + symbol + "_1h.csv",
+            data_dir + "/" + symbol + ".csv"};
 
         std::string data_file;
         for (const auto& f : possible_files) {
@@ -221,7 +206,8 @@ int main(int argc, char* argv[]) {
         if (data_file.empty()) {
             std::cerr << "\nWarning: No data file found for " << symbol << "\n";
             std::cerr << "Tried: ";
-            for (const auto& f : possible_files) std::cerr << f << " ";
+            for (const auto& f : possible_files)
+                std::cerr << f << " ";
             std::cerr << "\n";
             continue;
         }
@@ -274,21 +260,16 @@ int main(int argc, char* argv[]) {
 
     std::cout << "\nOptimization complete!\n";
     std::cout << "\nSummary:\n";
-    std::cout << std::left << std::setw(12) << "Symbol"
-              << std::setw(18) << "Strategy"
-              << std::right << std::setw(10) << "Return"
-              << std::setw(10) << "WinRate"
-              << std::setw(10) << "PF" << "\n";
+    std::cout << std::left << std::setw(12) << "Symbol" << std::setw(18) << "Strategy" << std::right << std::setw(10)
+              << "Return" << std::setw(10) << "WinRate" << std::setw(10) << "PF"
+              << "\n";
     std::cout << std::string(60, '-') << "\n";
 
     for (const auto& sym : trading_config.symbols) {
         std::string name = StrategyFactory::get_name(sym.strategy, sym.params);
-        std::cout << std::left << std::setw(12) << sym.symbol
-                  << std::setw(18) << name
-                  << std::right << std::fixed << std::setprecision(2)
-                  << std::setw(9) << sym.expected_return << "%"
-                  << std::setw(9) << sym.win_rate << "%"
-                  << std::setw(10) << sym.profit_factor << "\n";
+        std::cout << std::left << std::setw(12) << sym.symbol << std::setw(18) << name << std::right << std::fixed
+                  << std::setprecision(2) << std::setw(9) << sym.expected_return << "%" << std::setw(9) << sym.win_rate
+                  << "%" << std::setw(10) << sym.profit_factor << "\n";
     }
 
     std::cout << "\nConfig file saved: " << output_file << "\n";

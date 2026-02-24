@@ -10,28 +10,29 @@
  * after hitting 32 positions, causing cash to get stuck.
  */
 
-#include <iostream>
-#include <cassert>
-#include <cmath>
-
 #include "../include/trading/portfolio.hpp"
 #include "../include/types.hpp"
+
+#include <cassert>
+#include <cmath>
+#include <iostream>
 
 using namespace hft;
 using namespace hft::trading;
 
-#define ASSERT_NEAR(a, b, tol) do { \
-    if (std::abs((a) - (b)) > (tol)) { \
-        std::cerr << "FAIL: " << #a << " = " << (a) << ", expected " << (b) << "\n"; \
-        assert(false); \
-    } \
-} while(0)
+#define ASSERT_NEAR(a, b, tol)                                                                                         \
+    do {                                                                                                               \
+        if (std::abs((a) - (b)) > (tol)) {                                                                             \
+            std::cerr << "FAIL: " << #a << " = " << (a) << ", expected " << (b) << "\n";                               \
+            assert(false);                                                                                             \
+        }                                                                                                              \
+    } while (0)
 
 void test_buy_at_position_limit() {
     std::cout << "  test_buy_at_position_limit... ";
 
     Portfolio p;
-    p.init(1000000.0);  // $1M to avoid cash limits
+    p.init(1000000.0); // $1M to avoid cash limits
 
     Symbol BTC = 0;
     double price = 100.0;
@@ -40,7 +41,7 @@ void test_buy_at_position_limit() {
     // Fill up to MAX_POSITIONS_PER_SYMBOL
     for (size_t i = 0; i < MAX_POSITIONS_PER_SYMBOL; i++) {
         double commission = p.buy(BTC, price, qty);
-        assert(commission > 0);  // Should succeed
+        assert(commission > 0); // Should succeed
     }
 
     double cash_before = p.cash;

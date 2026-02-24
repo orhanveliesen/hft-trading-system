@@ -1,17 +1,19 @@
+#include "../include/config/shared_config.hpp"
+
 #include <cassert>
+#include <chrono>
 #include <iostream>
 #include <thread>
-#include <chrono>
-#include "../include/config/shared_config.hpp"
 
 using namespace hft::config;
 
 #define TEST(name) void name()
-#define RUN_TEST(name) do { \
-    std::cout << "  " << #name << "... "; \
-    name(); \
-    std::cout << "PASSED\n"; \
-} while(0)
+#define RUN_TEST(name)                                                                                                 \
+    do {                                                                                                               \
+        std::cout << "  " << #name << "... ";                                                                          \
+        name();                                                                                                        \
+        std::cout << "PASSED\n";                                                                                       \
+    } while (0)
 
 #define ASSERT_EQ(a, b) assert((a) == (b))
 #define ASSERT_TRUE(x) assert(x)

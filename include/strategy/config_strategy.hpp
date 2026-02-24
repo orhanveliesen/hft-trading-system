@@ -20,36 +20,37 @@
  * - EXIT_ONLY (4): No new positions, only close existing
  */
 
+#include "../config/defaults.hpp"
+#include "../ipc/shared_config.hpp"
+#include "../ipc/symbol_config.hpp"
+#include "../risk/enhanced_risk_manager.hpp"
 #include "istrategy.hpp"
 #include "rolling_sharpe.hpp"
 #include "technical_indicators.hpp"
-#include "../ipc/shared_config.hpp"
-#include "../ipc/symbol_config.hpp"
-#include "../config/defaults.hpp"
-#include "../risk/enhanced_risk_manager.hpp"
-#include <cstring>
+
 #include <algorithm>
+#include <cstring>
 
 namespace hft {
 namespace strategy {
 
 // Mode enum (matches SymbolTuningConfig::current_mode)
-enum class ConfigMode : int8_t {
-    AGGRESSIVE = 0,
-    NORMAL = 1,
-    CAUTIOUS = 2,
-    DEFENSIVE = 3,
-    EXIT_ONLY = 4
-};
+enum class ConfigMode : int8_t { AGGRESSIVE = 0, NORMAL = 1, CAUTIOUS = 2, DEFENSIVE = 3, EXIT_ONLY = 4 };
 
 inline const char* config_mode_str(ConfigMode mode) {
     switch (mode) {
-        case ConfigMode::AGGRESSIVE: return "AGGR";
-        case ConfigMode::NORMAL:     return "NORM";
-        case ConfigMode::CAUTIOUS:   return "CAUT";
-        case ConfigMode::DEFENSIVE:  return "DEF";
-        case ConfigMode::EXIT_ONLY:  return "EXIT";
-        default: return "?";
+    case ConfigMode::AGGRESSIVE:
+        return "AGGR";
+    case ConfigMode::NORMAL:
+        return "NORM";
+    case ConfigMode::CAUTIOUS:
+        return "CAUT";
+    case ConfigMode::DEFENSIVE:
+        return "DEF";
+    case ConfigMode::EXIT_ONLY:
+        return "EXIT";
+    default:
+        return "?";
     }
 }
 
@@ -69,17 +70,9 @@ public:
     // Sharpe window size
     static constexpr size_t SHARPE_WINDOW = 100;
 
-    ConfigStrategy(
-        const ipc::SharedConfig* global_config,
-        ipc::SharedSymbolConfigs* symbol_configs,
-        const char* symbol_name
-    )
-        : global_(global_config)
-        , symbol_configs_(symbol_configs)
-        , tick_count_(0)
-        , cumulative_pnl_(0)
-        , peak_pnl_(0)
-    {
+    ConfigStrategy(const ipc::SharedConfig* global_config, ipc::SharedSymbolConfigs* symbol_configs,
+                   const char* symbol_name)
+        : global_(global_config), symbol_configs_(symbol_configs), tick_count_(0), cumulative_pnl_(0), peak_pnl_(0) {
         std::strncpy(symbol_, symbol_name, sizeof(symbol_) - 1);
         symbol_[sizeof(symbol_) - 1] = '\0';
 
@@ -93,13 +86,9 @@ public:
     // IStrategy Interface
     // =========================================================================
 
-    Signal generate(
-        Symbol symbol,
-        const MarketSnapshot& market,
-        const StrategyPosition& position,
-        MarketRegime regime
-    ) override {
-        (void)symbol;  // We use symbol_ instead
+    Signal generate(Symbol symbol, const MarketSnapshot& market, const StrategyPosition& position,
+                    MarketRegime regime) override {
+        (void)symbol; // We use symbol_ instead
 
         // 1. Emergency stop check (global)
         if (global_ && !global_->is_trading_enabled()) {
@@ -139,13 +128,9 @@ public:
         return generate_signal(sym, market, position, regime, mode);
     }
 
-    std::string_view name() const override {
-        return "Config";
-    }
+    std::string_view name() const override { return "Config"; }
 
-    OrderPreference default_order_preference() const override {
-        return OrderPreference::Either;
-    }
+    OrderPreference default_order_preference() const override { return OrderPreference::Either; }
 
     bool suitable_for_regime(MarketRegime /*regime*/) const override {
         // ConfigStrategy is suitable for all regimes (config-driven)
@@ -168,9 +153,7 @@ public:
         indicators_.reset();
     }
 
-    bool ready() const override {
-        return tick_count_ >= MIN_TICKS_TO_READY && indicators_.ready();
-    }
+    bool ready() const override { return tick_count_ >= MIN_TICKS_TO_READY && indicators_.ready(); }
 
     // =========================================================================
     // Performance Tracking
@@ -185,7 +168,7 @@ public:
      */
     void record_trade_result(double pnl_pct, bool was_win) {
         // Update Sharpe
-        sharpe_.add_return(pnl_pct / 100.0);  // Convert % to decimal
+        sharpe_.add_return(pnl_pct / 100.0); // Convert % to decimal
 
         // Update cumulative P&L
         cumulative_pnl_ += pnl_pct;
@@ -208,9 +191,7 @@ public:
 
     double sharpe_ratio() const { return sharpe_.sharpe_ratio(); }
     double cumulative_pnl() const { return cumulative_pnl_; }
-    double current_drawdown() const {
-        return peak_pnl_ > 0 ? (peak_pnl_ - cumulative_pnl_) / peak_pnl_ : 0;
-    }
+    double current_drawdown() const { return peak_pnl_ > 0 ? (peak_pnl_ - cumulative_pnl_) / peak_pnl_ : 0; }
 
     // =========================================================================
     // Accumulation Factor Calculation (Tuner-Controlled)
@@ -226,13 +207,10 @@ public:
      * @param raw_signal_strength Signal strength (0-1)
      * @return Accumulation factor (0.1 to accum_max)
      */
-    double calculate_accumulation_factor(
-        const ipc::SymbolTuningConfig* sym,
-        const StrategyPosition& position,
-        MarketRegime regime,
-        double raw_signal_strength
-    ) const {
-        if (!sym) return 0.3;  // Default fallback
+    double calculate_accumulation_factor(const ipc::SymbolTuningConfig* sym, const StrategyPosition& position,
+                                         MarketRegime regime, double raw_signal_strength) const {
+        if (!sym)
+            return 0.3; // Default fallback
 
         // Base factor: inverse of position %
         double base = 1.0 - position.position_pct();
@@ -240,16 +218,16 @@ public:
         // Get floor from tuner's config based on regime
         double floor;
         switch (regime) {
-            case MarketRegime::TrendingUp:
-            case MarketRegime::TrendingDown:
-                floor = sym->accum_floor_trending();
-                break;
-            case MarketRegime::HighVolatility:
-                floor = sym->accum_floor_highvol();
-                break;
-            default:  // Ranging, Unknown
-                floor = sym->accum_floor_ranging();
-                break;
+        case MarketRegime::TrendingUp:
+        case MarketRegime::TrendingDown:
+            floor = sym->accum_floor_trending();
+            break;
+        case MarketRegime::HighVolatility:
+            floor = sym->accum_floor_highvol();
+            break;
+        default: // Ranging, Unknown
+            floor = sym->accum_floor_ranging();
+            break;
         }
 
         // Win streak boost (tuner-controlled rate)
@@ -298,7 +276,8 @@ private:
     // =========================================================================
 
     void update_mode(ipc::SymbolTuningConfig* sym) {
-        if (!sym) return;
+        if (!sym)
+            return;
 
         int losses = sym->consecutive_losses;
         int wins = sym->consecutive_wins;
@@ -392,13 +371,8 @@ private:
     // Signal Generation
     // =========================================================================
 
-    Signal generate_signal(
-        ipc::SymbolTuningConfig* sym,
-        const MarketSnapshot& market,
-        const StrategyPosition& position,
-        MarketRegime regime,
-        ConfigMode mode
-    ) {
+    Signal generate_signal(ipc::SymbolTuningConfig* sym, const MarketSnapshot& market, const StrategyPosition& position,
+                           MarketRegime regime, ConfigMode mode) {
         if (!market.valid()) {
             return Signal::none();
         }
@@ -438,7 +412,7 @@ private:
         if (score > 0 && position.can_buy()) {
             // Buy signal
             if (mode == ConfigMode::EXIT_ONLY) {
-                return Signal::none();  // No new buys in EXIT_ONLY
+                return Signal::none(); // No new buys in EXIT_ONLY
             }
             return Signal::buy(strength, qty, "Config:BUY");
         } else if (score < 0 && position.can_sell()) {
@@ -451,16 +425,16 @@ private:
 
     double get_signal_threshold(ipc::SymbolTuningConfig* sym, ConfigMode mode) const {
         switch (mode) {
-            case ConfigMode::AGGRESSIVE:
-                return sym->signal_threshold_aggressive();
-            case ConfigMode::NORMAL:
-                return sym->signal_threshold_normal();
-            case ConfigMode::CAUTIOUS:
-            case ConfigMode::DEFENSIVE:
-            case ConfigMode::EXIT_ONLY:
-                return sym->signal_threshold_cautious();
-            default:
-                return sym->signal_threshold_normal();
+        case ConfigMode::AGGRESSIVE:
+            return sym->signal_threshold_aggressive();
+        case ConfigMode::NORMAL:
+            return sym->signal_threshold_normal();
+        case ConfigMode::CAUTIOUS:
+        case ConfigMode::DEFENSIVE:
+        case ConfigMode::EXIT_ONLY:
+            return sym->signal_threshold_cautious();
+        default:
+            return sym->signal_threshold_normal();
         }
     }
 
@@ -475,12 +449,8 @@ private:
      *
      * @return Score in range [-1.0, 1.0], positive = buy, negative = sell
      */
-    double calculate_signal_score(
-        ipc::SymbolTuningConfig* sym,
-        const MarketSnapshot& market,
-        const StrategyPosition& position,
-        MarketRegime regime
-    ) const {
+    double calculate_signal_score(ipc::SymbolTuningConfig* sym, const MarketSnapshot& market,
+                                  const StrategyPosition& position, MarketRegime regime) const {
         // Need indicators to be warmed up
         if (!indicators_.ready()) {
             return 0.0;
@@ -499,13 +469,13 @@ private:
 
         // 1. EMA Trend Component (weight: 0.4)
         if (indicators_.ema_crossed_up()) {
-            score += EMA_CROSSOVER_WEIGHT;  // Strong bullish signal
+            score += EMA_CROSSOVER_WEIGHT; // Strong bullish signal
         } else if (indicators_.ema_bullish()) {
-            score += EMA_TREND_WEIGHT;  // Moderate bullish
+            score += EMA_TREND_WEIGHT; // Moderate bullish
         } else if (indicators_.ema_crossed_down()) {
-            score -= EMA_CROSSOVER_WEIGHT;  // Strong bearish signal
+            score -= EMA_CROSSOVER_WEIGHT; // Strong bearish signal
         } else if (indicators_.ema_bearish()) {
-            score -= EMA_TREND_WEIGHT;  // Moderate bearish
+            score -= EMA_TREND_WEIGHT; // Moderate bearish
         }
 
         // 2. RSI Component (weight: 0.3)
@@ -516,22 +486,22 @@ private:
         static constexpr double RSI_MILD_OVERBOUGHT = 60.0;
 
         if (rsi < RSI_OVERSOLD) {
-            score += RSI_EXTREME_WEIGHT;  // Oversold = buy
+            score += RSI_EXTREME_WEIGHT; // Oversold = buy
         } else if (rsi < RSI_MILD_OVERSOLD) {
-            score += RSI_MILD_WEIGHT;  // Mildly oversold
+            score += RSI_MILD_WEIGHT; // Mildly oversold
         } else if (rsi > RSI_OVERBOUGHT) {
-            score -= RSI_EXTREME_WEIGHT;  // Overbought = sell
+            score -= RSI_EXTREME_WEIGHT; // Overbought = sell
         } else if (rsi > RSI_MILD_OVERBOUGHT) {
-            score -= RSI_MILD_WEIGHT;  // Mildly overbought
+            score -= RSI_MILD_WEIGHT; // Mildly overbought
         }
 
         // 3. Bollinger Band Component (weight: 0.2)
         if (indicators_.below_lower_band()) {
-            score += BB_OUTSIDE_WEIGHT;  // Below lower = buy signal
+            score += BB_OUTSIDE_WEIGHT; // Below lower = buy signal
         } else if (indicators_.near_lower_band()) {
             score += BB_NEAR_WEIGHT;
         } else if (indicators_.above_upper_band()) {
-            score -= BB_OUTSIDE_WEIGHT;  // Above upper = sell signal
+            score -= BB_OUTSIDE_WEIGHT; // Above upper = sell signal
         } else if (indicators_.near_upper_band()) {
             score -= BB_NEAR_WEIGHT;
         }
@@ -539,36 +509,39 @@ private:
         // 4. Order Book Imbalance (weight: 0.1, reduced from sole input)
         double total_size = static_cast<double>(market.bid_size + market.ask_size);
         if (total_size > 0) {
-            double imbalance = (static_cast<double>(market.bid_size) -
-                               static_cast<double>(market.ask_size)) / total_size;
+            double imbalance =
+                (static_cast<double>(market.bid_size) - static_cast<double>(market.ask_size)) / total_size;
             score += imbalance * OB_IMBALANCE_WEIGHT;
         }
 
         // 5. Regime Adjustment
         switch (regime) {
-            case MarketRegime::TrendingUp:
-                if (score > 0) score *= 1.2;  // Boost buys in uptrend
-                else score *= 0.7;            // Penalize sells
-                break;
-            case MarketRegime::TrendingDown:
-                if (score < 0) score *= 1.2;  // Boost sells in downtrend
-                else score *= 0.7;            // Penalize buys
-                break;
-            case MarketRegime::HighVolatility:
-                score *= 0.5;  // Reduce all signals in high volatility
-                break;
-            case MarketRegime::Ranging:
-                // Mean reversion works better - no adjustment
-                break;
-            default:
-                break;
+        case MarketRegime::TrendingUp:
+            if (score > 0)
+                score *= 1.2; // Boost buys in uptrend
+            else
+                score *= 0.7; // Penalize sells
+            break;
+        case MarketRegime::TrendingDown:
+            if (score < 0)
+                score *= 1.2; // Boost sells in downtrend
+            else
+                score *= 0.7; // Penalize buys
+            break;
+        case MarketRegime::HighVolatility:
+            score *= 0.5; // Reduce all signals in high volatility
+            break;
+        case MarketRegime::Ranging:
+            // Mean reversion works better - no adjustment
+            break;
+        default:
+            break;
         }
 
         // 6. Position Accumulation Factor (keep existing logic)
         if (position.has_position()) {
             double raw_signal = std::abs(score);
-            double accum_factor = calculate_accumulation_factor(
-                sym, position, regime, raw_signal);
+            double accum_factor = calculate_accumulation_factor(sym, position, regime, raw_signal);
             score *= accum_factor;
         }
 
@@ -592,20 +565,15 @@ public:
      * @param current_price Current asset price in USD
      * @return Quantity to trade
      */
-    double calculate_position_size(
-        ipc::SymbolTuningConfig* sym,
-        const StrategyPosition& position,
-        ConfigMode mode,
-        double confidence,
-        double current_price
-    ) const {
+    double calculate_position_size(ipc::SymbolTuningConfig* sym, const StrategyPosition& position, ConfigMode mode,
+                                   double confidence, double current_price) const {
         // Validate price
         if (current_price <= 0) {
             return 0.0;
         }
 
         // Base position from config
-        double base_pct = sym->base_position_pct() / 100.0;  // Convert from % to ratio
+        double base_pct = sym->base_position_pct() / 100.0; // Convert from % to ratio
         double max_pct = sym->max_position_pct() / 100.0;
         double min_pct = sym->min_position_pct() / 100.0;
 
@@ -614,20 +582,20 @@ public:
 
         // Mode adjustment
         switch (mode) {
-            case ConfigMode::AGGRESSIVE:
-                size_pct *= 1.25;
-                break;
-            case ConfigMode::CAUTIOUS:
-                size_pct *= 0.75;
-                break;
-            case ConfigMode::DEFENSIVE:
-                size_pct *= 0.5;
-                break;
-            case ConfigMode::EXIT_ONLY:
-                // Only allow selling existing position
-                return position.quantity;
-            default:
-                break;
+        case ConfigMode::AGGRESSIVE:
+            size_pct *= 1.25;
+            break;
+        case ConfigMode::CAUTIOUS:
+            size_pct *= 0.75;
+            break;
+        case ConfigMode::DEFENSIVE:
+            size_pct *= 0.5;
+            break;
+        case ConfigMode::EXIT_ONLY:
+            // Only allow selling existing position
+            return position.quantity;
+        default:
+            break;
         }
 
         // Clamp to limits
@@ -644,12 +612,15 @@ public:
 
 private:
     SignalStrength confidence_to_strength(double confidence) const {
-        if (confidence >= 0.8) return SignalStrength::Strong;
-        if (confidence >= 0.5) return SignalStrength::Medium;
-        if (confidence >= 0.3) return SignalStrength::Weak;
+        if (confidence >= 0.8)
+            return SignalStrength::Strong;
+        if (confidence >= 0.5)
+            return SignalStrength::Medium;
+        if (confidence >= 0.3)
+            return SignalStrength::Weak;
         return SignalStrength::None;
     }
 };
 
-}  // namespace strategy
-}  // namespace hft
+} // namespace strategy
+} // namespace hft

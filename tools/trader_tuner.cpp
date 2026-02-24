@@ -15,28 +15,29 @@
  *   HFT_TUNER_MODEL            # Optional: Model to use (default: claude-3-haiku-20240307)
  */
 
-#include "../include/ipc/symbol_config.hpp"
-#include "../include/ipc/shared_event_log.hpp"
 #include "../include/ipc/shared_config.hpp"
+#include "../include/ipc/shared_event_log.hpp"
 #include "../include/ipc/shared_portfolio_state.hpp"
 #include "../include/ipc/shared_ring_buffer.hpp"
-#include "../include/ipc/trade_event.hpp"
 #include "../include/ipc/shared_tuner_state.hpp"
+#include "../include/ipc/symbol_config.hpp"
+#include "../include/ipc/trade_event.hpp"
 #include "../include/tuner/claude_client.hpp"
 #include "../include/tuner/news_client.hpp"
 #include "../include/tuner/rag_client.hpp"
-#include <iostream>
-#include <iomanip>
-#include <fstream>
-#include <cstring>
-#include <thread>
+
 #include <chrono>
 #include <csignal>
+#include <cstdlib>
+#include <cstring>
+#include <ctime>
+#include <fstream>
+#include <iomanip>
+#include <iostream>
+#include <sstream>
+#include <thread>
 #include <unistd.h>
 #include <vector>
-#include <cstdlib>
-#include <ctime>
-#include <sstream>
 
 using namespace hft::ipc;
 using namespace hft::tuner;
@@ -48,15 +49,13 @@ using namespace hft::tuner;
 std::string format_timestamp() {
     auto now = std::chrono::system_clock::now();
     auto time_t_now = std::chrono::system_clock::to_time_t(now);
-    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-        now.time_since_epoch()) % 1000;
+    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()) % 1000;
 
     std::tm tm_buf;
     localtime_r(&time_t_now, &tm_buf);
 
     std::ostringstream ss;
-    ss << std::put_time(&tm_buf, "%Y-%m-%d %H:%M:%S")
-       << "." << std::setfill('0') << std::setw(3) << ms.count();
+    ss << std::put_time(&tm_buf, "%Y-%m-%d %H:%M:%S") << "." << std::setfill('0') << std::setw(3) << ms.count();
     return ss.str();
 }
 
@@ -80,7 +79,9 @@ class TuningHistoryLogger {
 public:
     TuningHistoryLogger(const std::string& log_dir = "../logs") {
         // Create log directory if needed (relative to build dir)
-        std::string cmd = "mkdir -p " + log_dir; // TODO: why are you using shell commands? what if we dont have that program installed in the OS
+        std::string cmd =
+            "mkdir -p " +
+            log_dir; // TODO: why are you using shell commands? what if we dont have that program installed in the OS
         (void)system(cmd.c_str());
 
         // Open log file with date
@@ -93,7 +94,8 @@ public:
             file_.seekp(0, std::ios::end);
             if (file_.tellp() == 0) {
                 file_ << "# HFT AI Tuner History Log\n";
-                file_ << "# Format: timestamp | trigger | action | symbol | confidence | reason | config_changes | applied\n";
+                file_ << "# Format: timestamp | trigger | action | symbol | confidence | reason | config_changes | "
+                         "applied\n";
                 file_ << "# Started: " << format_timestamp() << "\n";
                 file_ << std::string(100, '-') << "\n";
                 file_.flush();
@@ -107,12 +109,8 @@ public:
         }
     }
 
-    void log_tuning_decision(
-        TriggerReason trigger,
-        const ClaudeResponse& response,
-        bool applied,
-        const std::string& news_context = "")
-    {
+    void log_tuning_decision(TriggerReason trigger, const ClaudeResponse& response, bool applied,
+                             const std::string& news_context = "") {
         std::ostringstream console_log;
         std::ostringstream file_log;
 
@@ -127,7 +125,8 @@ public:
         console_log << "║ Trigger:    " << std::left << std::setw(65) << trigger_name(trigger) << "║\n";
         console_log << "║ Action:     " << std::left << std::setw(65) << action_name(cmd.action) << "║\n";
         console_log << "║ Symbol:     " << std::left << std::setw(65) << (cmd.symbol[0] ? cmd.symbol : "*") << "║\n";
-        console_log << "║ Confidence: " << std::left << std::setw(65) << std::to_string((int)cmd.confidence) + "%" << "║\n";
+        console_log << "║ Confidence: " << std::left << std::setw(65) << std::to_string((int)cmd.confidence) + "%"
+                    << "║\n";
         console_log << "║ Urgency:    " << std::left << std::setw(65) << std::to_string((int)cmd.urgency) << "║\n";
 
         // Reason (may be long, truncate for display)
@@ -142,46 +141,52 @@ public:
             console_log << "╠══════════════════════════════════════════════════════════════════════════════╣\n";
             console_log << "║ CONFIG CHANGES:                                                              ║\n";
             console_log << "║   EMA Dev (Trending): " << std::left << std::setw(54)
-                       << std::to_string(cmd.config.ema_dev_trending_x100 / 100.0) + "%" << "║\n";
+                        << std::to_string(cmd.config.ema_dev_trending_x100 / 100.0) + "%"
+                        << "║\n";
             console_log << "║   EMA Dev (Ranging):  " << std::left << std::setw(54)
-                       << std::to_string(cmd.config.ema_dev_ranging_x100 / 100.0) + "%" << "║\n";
+                        << std::to_string(cmd.config.ema_dev_ranging_x100 / 100.0) + "%"
+                        << "║\n";
             console_log << "║   Base Position:      " << std::left << std::setw(54)
-                       << std::to_string(cmd.config.base_position_x100 / 100.0) + "%" << "║\n";
+                        << std::to_string(cmd.config.base_position_x100 / 100.0) + "%"
+                        << "║\n";
             console_log << "║   Cooldown:           " << std::left << std::setw(54)
-                       << std::to_string(cmd.config.cooldown_ms) + "ms" << "║\n";
+                        << std::to_string(cmd.config.cooldown_ms) + "ms"
+                        << "║\n";
             console_log << "║   Target:             " << std::left << std::setw(54)
-                       << std::to_string(cmd.config.target_pct_x100 / 100.0) + "%" << "║\n";
+                        << std::to_string(cmd.config.target_pct_x100 / 100.0) + "%"
+                        << "║\n";
             console_log << "║   Stop Loss:          " << std::left << std::setw(54)
-                       << std::to_string(cmd.config.stop_pct_x100 / 100.0) + "%" << "║\n";
+                        << std::to_string(cmd.config.stop_pct_x100 / 100.0) + "%"
+                        << "║\n";
             console_log << "╠──────────────────────────────────────────────────────────────────────────────╣\n";
             console_log << "║ ACCUMULATION PARAMS:                                                         ║\n";
             console_log << "║   Floor (Trending):   " << std::left << std::setw(54)
-                       << std::to_string(cmd.config.accum_floor_trending_x100 / 100.0) << "║\n";
+                        << std::to_string(cmd.config.accum_floor_trending_x100 / 100.0) << "║\n";
             console_log << "║   Floor (Ranging):    " << std::left << std::setw(54)
-                       << std::to_string(cmd.config.accum_floor_ranging_x100 / 100.0) << "║\n";
+                        << std::to_string(cmd.config.accum_floor_ranging_x100 / 100.0) << "║\n";
             console_log << "║   Floor (HighVol):    " << std::left << std::setw(54)
-                       << std::to_string(cmd.config.accum_floor_highvol_x100 / 100.0) << "║\n";
+                        << std::to_string(cmd.config.accum_floor_highvol_x100 / 100.0) << "║\n";
             console_log << "║   Boost/Win:          " << std::left << std::setw(54)
-                       << std::to_string(cmd.config.accum_boost_per_win_x100 / 100.0) << "║\n";
+                        << std::to_string(cmd.config.accum_boost_per_win_x100 / 100.0) << "║\n";
             console_log << "║   Penalty/Loss:       " << std::left << std::setw(54)
-                       << std::to_string(cmd.config.accum_penalty_per_loss_x100 / 100.0) << "║\n";
+                        << std::to_string(cmd.config.accum_penalty_per_loss_x100 / 100.0) << "║\n";
             console_log << "║   Signal Boost:       " << std::left << std::setw(54)
-                       << std::to_string(cmd.config.accum_signal_boost_x100 / 100.0) << "║\n";
+                        << std::to_string(cmd.config.accum_signal_boost_x100 / 100.0) << "║\n";
             console_log << "║   Max Factor:         " << std::left << std::setw(54)
-                       << std::to_string(cmd.config.accum_max_x100 / 100.0) << "║\n";
+                        << std::to_string(cmd.config.accum_max_x100 / 100.0) << "║\n";
         }
 
         console_log << "╠══════════════════════════════════════════════════════════════════════════════╣\n";
-        console_log << "║ API Stats:  " << "HTTP " << response.http_code
-                   << " | Latency: " << response.latency_ms << "ms"
-                   << " | Tokens: " << response.input_tokens << "/" << response.output_tokens;
+        console_log << "║ API Stats:  "
+                    << "HTTP " << response.http_code << " | Latency: " << response.latency_ms << "ms"
+                    << " | Tokens: " << response.input_tokens << "/" << response.output_tokens;
         int padding = 77 - 14 - std::to_string(response.http_code).length() -
-                     std::to_string(response.latency_ms).length() -
-                     std::to_string(response.input_tokens).length() -
-                     std::to_string(response.output_tokens).length() - 25;
+                      std::to_string(response.latency_ms).length() - std::to_string(response.input_tokens).length() -
+                      std::to_string(response.output_tokens).length() - 25;
         console_log << std::string(std::max(0, padding), ' ') << "║\n";
 
-        std::string status = applied ? "✓ APPLIED" : (response.success ? "○ NOT APPLIED (dry-run or no-change)" : "✗ FAILED");
+        std::string status =
+            applied ? "✓ APPLIED" : (response.success ? "○ NOT APPLIED (dry-run or no-change)" : "✗ FAILED");
         console_log << "║ Status:     " << std::left << std::setw(65) << status << "║\n";
         console_log << "╚══════════════════════════════════════════════════════════════════════════════╝\n";
 
@@ -190,27 +195,23 @@ public:
 
         // File log (structured, one line per decision)
         if (file_.is_open()) {
-            file_log << ts << " | "
-                    << trigger_name(trigger) << " | "
-                    << action_name(cmd.action) << " | "
-                    << (cmd.symbol[0] ? cmd.symbol : "*") << " | "
-                    << (int)cmd.confidence << "% | "
-                    << cmd.reason << " | ";
+            file_log << ts << " | " << trigger_name(trigger) << " | " << action_name(cmd.action) << " | "
+                     << (cmd.symbol[0] ? cmd.symbol : "*") << " | " << (int)cmd.confidence << "% | " << cmd.reason
+                     << " | ";
 
             if (cmd.action == TunerCommand::Action::UpdateSymbolConfig) {
                 file_log << "ema_trend=" << (cmd.config.ema_dev_trending_x100 / 100.0)
-                        << ",ema_range=" << (cmd.config.ema_dev_ranging_x100 / 100.0)
-                        << ",pos=" << (cmd.config.base_position_x100 / 100.0)
-                        << ",cool=" << cmd.config.cooldown_ms
-                        << ",target=" << (cmd.config.target_pct_x100 / 100.0)
-                        << ",stop=" << (cmd.config.stop_pct_x100 / 100.0)
-                        << ",accFloor_T=" << (cmd.config.accum_floor_trending_x100 / 100.0)
-                        << ",accFloor_R=" << (cmd.config.accum_floor_ranging_x100 / 100.0)
-                        << ",accFloor_H=" << (cmd.config.accum_floor_highvol_x100 / 100.0)
-                        << ",accBoost=" << (cmd.config.accum_boost_per_win_x100 / 100.0)
-                        << ",accPenalty=" << (cmd.config.accum_penalty_per_loss_x100 / 100.0)
-                        << ",accSigBoost=" << (cmd.config.accum_signal_boost_x100 / 100.0)
-                        << ",accMax=" << (cmd.config.accum_max_x100 / 100.0);
+                         << ",ema_range=" << (cmd.config.ema_dev_ranging_x100 / 100.0)
+                         << ",pos=" << (cmd.config.base_position_x100 / 100.0) << ",cool=" << cmd.config.cooldown_ms
+                         << ",target=" << (cmd.config.target_pct_x100 / 100.0)
+                         << ",stop=" << (cmd.config.stop_pct_x100 / 100.0)
+                         << ",accFloor_T=" << (cmd.config.accum_floor_trending_x100 / 100.0)
+                         << ",accFloor_R=" << (cmd.config.accum_floor_ranging_x100 / 100.0)
+                         << ",accFloor_H=" << (cmd.config.accum_floor_highvol_x100 / 100.0)
+                         << ",accBoost=" << (cmd.config.accum_boost_per_win_x100 / 100.0)
+                         << ",accPenalty=" << (cmd.config.accum_penalty_per_loss_x100 / 100.0)
+                         << ",accSigBoost=" << (cmd.config.accum_signal_boost_x100 / 100.0)
+                         << ",accMax=" << (cmd.config.accum_max_x100 / 100.0);
             } else {
                 file_log << "-";
             }
@@ -228,8 +229,7 @@ public:
         std::cout << "\n[" << ts << "] [ERROR] Tuning failed: " << error << "\n";
 
         if (file_.is_open()) {
-            file_ << ts << " | " << trigger_name(trigger)
-                 << " | ERROR | - | - | " << error << " | - | FAILED\n";
+            file_ << ts << " | " << trigger_name(trigger) << " | ERROR | - | - | " << error << " | - | FAILED\n";
             file_.flush();
         }
     }
@@ -244,12 +244,15 @@ public:
         std::cout << "├─────────────────────────────────────────────────────────────────────┤\n";
         std::cout << "│ Decision:    NO CHANGES NEEDED                                      │\n";
         std::cout << "│ Trigger:     " << std::left << std::setw(54) << trigger_name(trigger) << "│\n";
-        std::cout << "│ Confidence:  " << std::left << std::setw(54) << (std::to_string((int)response.command.confidence) + "%") << "│\n";
+        std::cout << "│ Confidence:  " << std::left << std::setw(54)
+                  << (std::to_string((int)response.command.confidence) + "%") << "│\n";
 
         // Show reason (may be multi-line, truncate for display)
         std::string reason = response.command.reason;
-        if (reason.empty()) reason = "No specific reason provided";
-        if (reason.length() > 52) reason = reason.substr(0, 49) + "...";
+        if (reason.empty())
+            reason = "No specific reason provided";
+        if (reason.length() > 52)
+            reason = reason.substr(0, 49) + "...";
         std::cout << "│ Reason:      " << std::left << std::setw(54) << reason << "│\n";
 
         // Show symbol if specified
@@ -258,24 +261,22 @@ public:
         }
 
         std::cout << "├─────────────────────────────────────────────────────────────────────┤\n";
-        std::cout << "│ API Stats:   HTTP " << response.http_code
-                  << " | " << response.latency_ms << "ms"
+        std::cout << "│ API Stats:   HTTP " << response.http_code << " | " << response.latency_ms << "ms"
                   << " | tokens: " << response.input_tokens << "/" << response.output_tokens;
         // Pad to align
         int stats_len = 20 + std::to_string(response.http_code).length() +
-                        std::to_string(response.latency_ms).length() +
-                        std::to_string(response.input_tokens).length() +
+                        std::to_string(response.latency_ms).length() + std::to_string(response.input_tokens).length() +
                         std::to_string(response.output_tokens).length();
-        for (int i = stats_len; i < 54; ++i) std::cout << " ";
+        for (int i = stats_len; i < 54; ++i)
+            std::cout << " ";
         std::cout << "│\n";
         std::cout << "└─────────────────────────────────────────────────────────────────────┘\n";
-        std::cout << std::right;  // Reset alignment
+        std::cout << std::right; // Reset alignment
         std::cout.flush();
 
         if (file_.is_open()) {
-            file_ << ts << " | " << trigger_name(trigger)
-                 << " | NO_CHANGE | * | " << (int)response.command.confidence << "% | "
-                 << response.command.reason << " | - | OK\n";
+            file_ << ts << " | " << trigger_name(trigger) << " | NO_CHANGE | * | " << (int)response.command.confidence
+                  << "% | " << response.command.reason << " | - | OK\n";
             file_.flush();
         }
     }
@@ -285,31 +286,51 @@ private:
 
     const char* trigger_name(TriggerReason trigger) {
         switch (trigger) {
-            case TriggerReason::Scheduled: return "SCHEDULED";
-            case TriggerReason::LossThreshold: return "LOSS_THRESHOLD";
-            case TriggerReason::ConsecutiveLosses: return "CONSEC_LOSSES";
-            case TriggerReason::WinStreak: return "WIN_STREAK";
-            case TriggerReason::VolatilitySpike: return "VOLATILITY";
-            case TriggerReason::NewsTriggered: return "NEWS";
-            case TriggerReason::ManualRequest: return "MANUAL";
-            case TriggerReason::StartupInit: return "STARTUP";
-            case TriggerReason::RegimeChange: return "REGIME_CHANGE";
-            case TriggerReason::DrawdownAlert: return "DRAWDOWN";
-            default: return "UNKNOWN";
+        case TriggerReason::Scheduled:
+            return "SCHEDULED";
+        case TriggerReason::LossThreshold:
+            return "LOSS_THRESHOLD";
+        case TriggerReason::ConsecutiveLosses:
+            return "CONSEC_LOSSES";
+        case TriggerReason::WinStreak:
+            return "WIN_STREAK";
+        case TriggerReason::VolatilitySpike:
+            return "VOLATILITY";
+        case TriggerReason::NewsTriggered:
+            return "NEWS";
+        case TriggerReason::ManualRequest:
+            return "MANUAL";
+        case TriggerReason::StartupInit:
+            return "STARTUP";
+        case TriggerReason::RegimeChange:
+            return "REGIME_CHANGE";
+        case TriggerReason::DrawdownAlert:
+            return "DRAWDOWN";
+        default:
+            return "UNKNOWN";
         }
     }
 
     const char* action_name(TunerCommand::Action action) {
         switch (action) {
-            case TunerCommand::Action::NoChange: return "NO_CHANGE";
-            case TunerCommand::Action::UpdateSymbolConfig: return "UPDATE_CONFIG";
-            case TunerCommand::Action::PauseSymbol: return "PAUSE";
-            case TunerCommand::Action::ResumeSymbol: return "RESUME";
-            case TunerCommand::Action::PauseAllTrading: return "PAUSE_ALL";
-            case TunerCommand::Action::ResumeAllTrading: return "RESUME_ALL";
-            case TunerCommand::Action::EmergencyExitSymbol: return "EMERGENCY_EXIT";
-            case TunerCommand::Action::EmergencyExitAll: return "EMERGENCY_EXIT_ALL";
-            default: return "UNKNOWN";
+        case TunerCommand::Action::NoChange:
+            return "NO_CHANGE";
+        case TunerCommand::Action::UpdateSymbolConfig:
+            return "UPDATE_CONFIG";
+        case TunerCommand::Action::PauseSymbol:
+            return "PAUSE";
+        case TunerCommand::Action::ResumeSymbol:
+            return "RESUME";
+        case TunerCommand::Action::PauseAllTrading:
+            return "PAUSE_ALL";
+        case TunerCommand::Action::ResumeAllTrading:
+            return "RESUME_ALL";
+        case TunerCommand::Action::EmergencyExitSymbol:
+            return "EMERGENCY_EXIT";
+        case TunerCommand::Action::EmergencyExitAll:
+            return "EMERGENCY_EXIT_ALL";
+        default:
+            return "UNKNOWN";
         }
     }
 };
@@ -328,10 +349,10 @@ void signal_handler(int) {
 struct TunerArgs {
     bool dry_run = false;
     bool verbose = false;
-    int interval_sec = 300;     // 5 minutes default
-    int loss_threshold = 1;     // Tune after N consecutive losses
-    double loss_pct_trigger = 2.0;  // Tune if symbol loses >N%
-    std::string model;          // Claude model (empty = use default/env)
+    int interval_sec = 300;        // 5 minutes default
+    int loss_threshold = 1;        // Tune after N consecutive losses
+    double loss_pct_trigger = 2.0; // Tune if symbol loses >N%
+    std::string model;             // Claude model (empty = use default/env)
 };
 // TODO: another parse_args method? is there a libary that we can use for this one?
 TunerArgs parse_args(int argc, char* argv[]) {
@@ -386,17 +407,17 @@ struct SymbolPerformance {
     uint64_t last_fill_ns = 0;
     uint64_t last_tuned_ns = 0;
 
-    double win_rate() const {
-        return trades_session > 0 ? (100.0 * wins_session / trades_session) : 0.0;
-    }
+    double win_rate() const { return trades_session > 0 ? (100.0 * wins_session / trades_session) : 0.0; }
 
     bool needs_tuning(int loss_threshold, double loss_pct) const {
         // Tune if consecutive losses exceed threshold
-        if (consecutive_losses >= loss_threshold) return true;
+        if (consecutive_losses >= loss_threshold)
+            return true;
 
         // Tune if session loss exceeds percentage of initial capital
         // (This would need initial capital info, simplified for now)
-        if (pnl_session < -100.0) return true;  // Placeholder
+        if (pnl_session < -100.0)
+            return true; // Placeholder
 
         return false;
     }
@@ -408,10 +429,7 @@ struct SymbolPerformance {
 
 class TunerApp {
 public:
-    explicit TunerApp(const TunerArgs& args)
-        : args_(args)
-        , history_logger_("../logs")
-    {
+    explicit TunerApp(const TunerArgs& args) : args_(args), history_logger_("../logs") {
         // Open shared memory connections
         symbol_configs_ = SharedSymbolConfigs::open_rw("/trader_symbol_configs");
         if (!symbol_configs_) {
@@ -420,16 +438,15 @@ public:
         }
         if (symbol_configs_) {
             symbol_configs_->tuner_connected.store(1);
-            std::cout << "[IPC] Connected to symbol configs (symbols: "
-                      << symbol_configs_->symbol_count.load() << ")\n";
+            std::cout << "[IPC] Connected to symbol configs (symbols: " << symbol_configs_->symbol_count.load()
+                      << ")\n";
         } else {
             std::cerr << "[WARN] Could not connect to symbol configs\n";
         }
 
         event_log_ = SharedEventLog::open_readwrite();
         if (event_log_) {
-            std::cout << "[IPC] Connected to event log (events: "
-                      << event_log_->total_events.load() << ")\n";
+            std::cout << "[IPC] Connected to event log (events: " << event_log_->total_events.load() << ")\n";
         } else {
             std::cerr << "[WARN] Could not connect to event log\n";
         }
@@ -443,8 +460,7 @@ public:
 
         portfolio_state_ = SharedPortfolioState::open("/trader_portfolio");
         if (portfolio_state_) {
-            std::cout << "[IPC] Connected to portfolio state (cash: $"
-                      << std::fixed << std::setprecision(2)
+            std::cout << "[IPC] Connected to portfolio state (cash: $" << std::fixed << std::setprecision(2)
                       << portfolio_state_->cash() << ")\n";
         }
 
@@ -485,17 +501,14 @@ public:
         // Initialize RAG client (auto-start if not available)
         auto rag_health = rag_.health_check();
         if (rag_health.success && rag_health.is_healthy) {
-            std::cout << "[RAG] Connected to RAG service (docs: "
-                      << rag_health.collection_size << ", model: "
-                      << rag_health.model << ")\n";
+            std::cout << "[RAG] Connected to RAG service (docs: " << rag_health.collection_size
+                      << ", model: " << rag_health.model << ")\n";
         } else {
             std::cout << "[RAG] Service not available, attempting auto-start...\n";
 
             // Try to start RAG service in background (using venv)
-            int result = std::system(
-                "cd /mnt/c/Users/orhan/projects/hft/rag_service && "
-                "nohup ./venv/bin/python3 rag_server.py > /tmp/rag_server.log 2>&1 &"
-            );
+            int result = std::system("cd /mnt/c/Users/orhan/projects/hft/rag_service && "
+                                     "nohup ./venv/bin/python3 rag_server.py > /tmp/rag_server.log 2>&1 &");
 
             if (result == 0) {
                 // Wait for service to start (up to 10 seconds)
@@ -506,17 +519,14 @@ public:
                     std::this_thread::sleep_for(std::chrono::milliseconds(RETRY_DELAY_MS));
                     rag_health = rag_.health_check();
                     if (rag_health.success && rag_health.is_healthy) {
-                        std::cout << "[RAG] Auto-started successfully (docs: "
-                                  << rag_health.collection_size << ", model: "
-                                  << rag_health.model << ")\n";
+                        std::cout << "[RAG] Auto-started successfully (docs: " << rag_health.collection_size
+                                  << ", model: " << rag_health.model << ")\n";
                         break;
                     }
-
                 }
 
                 if (!rag_health.success || !rag_health.is_healthy) {
-                    std::cerr << "[WARN] RAG service failed to start after "
-                              << MAX_RETRIES << " attempts\n";
+                    std::cerr << "[WARN] RAG service failed to start after " << MAX_RETRIES << " attempts\n";
                     std::cerr << "[WARN] Check /tmp/rag_server.log for errors\n";
                 }
             } else {
@@ -535,9 +545,8 @@ public:
     }
 
     void run() {
-        std::cout << "[TUNER] Starting AI tuner (interval: "
-                  << args_.interval_sec << "s, dry_run: "
-                  << (args_.dry_run ? "true" : "false") << ")\n";
+        std::cout << "[TUNER] Starting AI tuner (interval: " << args_.interval_sec
+                  << "s, dry_run: " << (args_.dry_run ? "true" : "false") << ")\n";
 
         uint64_t last_scheduled_tune = 0;
         uint64_t last_event_seq = event_log_ ? event_log_->current_position() : 0;
@@ -550,15 +559,13 @@ public:
             if (shared_config_ && shared_config_->should_tune_now()) {
                 trigger = TriggerReason::ManualRequest;
                 shared_config_->clear_manual_tune_request();
-                std::cout << "[" << format_timestamp()
-                          << "] [TUNING] Manual tune request received\n";
+                std::cout << "[" << format_timestamp() << "] [TUNING] Manual tune request received\n";
             }
 
             // Check for scheduled tuning (only if no manual request)
             if (trigger == TriggerReason::None) {
                 // Use shared config interval if available, otherwise command-line arg
-                int32_t interval_sec = shared_config_ ?
-                    shared_config_->get_tuner_interval_sec() : args_.interval_sec;
+                int32_t interval_sec = shared_config_ ? shared_config_->get_tuner_interval_sec() : args_.interval_sec;
                 uint64_t interval_ns = interval_sec * 1'000'000'000ULL;
                 if (now_ns - last_scheduled_tune > interval_ns) {
                     trigger = TriggerReason::Scheduled;
@@ -580,13 +587,11 @@ public:
 
                 if (is_paused && trigger != TriggerReason::ManualRequest) {
                     if (args_.verbose) {
-                        std::cout << "[" << format_timestamp()
-                                  << "] [TUNING] Skipped - Tuner is paused\n";
+                        std::cout << "[" << format_timestamp() << "] [TUNING] Skipped - Tuner is paused\n";
                     }
                 } else if (is_manual_override && trigger != TriggerReason::ManualRequest) {
                     if (args_.verbose) {
-                        std::cout << "[" << format_timestamp()
-                                  << "] [TUNING] Skipped - Manual Override active\n";
+                        std::cout << "[" << format_timestamp() << "] [TUNING] Skipped - Manual Override active\n";
                     }
                 } else {
                     run_tuning(trigger);
@@ -607,24 +612,25 @@ private:
     SharedConfig* shared_config_ = nullptr;
     SharedPortfolioState* portfolio_state_ = nullptr;
     SharedRingBuffer<TradeEvent>* trade_events_ = nullptr;
-    SharedTunerState* tuner_state_ = nullptr;  // Detailed tuner decisions for dashboard
+    SharedTunerState* tuner_state_ = nullptr; // Detailed tuner decisions for dashboard
     ClaudeClient claude_;
     NewsClient news_;
     RagClient rag_;
     TuningHistoryLogger history_logger_;
-    std::atomic<uint32_t> event_seq_{0};  // Sequence number for trade events
+    std::atomic<uint32_t> event_seq_{0}; // Sequence number for trade events
 
     // API failure tracking - tuner enters disconnected mode but strategies continue
     static constexpr int MAX_CONSECUTIVE_API_FAILURES = 3;
     int consecutive_api_failures_ = 0;
-    bool tuner_disconnected_ = false;  // When true, skip AI tuning but strategies run autonomously
+    bool tuner_disconnected_ = false; // When true, skip AI tuning but strategies run autonomously
 
     // Per-symbol performance tracking
     std::array<SymbolPerformance, 32> symbol_perf_{};
 
     // Publish TradeEvent to ring buffer for dashboard visibility
     void publish_trade_event(const char* symbol, StatusCode code, uint8_t confidence) {
-        if (!trade_events_) return;
+        if (!trade_events_)
+            return;
 
         uint64_t now_ns = std::chrono::steady_clock::now().time_since_epoch().count();
         uint32_t seq = event_seq_.fetch_add(1);
@@ -639,58 +645,59 @@ private:
         trade_events_->push(e);
 
         if (args_.verbose) {
-            std::cout << "[EVENT] Published " << TradeEvent::status_code_name(code)
-                      << " for " << symbol << " [" << (int)confidence << "% conf]\n";
+            std::cout << "[EVENT] Published " << TradeEvent::status_code_name(code) << " for " << symbol << " ["
+                      << (int)confidence << "% conf]\n";
         }
     }
 
     void process_events(uint64_t since_seq, TriggerReason& trigger) {
         uint64_t current = event_log_->current_position();
-        if (since_seq >= current) return;
+        if (since_seq >= current)
+            return;
 
         for (uint64_t seq = since_seq; seq < current; ++seq) {
             const TunerEvent* e = event_log_->get_event(seq);
-            if (!e) continue;
+            if (!e)
+                continue;
 
             // Find or create symbol performance entry
             SymbolPerformance* perf = find_or_create_perf(e->symbol);
-            if (!perf) continue;
+            if (!perf)
+                continue;
 
             switch (e->type) {
-                case TunerEventType::Fill:
-                    perf->trades_session++;
-                    if (e->payload.trade.pnl_x100 >= 0) {
-                        perf->wins_session++;
-                        perf->consecutive_wins++;
-                        perf->consecutive_losses = 0;
-                    } else {
-                        perf->consecutive_losses++;
-                        perf->consecutive_wins = 0;
+            case TunerEventType::Fill:
+                perf->trades_session++;
+                if (e->payload.trade.pnl_x100 >= 0) {
+                    perf->wins_session++;
+                    perf->consecutive_wins++;
+                    perf->consecutive_losses = 0;
+                } else {
+                    perf->consecutive_losses++;
+                    perf->consecutive_wins = 0;
 
-                        // Check if we should trigger tuning
-                        if (perf->consecutive_losses >= args_.loss_threshold) {
-                            trigger = TriggerReason::ConsecutiveLosses;
-                            if (args_.verbose) {
-                                std::cout << "[TRIGGER] " << e->symbol
-                                          << " hit " << perf->consecutive_losses
-                                          << " consecutive losses\n";
-                            }
+                    // Check if we should trigger tuning
+                    if (perf->consecutive_losses >= args_.loss_threshold) {
+                        trigger = TriggerReason::ConsecutiveLosses;
+                        if (args_.verbose) {
+                            std::cout << "[TRIGGER] " << e->symbol << " hit " << perf->consecutive_losses
+                                      << " consecutive losses\n";
                         }
                     }
-                    perf->pnl_session += e->payload.trade.pnl_x100 / 100.0;
-                    perf->last_fill_ns = e->timestamp_ns;
-                    break;
+                }
+                perf->pnl_session += e->payload.trade.pnl_x100 / 100.0;
+                perf->last_fill_ns = e->timestamp_ns;
+                break;
 
-                case TunerEventType::RegimeChange:
-                    perf->current_regime = e->payload.regime.new_regime;
-                    if (args_.verbose) {
-                        std::cout << "[REGIME] " << e->symbol
-                                  << " changed to regime " << (int)perf->current_regime << "\n";
-                    }
-                    break;
+            case TunerEventType::RegimeChange:
+                perf->current_regime = e->payload.regime.new_regime;
+                if (args_.verbose) {
+                    std::cout << "[REGIME] " << e->symbol << " changed to regime " << (int)perf->current_regime << "\n";
+                }
+                break;
 
-                default:
-                    break;
+            default:
+                break;
             }
         }
     }
@@ -747,8 +754,10 @@ private:
                             data.has_snapshot = (snap.tick_count.load() > 0);
 
                             // Update EMA and ATR from snapshot if available
-                            if (data.snapshot.ema_20 > 0) data.ema_20 = data.snapshot.ema_20;
-                            if (data.snapshot.atr_14 > 0) data.atr_14 = data.snapshot.atr_14;
+                            if (data.snapshot.ema_20 > 0)
+                                data.ema_20 = data.snapshot.ema_20;
+                            if (data.snapshot.atr_14 > 0)
+                                data.atr_14 = data.snapshot.atr_14;
                             break;
                         }
                     }
@@ -759,10 +768,8 @@ private:
         }
 
         // Get portfolio state
-        double portfolio_pnl = portfolio_state_ ?
-            portfolio_state_->total_realized_pnl() : 0.0;
-        double portfolio_cash = portfolio_state_ ?
-            portfolio_state_->cash() : 10000.0;
+        double portfolio_pnl = portfolio_state_ ? portfolio_state_->total_realized_pnl() : 0.0;
+        double portfolio_cash = portfolio_state_ ? portfolio_state_->cash() : 10000.0;
 
         // Build cost metrics for AI analysis (CRITICAL for profitability)
         CostMetrics cost_metrics;
@@ -782,18 +789,16 @@ private:
 
             // P&L metrics
             cost_metrics.gross_pnl = portfolio_state_->gross_pnl();
-            cost_metrics.net_pnl = portfolio_state_->total_realized_pnl() +
-                                   portfolio_state_->total_unrealized_pnl();
+            cost_metrics.net_pnl = portfolio_state_->total_realized_pnl() + portfolio_state_->total_unrealized_pnl();
 
             // Win rate
             uint32_t wins = portfolio_state_->winning_trades.load();
             uint32_t losses = portfolio_state_->losing_trades.load();
-            cost_metrics.win_rate = (wins + losses) > 0 ?
-                (100.0 * wins / (wins + losses)) : 0.0;
+            cost_metrics.win_rate = (wins + losses) > 0 ? (100.0 * wins / (wins + losses)) : 0.0;
 
             // Profit factor (simplified: targets vs stops)
-            cost_metrics.profit_factor = cost_metrics.total_stops > 0 ?
-                (double)cost_metrics.total_targets / cost_metrics.total_stops : 0.0;
+            cost_metrics.profit_factor =
+                cost_metrics.total_stops > 0 ? (double)cost_metrics.total_targets / cost_metrics.total_stops : 0.0;
 
             // Trading frequency
             uint64_t start_ns = portfolio_state_->start_time_ns.load();
@@ -803,17 +808,16 @@ private:
             // Avoid division by zero
             if (cost_metrics.session_duration_sec > 0) {
                 double hours = cost_metrics.session_duration_sec / 3600.0;
-                cost_metrics.trades_per_hour = hours > 0 ?
-                    cost_metrics.total_fills / hours : 0.0;
+                cost_metrics.trades_per_hour = hours > 0 ? cost_metrics.total_fills / hours : 0.0;
             } else {
                 cost_metrics.trades_per_hour = 0.0;
             }
 
             // Expected vs Observed cost analysis (CRITICAL for tuner decisions)
             // Configured values from defaults.hpp
-            cost_metrics.configured_slippage_bps = 5.0;     // hft::config::costs::SLIPPAGE_BPS
-            cost_metrics.configured_commission_bps = 10.0;  // 0.1% = 10 bps
-            cost_metrics.expected_round_trip_pct = 0.3;     // hft::config::costs::ROUND_TRIP_PCT * 100
+            cost_metrics.configured_slippage_bps = 5.0;    // hft::config::costs::SLIPPAGE_BPS
+            cost_metrics.configured_commission_bps = 10.0; // 0.1% = 10 bps
+            cost_metrics.expected_round_trip_pct = 0.3;    // hft::config::costs::ROUND_TRIP_PCT * 100
 
             // Calculate observed values from actual trading
             if (cost_metrics.total_fills > 0 && cost_metrics.avg_trade_value > 0) {
@@ -837,10 +841,10 @@ private:
 
             if (args_.verbose && has_cost_data) {
                 std::cout << "[" << format_timestamp() << "] [COST] "
-                          << "Fills: " << cost_metrics.total_fills
-                          << ", Costs: $" << std::fixed << std::setprecision(2) << cost_metrics.total_costs
-                          << ", Trades/hr: " << std::setprecision(1) << cost_metrics.trades_per_hour
-                          << ", Win%: " << std::setprecision(1) << cost_metrics.win_rate << "%\n";
+                          << "Fills: " << cost_metrics.total_fills << ", Costs: $" << std::fixed << std::setprecision(2)
+                          << cost_metrics.total_costs << ", Trades/hr: " << std::setprecision(1)
+                          << cost_metrics.trades_per_hour << ", Win%: " << std::setprecision(1) << cost_metrics.win_rate
+                          << "%\n";
             }
         }
 
@@ -861,8 +865,7 @@ private:
                     primary_symbol = s.symbol;
                     primary_regime = regime_name(s.current_regime);
                 }
-                double wr = s.trades_session > 0 ?
-                    (100.0 * s.wins_session / s.trades_session) : 100.0;
+                double wr = s.trades_session > 0 ? (100.0 * s.wins_session / s.trades_session) : 100.0;
                 if (wr < min_winrate) {
                     min_winrate = wr;
                 }
@@ -873,21 +876,16 @@ private:
                 uint32_t count = symbol_configs_->symbol_count.load();
                 if (count > 0) {
                     primary_symbol = symbol_configs_->symbols[0].symbol;
-                    std::cout << "[" << format_timestamp() << "] [RAG] Using config symbol: "
-                              << primary_symbol << " (no trades yet)\n";
+                    std::cout << "[" << format_timestamp() << "] [RAG] Using config symbol: " << primary_symbol
+                              << " (no trades yet)\n";
                 }
             }
 
             if (!primary_symbol.empty()) {
-                rag_context = rag_.build_tuner_context(
-                    primary_symbol,
-                    primary_regime,
-                    max_losses,
-                    min_winrate
-                );
+                rag_context = rag_.build_tuner_context(primary_symbol, primary_regime, max_losses, min_winrate);
                 if (!rag_context.empty()) {
-                    std::cout << "[" << format_timestamp() << "] [RAG] Retrieved "
-                              << rag_context.size() << " bytes of context\n";
+                    std::cout << "[" << format_timestamp() << "] [RAG] Retrieved " << rag_context.size()
+                              << " bytes of context\n";
                 }
             }
         }
@@ -898,18 +896,16 @@ private:
             auto news = news_.fetch_all();
             if (news.success) {
                 news_context = news.summary_for_prompt(5);
-                std::cout << "[" << format_timestamp() << "] [NEWS] Fetched "
-                          << news.items.size() << " news items\n";
+                std::cout << "[" << format_timestamp() << "] [NEWS] Fetched " << news.items.size() << " news items\n";
 
                 // Check for news-triggered tuning
                 for (const auto& item : news.items) {
                     if (item.is_recent(300) && item.importance >= 80) {
                         // High-impact recent news
-                        if (trigger == TriggerReason::None ||
-                            trigger == TriggerReason::Scheduled) {
+                        if (trigger == TriggerReason::None || trigger == TriggerReason::Scheduled) {
                             trigger = TriggerReason::NewsTriggered;
-                            std::cout << "[" << format_timestamp() << "] [NEWS] High-impact news: "
-                                      << item.title << "\n";
+                            std::cout << "[" << format_timestamp() << "] [NEWS] High-impact news: " << item.title
+                                      << "\n";
                         }
                     }
                 }
@@ -927,25 +923,22 @@ private:
         }
 
         // Request tuning from Claude (with cost analysis if available)
-        std::cout << "[" << format_timestamp() << "] [API] Calling Claude ("
-                  << claude_.model() << ")";
+        std::cout << "[" << format_timestamp() << "] [API] Calling Claude (" << claude_.model() << ")";
         if (has_cost_data) {
-            std::cout << " [with cost data: " << cost_metrics.total_fills << " fills, $"
-                      << std::fixed << std::setprecision(2) << cost_metrics.total_costs << " costs]";
+            std::cout << " [with cost data: " << cost_metrics.total_fills << " fills, $" << std::fixed
+                      << std::setprecision(2) << cost_metrics.total_costs << " costs]";
         }
         std::cout << "...\n";
         std::cout.flush();
 
         auto api_start = std::chrono::steady_clock::now();
-        ClaudeResponse response = claude_.request_tuning(
-            symbols, portfolio_pnl, portfolio_cash, trigger, combined_context,
-            has_cost_data ? &cost_metrics : nullptr);
+        ClaudeResponse response = claude_.request_tuning(symbols, portfolio_pnl, portfolio_cash, trigger,
+                                                         combined_context, has_cost_data ? &cost_metrics : nullptr);
         auto api_end = std::chrono::steady_clock::now();
 
         // Calculate latency if not set
         if (response.latency_ms == 0) {
-            response.latency_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                api_end - api_start).count();
+            response.latency_ms = std::chrono::duration_cast<std::chrono::milliseconds>(api_end - api_start).count();
         }
 
         // Handle error case
@@ -968,26 +961,22 @@ private:
                     error_code = ERROR_API_TIMEOUT;
                 }
 
-                auto error_event = TunerEvent::make_error(
-                    "claude_client",
-                    error_code,
-                    true,  // recoverable (API errors are recoverable)
-                    response.error.c_str()
-                );
+                auto error_event = TunerEvent::make_error("claude_client", error_code,
+                                                          true, // recoverable (API errors are recoverable)
+                                                          response.error.c_str());
                 event_log_->log(error_event);
             }
 
             // Still count this as a tuning attempt (even though it failed)
             if (symbol_configs_) {
                 symbol_configs_->tune_count.fetch_add(1);
-                symbol_configs_->last_tune_ns.store(
-                    std::chrono::steady_clock::now().time_since_epoch().count());
+                symbol_configs_->last_tune_ns.store(std::chrono::steady_clock::now().time_since_epoch().count());
             }
 
             // Track consecutive failures - tuner enters degraded mode
             consecutive_api_failures_++;
-            std::cerr << "[WARN] API call failed (" << consecutive_api_failures_
-                      << "/" << MAX_CONSECUTIVE_API_FAILURES << "): " << response.error << "\n";
+            std::cerr << "[WARN] API call failed (" << consecutive_api_failures_ << "/" << MAX_CONSECUTIVE_API_FAILURES
+                      << "): " << response.error << "\n";
 
             // Enter disconnected mode - tuner stops making decisions but strategies continue
             if (consecutive_api_failures_ >= MAX_CONSECUTIVE_API_FAILURES && !tuner_disconnected_) {
@@ -995,7 +984,8 @@ private:
                 std::cerr << "╔══════════════════════════════════════════════════════════════════════════════╗\n";
                 std::cerr << "║ ⚠️  TUNER DISCONNECTED - ENTERING AUTONOMOUS MODE                             ║\n";
                 std::cerr << "╠══════════════════════════════════════════════════════════════════════════════╣\n";
-                std::cerr << "║ The tuner has failed to connect to Claude API " << MAX_CONSECUTIVE_API_FAILURES << " consecutive times.          ║\n";
+                std::cerr << "║ The tuner has failed to connect to Claude API " << MAX_CONSECUTIVE_API_FAILURES
+                          << " consecutive times.          ║\n";
                 std::cerr << "║                                                                              ║\n";
                 std::cerr << "║ Strategies will CONTINUE running with current parameters.                    ║\n";
                 std::cerr << "║ Tuner will SKIP AI-driven parameter adjustments until reconnected.           ║\n";
@@ -1010,12 +1000,9 @@ private:
                 // Log critical error to shared memory via TunerEvent
                 if (event_log_) {
                     static constexpr int32_t ERROR_API_FAILED = 1002;
-                    auto error_event = TunerEvent::make_error(
-                        "tuner_app",
-                        ERROR_API_FAILED,
-                        false,  // not recoverable without intervention
-                        "Tuner disconnected after consecutive API failures"
-                    );
+                    auto error_event = TunerEvent::make_error("tuner_app", ERROR_API_FAILED,
+                                                              false, // not recoverable without intervention
+                                                              "Tuner disconnected after consecutive API failures");
                     event_log_->log(error_event);
                 }
             }
@@ -1061,10 +1048,8 @@ private:
 
         // Log tuning event to shared memory
         if (event_log_) {
-            TunerEvent e = TunerEvent::make_ai_decision(
-                cmd.confidence, cmd.urgency,
-                static_cast<uint8_t>(cmd.action), response.latency_ms,
-                cmd.reason);
+            TunerEvent e = TunerEvent::make_ai_decision(cmd.confidence, cmd.urgency, static_cast<uint8_t>(cmd.action),
+                                                        response.latency_ms, cmd.reason);
             e.trigger = trigger;
             e.payload.ai.tokens_input = response.input_tokens;
             e.payload.ai.tokens_output = response.output_tokens;
@@ -1082,279 +1067,284 @@ private:
         // This tracks ALL tuning attempts, not just applied changes
         if (symbol_configs_) {
             symbol_configs_->tune_count.fetch_add(1);
-            symbol_configs_->last_tune_ns.store(
-                std::chrono::steady_clock::now().time_since_epoch().count());
+            symbol_configs_->last_tune_ns.store(std::chrono::steady_clock::now().time_since_epoch().count());
         }
     }
 
     const char* action_name(TunerCommand::Action action) {
         switch (action) {
-            case TunerCommand::Action::NoChange: return "NO_CHANGE";
-            case TunerCommand::Action::UpdateSymbolConfig: return "UPDATE_CONFIG";
-            case TunerCommand::Action::PauseSymbol: return "PAUSE";
-            case TunerCommand::Action::ResumeSymbol: return "RESUME";
-            case TunerCommand::Action::PauseAllTrading: return "PAUSE_ALL";
-            case TunerCommand::Action::ResumeAllTrading: return "RESUME_ALL";
-            case TunerCommand::Action::EmergencyExitSymbol: return "EMERGENCY_EXIT";
-            case TunerCommand::Action::EmergencyExitAll: return "EMERGENCY_EXIT_ALL";
-            default: return "UNKNOWN";
+        case TunerCommand::Action::NoChange:
+            return "NO_CHANGE";
+        case TunerCommand::Action::UpdateSymbolConfig:
+            return "UPDATE_CONFIG";
+        case TunerCommand::Action::PauseSymbol:
+            return "PAUSE";
+        case TunerCommand::Action::ResumeSymbol:
+            return "RESUME";
+        case TunerCommand::Action::PauseAllTrading:
+            return "PAUSE_ALL";
+        case TunerCommand::Action::ResumeAllTrading:
+            return "RESUME_ALL";
+        case TunerCommand::Action::EmergencyExitSymbol:
+            return "EMERGENCY_EXIT";
+        case TunerCommand::Action::EmergencyExitAll:
+            return "EMERGENCY_EXIT_ALL";
+        default:
+            return "UNKNOWN";
         }
     }
 
     void apply_command(const TunerCommand& cmd) {
-        if (!symbol_configs_) return;
+        if (!symbol_configs_)
+            return;
 
         switch (cmd.action) {
-            case TunerCommand::Action::UpdateSymbolConfig: {
-                // Capture old config BEFORE update for change tracking
-                SymbolTuningConfig old_config{};
-                const auto* existing = symbol_configs_->find(cmd.symbol);
-                if (existing) {
-                    old_config = *existing;
-                } else {
-                    old_config.init(cmd.symbol);
-                }
-
-                if (symbol_configs_->update(cmd.symbol, cmd.config)) {
-                    std::cout << "[APPLY] Updated symbol config for " << cmd.symbol << "\n";
-
-                    // Write detailed decision to SharedTunerState
-                    if (tuner_state_) {
-                        auto* decision = tuner_state_->write_next();
-                        decision->set_symbol(cmd.symbol);
-                        decision->set_reason(cmd.reason);
-                        decision->confidence = cmd.confidence;
-                        decision->urgency = cmd.urgency;
-                        decision->action = static_cast<uint8_t>(cmd.action);
-
-                        // Track parameter changes (compare old vs new)
-                        if (old_config.cooldown_ms != cmd.config.cooldown_ms) {
-                            decision->add_change(TunerParam::Cooldown,
-                                static_cast<float>(old_config.cooldown_ms),
-                                static_cast<float>(cmd.config.cooldown_ms));
-                        }
-                        if (old_config.target_pct_x100 != cmd.config.target_pct_x100) {
-                            decision->add_change(TunerParam::TargetPct,
-                                old_config.target_pct_x100 / 100.0f,
-                                cmd.config.target_pct_x100 / 100.0f);
-                        }
-                        if (old_config.stop_pct_x100 != cmd.config.stop_pct_x100) {
-                            decision->add_change(TunerParam::StopLossPct,
-                                old_config.stop_pct_x100 / 100.0f,
-                                cmd.config.stop_pct_x100 / 100.0f);
-                        }
-                        if (old_config.ema_dev_trending_x100 != cmd.config.ema_dev_trending_x100) {
-                            decision->add_change(TunerParam::EmaDevTrend,
-                                old_config.ema_dev_trending_x100 / 100.0f,
-                                cmd.config.ema_dev_trending_x100 / 100.0f);
-                        }
-                        if (old_config.ema_dev_ranging_x100 != cmd.config.ema_dev_ranging_x100) {
-                            decision->add_change(TunerParam::EmaDevRange,
-                                old_config.ema_dev_ranging_x100 / 100.0f,
-                                cmd.config.ema_dev_ranging_x100 / 100.0f);
-                        }
-                        if (old_config.base_position_x100 != cmd.config.base_position_x100) {
-                            decision->add_change(TunerParam::BasePosition,
-                                old_config.base_position_x100 / 100.0f,
-                                cmd.config.base_position_x100 / 100.0f);
-                        }
-
-                        // Accumulation parameter changes
-                        if (old_config.accum_floor_trending_x100 != cmd.config.accum_floor_trending_x100) {
-                            decision->add_change(TunerParam::AccumFloorTrend,
-                                old_config.accum_floor_trending_x100 / 100.0f,
-                                cmd.config.accum_floor_trending_x100 / 100.0f);
-                        }
-                        if (old_config.accum_floor_ranging_x100 != cmd.config.accum_floor_ranging_x100) {
-                            decision->add_change(TunerParam::AccumFloorRange,
-                                old_config.accum_floor_ranging_x100 / 100.0f,
-                                cmd.config.accum_floor_ranging_x100 / 100.0f);
-                        }
-                        if (old_config.accum_floor_highvol_x100 != cmd.config.accum_floor_highvol_x100) {
-                            decision->add_change(TunerParam::AccumFloorHvol,
-                                old_config.accum_floor_highvol_x100 / 100.0f,
-                                cmd.config.accum_floor_highvol_x100 / 100.0f);
-                        }
-                        if (old_config.accum_boost_per_win_x100 != cmd.config.accum_boost_per_win_x100) {
-                            decision->add_change(TunerParam::AccumBoostWin,
-                                old_config.accum_boost_per_win_x100 / 100.0f,
-                                cmd.config.accum_boost_per_win_x100 / 100.0f);
-                        }
-                        if (old_config.accum_penalty_per_loss_x100 != cmd.config.accum_penalty_per_loss_x100) {
-                            decision->add_change(TunerParam::AccumPenaltyLoss,
-                                old_config.accum_penalty_per_loss_x100 / 100.0f,
-                                cmd.config.accum_penalty_per_loss_x100 / 100.0f);
-                        }
-                        if (old_config.accum_signal_boost_x100 != cmd.config.accum_signal_boost_x100) {
-                            decision->add_change(TunerParam::AccumSignalBoost,
-                                old_config.accum_signal_boost_x100 / 100.0f,
-                                cmd.config.accum_signal_boost_x100 / 100.0f);
-                        }
-                        if (old_config.accum_max_x100 != cmd.config.accum_max_x100) {
-                            decision->add_change(TunerParam::AccumMax,
-                                old_config.accum_max_x100 / 100.0f,
-                                cmd.config.accum_max_x100 / 100.0f);
-                        }
-
-                        tuner_state_->commit_write();
-
-                        if (args_.verbose) {
-                            std::cout << "[TUNER_STATE] Wrote decision #"
-                                      << tuner_state_->total_decisions.load()
-                                      << " with " << (int)decision->num_changes << " changes\n";
-                        }
-                    }
-
-                    // Also sync to global shared_config_ so HFT uses these values
-                    if (shared_config_) {
-                        // EMA deviation thresholds
-                        // Scale conversions: SymbolTuningConfig x100 -> SharedConfig (percentage * 10)
-                        // x100=80 means 0.8% -> store as 8 (0.8 * 10)
-                        shared_config_->ema_dev_trending_x1000.store(cmd.config.ema_dev_trending_x100 / 10);
-                        shared_config_->ema_dev_ranging_x1000.store(cmd.config.ema_dev_ranging_x100 / 10);
-                        shared_config_->ema_dev_highvol_x1000.store(cmd.config.ema_dev_highvol_x100 / 10);
-
-                        // Position sizing
-                        shared_config_->base_position_pct_x100.store(cmd.config.base_position_x100);
-                        shared_config_->max_position_pct_x100.store(cmd.config.max_position_x100);
-
-                        // Trade filtering
-                        shared_config_->cooldown_ms.store(cmd.config.cooldown_ms);
-                        shared_config_->signal_strength.store(cmd.config.signal_strength);
-
-                        // Profit targets
-                        shared_config_->target_pct_x100.store(cmd.config.target_pct_x100);
-                        shared_config_->stop_pct_x100.store(cmd.config.stop_pct_x100);
-                        shared_config_->pullback_pct_x100.store(cmd.config.pullback_pct_x100);
-
-                        // Order execution preferences
-                        shared_config_->order_type_default.store(cmd.config.order_type_preference);
-                        shared_config_->limit_offset_bps_x100.store(cmd.config.limit_offset_bps_x100);
-                        shared_config_->limit_timeout_ms.store(cmd.config.limit_timeout_ms);
-
-                        shared_config_->sequence.fetch_add(1);
-
-                        // Order type names for logging
-                        const char* order_type_names[] = {"Auto", "MarketOnly", "LimitOnly", "Adaptive"};
-                        uint8_t ot = cmd.config.order_type_preference;
-                        const char* order_type_name = (ot < 4) ? order_type_names[ot] : "Auto";
-
-                        std::cout << "[APPLY] Synced ALL params to global config (seq: "
-                                  << shared_config_->sequence.load() << ")\n";
-                        std::cout << "        EMA: trend=" << (cmd.config.ema_dev_trending_x100 / 100.0)
-                                  << "%, range=" << (cmd.config.ema_dev_ranging_x100 / 100.0)
-                                  << "%, hvol=" << (cmd.config.ema_dev_highvol_x100 / 100.0) << "%\n";
-                        std::cout << "        Pos: base=" << (cmd.config.base_position_x100 / 100.0)
-                                  << "%, max=" << (cmd.config.max_position_x100 / 100.0) << "%\n";
-                        std::cout << "        T/S: target=" << (cmd.config.target_pct_x100 / 100.0)
-                                  << "%, stop=" << (cmd.config.stop_pct_x100 / 100.0)
-                                  << "%, pullback=" << (cmd.config.pullback_pct_x100 / 100.0) << "%\n";
-                        std::cout << "        Order: type=" << order_type_name
-                                  << ", offset=" << (cmd.config.limit_offset_bps_x100 / 100.0) << "bps"
-                                  << ", timeout=" << cmd.config.limit_timeout_ms << "ms\n";
-                    }
-
-                    // Log config change event (to SharedEventLog for tuner stats)
-                    if (event_log_) {
-                        TunerEvent e;
-                        e.init(TunerEventType::ConfigChange, cmd.symbol);
-                        e.payload.config.ai_confidence = cmd.confidence;
-                        e.set_reason(cmd.reason);
-                        event_log_->log(e);
-                    }
-
-                    // Publish to TradeEvent ring buffer (for dashboard visibility)
-                    publish_trade_event(cmd.symbol, StatusCode::TunerConfigUpdate, cmd.confidence);
-                }
-                break;
+        case TunerCommand::Action::UpdateSymbolConfig: {
+            // Capture old config BEFORE update for change tracking
+            SymbolTuningConfig old_config{};
+            const auto* existing = symbol_configs_->find(cmd.symbol);
+            if (existing) {
+                old_config = *existing;
+            } else {
+                old_config.init(cmd.symbol);
             }
 
-            case TunerCommand::Action::PauseSymbol: {
-                auto* cfg = symbol_configs_->get_or_create(cmd.symbol);
-                if (cfg) {
-                    cfg->enabled = 0;
-                    symbol_configs_->sequence.fetch_add(1);
-                    std::cout << "[APPLY] Paused trading for " << cmd.symbol << "\n";
+            if (symbol_configs_->update(cmd.symbol, cmd.config)) {
+                std::cout << "[APPLY] Updated symbol config for " << cmd.symbol << "\n";
 
-                    // Write to SharedTunerState
-                    if (tuner_state_) {
-                        auto* decision = tuner_state_->write_next();
-                        decision->set_symbol(cmd.symbol);
-                        decision->set_reason(cmd.reason);
-                        decision->confidence = cmd.confidence;
-                        decision->urgency = cmd.urgency;
-                        decision->action = static_cast<uint8_t>(cmd.action);
-                        decision->add_change(TunerParam::Enabled, 1.0f, 0.0f);
-                        tuner_state_->commit_write();
+                // Write detailed decision to SharedTunerState
+                if (tuner_state_) {
+                    auto* decision = tuner_state_->write_next();
+                    decision->set_symbol(cmd.symbol);
+                    decision->set_reason(cmd.reason);
+                    decision->confidence = cmd.confidence;
+                    decision->urgency = cmd.urgency;
+                    decision->action = static_cast<uint8_t>(cmd.action);
+
+                    // Track parameter changes (compare old vs new)
+                    if (old_config.cooldown_ms != cmd.config.cooldown_ms) {
+                        decision->add_change(TunerParam::Cooldown, static_cast<float>(old_config.cooldown_ms),
+                                             static_cast<float>(cmd.config.cooldown_ms));
+                    }
+                    if (old_config.target_pct_x100 != cmd.config.target_pct_x100) {
+                        decision->add_change(TunerParam::TargetPct, old_config.target_pct_x100 / 100.0f,
+                                             cmd.config.target_pct_x100 / 100.0f);
+                    }
+                    if (old_config.stop_pct_x100 != cmd.config.stop_pct_x100) {
+                        decision->add_change(TunerParam::StopLossPct, old_config.stop_pct_x100 / 100.0f,
+                                             cmd.config.stop_pct_x100 / 100.0f);
+                    }
+                    if (old_config.ema_dev_trending_x100 != cmd.config.ema_dev_trending_x100) {
+                        decision->add_change(TunerParam::EmaDevTrend, old_config.ema_dev_trending_x100 / 100.0f,
+                                             cmd.config.ema_dev_trending_x100 / 100.0f);
+                    }
+                    if (old_config.ema_dev_ranging_x100 != cmd.config.ema_dev_ranging_x100) {
+                        decision->add_change(TunerParam::EmaDevRange, old_config.ema_dev_ranging_x100 / 100.0f,
+                                             cmd.config.ema_dev_ranging_x100 / 100.0f);
+                    }
+                    if (old_config.base_position_x100 != cmd.config.base_position_x100) {
+                        decision->add_change(TunerParam::BasePosition, old_config.base_position_x100 / 100.0f,
+                                             cmd.config.base_position_x100 / 100.0f);
                     }
 
-                    if (event_log_) {
-                        TunerEvent e;
-                        e.init(TunerEventType::PauseSymbol, cmd.symbol);
-                        e.set_reason(cmd.reason);
-                        event_log_->log(e);
+                    // Accumulation parameter changes
+                    if (old_config.accum_floor_trending_x100 != cmd.config.accum_floor_trending_x100) {
+                        decision->add_change(TunerParam::AccumFloorTrend, old_config.accum_floor_trending_x100 / 100.0f,
+                                             cmd.config.accum_floor_trending_x100 / 100.0f);
+                    }
+                    if (old_config.accum_floor_ranging_x100 != cmd.config.accum_floor_ranging_x100) {
+                        decision->add_change(TunerParam::AccumFloorRange, old_config.accum_floor_ranging_x100 / 100.0f,
+                                             cmd.config.accum_floor_ranging_x100 / 100.0f);
+                    }
+                    if (old_config.accum_floor_highvol_x100 != cmd.config.accum_floor_highvol_x100) {
+                        decision->add_change(TunerParam::AccumFloorHvol, old_config.accum_floor_highvol_x100 / 100.0f,
+                                             cmd.config.accum_floor_highvol_x100 / 100.0f);
+                    }
+                    if (old_config.accum_boost_per_win_x100 != cmd.config.accum_boost_per_win_x100) {
+                        decision->add_change(TunerParam::AccumBoostWin, old_config.accum_boost_per_win_x100 / 100.0f,
+                                             cmd.config.accum_boost_per_win_x100 / 100.0f);
+                    }
+                    if (old_config.accum_penalty_per_loss_x100 != cmd.config.accum_penalty_per_loss_x100) {
+                        decision->add_change(TunerParam::AccumPenaltyLoss,
+                                             old_config.accum_penalty_per_loss_x100 / 100.0f,
+                                             cmd.config.accum_penalty_per_loss_x100 / 100.0f);
+                    }
+                    if (old_config.accum_signal_boost_x100 != cmd.config.accum_signal_boost_x100) {
+                        decision->add_change(TunerParam::AccumSignalBoost, old_config.accum_signal_boost_x100 / 100.0f,
+                                             cmd.config.accum_signal_boost_x100 / 100.0f);
+                    }
+                    if (old_config.accum_max_x100 != cmd.config.accum_max_x100) {
+                        decision->add_change(TunerParam::AccumMax, old_config.accum_max_x100 / 100.0f,
+                                             cmd.config.accum_max_x100 / 100.0f);
                     }
 
-                    // Publish to dashboard
-                    publish_trade_event(cmd.symbol, StatusCode::TunerPauseSymbol, cmd.confidence);
+                    tuner_state_->commit_write();
+
+                    if (args_.verbose) {
+                        std::cout << "[TUNER_STATE] Wrote decision #" << tuner_state_->total_decisions.load()
+                                  << " with " << (int)decision->num_changes << " changes\n";
+                    }
                 }
-                break;
-            }
 
-            case TunerCommand::Action::ResumeSymbol: {
-                auto* cfg = symbol_configs_->get_or_create(cmd.symbol);
-                if (cfg) {
-                    cfg->enabled = 1;
-                    symbol_configs_->sequence.fetch_add(1);
-                    std::cout << "[APPLY] Resumed trading for " << cmd.symbol << "\n";
+                // Also sync to global shared_config_ so HFT uses these values
+                if (shared_config_) {
+                    // EMA deviation thresholds
+                    // Scale conversions: SymbolTuningConfig x100 -> SharedConfig (percentage * 10)
+                    // x100=80 means 0.8% -> store as 8 (0.8 * 10)
+                    shared_config_->ema_dev_trending_x1000.store(cmd.config.ema_dev_trending_x100 / 10);
+                    shared_config_->ema_dev_ranging_x1000.store(cmd.config.ema_dev_ranging_x100 / 10);
+                    shared_config_->ema_dev_highvol_x1000.store(cmd.config.ema_dev_highvol_x100 / 10);
 
-                    // Write to SharedTunerState
-                    if (tuner_state_) {
-                        auto* decision = tuner_state_->write_next();
-                        decision->set_symbol(cmd.symbol);
-                        decision->set_reason(cmd.reason);
-                        decision->confidence = cmd.confidence;
-                        decision->urgency = cmd.urgency;
-                        decision->action = static_cast<uint8_t>(cmd.action);
-                        decision->add_change(TunerParam::Enabled, 0.0f, 1.0f);
-                        tuner_state_->commit_write();
-                    }
+                    // Position sizing
+                    shared_config_->base_position_pct_x100.store(cmd.config.base_position_x100);
+                    shared_config_->max_position_pct_x100.store(cmd.config.max_position_x100);
 
-                    if (event_log_) {
-                        TunerEvent e;
-                        e.init(TunerEventType::ResumeSymbol, cmd.symbol);
-                        e.set_reason(cmd.reason);
-                        event_log_->log(e);
-                    }
+                    // Trade filtering
+                    shared_config_->cooldown_ms.store(cmd.config.cooldown_ms);
+                    shared_config_->signal_strength.store(cmd.config.signal_strength);
 
-                    // Publish to dashboard
-                    publish_trade_event(cmd.symbol, StatusCode::TunerResumeSymbol, cmd.confidence);
+                    // Profit targets
+                    shared_config_->target_pct_x100.store(cmd.config.target_pct_x100);
+                    shared_config_->stop_pct_x100.store(cmd.config.stop_pct_x100);
+                    shared_config_->pullback_pct_x100.store(cmd.config.pullback_pct_x100);
+
+                    // Order execution preferences
+                    shared_config_->order_type_default.store(cmd.config.order_type_preference);
+                    shared_config_->limit_offset_bps_x100.store(cmd.config.limit_offset_bps_x100);
+                    shared_config_->limit_timeout_ms.store(cmd.config.limit_timeout_ms);
+
+                    shared_config_->sequence.fetch_add(1);
+
+                    // Order type names for logging
+                    const char* order_type_names[] = {"Auto", "MarketOnly", "LimitOnly", "Adaptive"};
+                    uint8_t ot = cmd.config.order_type_preference;
+                    const char* order_type_name = (ot < 4) ? order_type_names[ot] : "Auto";
+
+                    std::cout << "[APPLY] Synced ALL params to global config (seq: " << shared_config_->sequence.load()
+                              << ")\n";
+                    std::cout << "        EMA: trend=" << (cmd.config.ema_dev_trending_x100 / 100.0)
+                              << "%, range=" << (cmd.config.ema_dev_ranging_x100 / 100.0)
+                              << "%, hvol=" << (cmd.config.ema_dev_highvol_x100 / 100.0) << "%\n";
+                    std::cout << "        Pos: base=" << (cmd.config.base_position_x100 / 100.0)
+                              << "%, max=" << (cmd.config.max_position_x100 / 100.0) << "%\n";
+                    std::cout << "        T/S: target=" << (cmd.config.target_pct_x100 / 100.0)
+                              << "%, stop=" << (cmd.config.stop_pct_x100 / 100.0)
+                              << "%, pullback=" << (cmd.config.pullback_pct_x100 / 100.0) << "%\n";
+                    std::cout << "        Order: type=" << order_type_name
+                              << ", offset=" << (cmd.config.limit_offset_bps_x100 / 100.0) << "bps"
+                              << ", timeout=" << cmd.config.limit_timeout_ms << "ms\n";
                 }
-                break;
-            }
 
-            // TODO: Implement emergency exit actions
-            default:
-                break;
+                // Log config change event (to SharedEventLog for tuner stats)
+                if (event_log_) {
+                    TunerEvent e;
+                    e.init(TunerEventType::ConfigChange, cmd.symbol);
+                    e.payload.config.ai_confidence = cmd.confidence;
+                    e.set_reason(cmd.reason);
+                    event_log_->log(e);
+                }
+
+                // Publish to TradeEvent ring buffer (for dashboard visibility)
+                publish_trade_event(cmd.symbol, StatusCode::TunerConfigUpdate, cmd.confidence);
+            }
+            break;
+        }
+
+        case TunerCommand::Action::PauseSymbol: {
+            auto* cfg = symbol_configs_->get_or_create(cmd.symbol);
+            if (cfg) {
+                cfg->enabled = 0;
+                symbol_configs_->sequence.fetch_add(1);
+                std::cout << "[APPLY] Paused trading for " << cmd.symbol << "\n";
+
+                // Write to SharedTunerState
+                if (tuner_state_) {
+                    auto* decision = tuner_state_->write_next();
+                    decision->set_symbol(cmd.symbol);
+                    decision->set_reason(cmd.reason);
+                    decision->confidence = cmd.confidence;
+                    decision->urgency = cmd.urgency;
+                    decision->action = static_cast<uint8_t>(cmd.action);
+                    decision->add_change(TunerParam::Enabled, 1.0f, 0.0f);
+                    tuner_state_->commit_write();
+                }
+
+                if (event_log_) {
+                    TunerEvent e;
+                    e.init(TunerEventType::PauseSymbol, cmd.symbol);
+                    e.set_reason(cmd.reason);
+                    event_log_->log(e);
+                }
+
+                // Publish to dashboard
+                publish_trade_event(cmd.symbol, StatusCode::TunerPauseSymbol, cmd.confidence);
+            }
+            break;
+        }
+
+        case TunerCommand::Action::ResumeSymbol: {
+            auto* cfg = symbol_configs_->get_or_create(cmd.symbol);
+            if (cfg) {
+                cfg->enabled = 1;
+                symbol_configs_->sequence.fetch_add(1);
+                std::cout << "[APPLY] Resumed trading for " << cmd.symbol << "\n";
+
+                // Write to SharedTunerState
+                if (tuner_state_) {
+                    auto* decision = tuner_state_->write_next();
+                    decision->set_symbol(cmd.symbol);
+                    decision->set_reason(cmd.reason);
+                    decision->confidence = cmd.confidence;
+                    decision->urgency = cmd.urgency;
+                    decision->action = static_cast<uint8_t>(cmd.action);
+                    decision->add_change(TunerParam::Enabled, 0.0f, 1.0f);
+                    tuner_state_->commit_write();
+                }
+
+                if (event_log_) {
+                    TunerEvent e;
+                    e.init(TunerEventType::ResumeSymbol, cmd.symbol);
+                    e.set_reason(cmd.reason);
+                    event_log_->log(e);
+                }
+
+                // Publish to dashboard
+                publish_trade_event(cmd.symbol, StatusCode::TunerResumeSymbol, cmd.confidence);
+            }
+            break;
+        }
+
+        // TODO: Implement emergency exit actions
+        default:
+            break;
         }
         // Note: tune_count is now updated in run_tuning() after this returns
     }
 
     const char* regime_name(uint8_t regime) {
         switch (regime) {
-            case 0: return "Unknown";
-            case 1: return "TRENDING_UP";
-            case 2: return "TRENDING_DOWN";
-            case 3: return "RANGING";
-            case 4: return "HIGH_VOLATILITY";
-            case 5: return "LOW_VOLATILITY";
-            case 6: return "SPIKE";
-            default: return "Unknown";
+        case 0:
+            return "Unknown";
+        case 1:
+            return "TRENDING_UP";
+        case 2:
+            return "TRENDING_DOWN";
+        case 3:
+            return "RANGING";
+        case 4:
+            return "HIGH_VOLATILITY";
+        case 5:
+            return "LOW_VOLATILITY";
+        case 6:
+            return "SPIKE";
+        default:
+            return "Unknown";
         }
     }
 
     SymbolPerformance* find_or_create_perf(const char* symbol) {
-        if (symbol[0] == '*' || symbol[0] == '\0') return nullptr;
+        if (symbol[0] == '*' || symbol[0] == '\0')
+            return nullptr;
 
         // Find existing
         for (auto& perf : symbol_perf_) {

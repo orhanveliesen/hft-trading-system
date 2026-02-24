@@ -1,8 +1,9 @@
 #pragma once
 
 #include "istrategy.hpp"
-#include <cmath>
+
 #include <algorithm>
+#include <cmath>
 
 namespace hft {
 namespace strategy {
@@ -42,16 +43,16 @@ public:
         size_t momentum_ema_period = 5;
 
         // Thresholds (as percentage)
-        double strong_momentum_pct = 0.5;   // 0.5% = strong signal
-        double medium_momentum_pct = 0.2;   // 0.2% = medium signal
-        double weak_momentum_pct = 0.1;     // 0.1% = weak signal
+        double strong_momentum_pct = 0.5; // 0.5% = strong signal
+        double medium_momentum_pct = 0.2; // 0.2% = medium signal
+        double weak_momentum_pct = 0.1;   // 0.1% = weak signal
 
         // Exit thresholds
-        double momentum_reversal_pct = -0.1;  // Exit if momentum reverses
+        double momentum_reversal_pct = -0.1; // Exit if momentum reverses
 
         // Position sizing
-        double base_position_pct = 0.15;    // 15% of capital (aggressive)
-        double max_position_pct = 0.4;      // Max 40% in single asset
+        double base_position_pct = 0.15; // 15% of capital (aggressive)
+        double max_position_pct = 0.4;   // Max 40% in single asset
 
         // Price scale
         double price_scale = 1e8;
@@ -62,22 +63,14 @@ public:
 
     MomentumStrategy() : config_{} { reset(); }
 
-    explicit MomentumStrategy(const Config& config)
-        : config_(config)
-    {
-        reset();
-    }
+    explicit MomentumStrategy(const Config& config) : config_(config) { reset(); }
 
     // =========================================================================
     // IStrategy Implementation
     // =========================================================================
 
-    Signal generate(
-        Symbol symbol,
-        const MarketSnapshot& market,
-        const StrategyPosition& position,
-        MarketRegime regime
-    ) override {
+    Signal generate(Symbol symbol, const MarketSnapshot& market, const StrategyPosition& position,
+                    MarketRegime regime) override {
         (void)symbol;
 
         if (!ready() || !market.valid()) {
@@ -101,32 +94,31 @@ public:
         return generate_entry_signal(market, position, regime, momentum);
     }
 
-    std::string_view name() const override {
-        return "Momentum";
-    }
+    std::string_view name() const override { return "Momentum"; }
 
     OrderPreference default_order_preference() const override {
-        return OrderPreference::Market;  // Momentum = time-sensitive
+        return OrderPreference::Market; // Momentum = time-sensitive
     }
 
     bool suitable_for_regime(MarketRegime regime) const override {
         switch (regime) {
-            case MarketRegime::TrendingUp:
-            case MarketRegime::TrendingDown:
-                return true;  // BEST - this is what momentum is for
-            case MarketRegime::HighVolatility:
-                return true;  // Risky but can work
-            case MarketRegime::Ranging:
-                return false; // AVOID - whipsaws kill momentum traders
-            case MarketRegime::LowVolatility:
-                return false; // Poor - no momentum to capture
-            default:
-                return true;  // Unknown, try it
+        case MarketRegime::TrendingUp:
+        case MarketRegime::TrendingDown:
+            return true; // BEST - this is what momentum is for
+        case MarketRegime::HighVolatility:
+            return true; // Risky but can work
+        case MarketRegime::Ranging:
+            return false; // AVOID - whipsaws kill momentum traders
+        case MarketRegime::LowVolatility:
+            return false; // Poor - no momentum to capture
+        default:
+            return true; // Unknown, try it
         }
     }
 
     void on_tick(const MarketSnapshot& market) override {
-        if (!market.valid()) return;
+        if (!market.valid())
+            return;
 
         double price = market.mid_usd(config_.price_scale);
 
@@ -137,7 +129,7 @@ public:
         if (sample_count_ >= config_.roc_period) {
             double roc = current_momentum();
             if (sample_count_ == config_.roc_period) {
-                momentum_ema_ = roc;  // Initialize
+                momentum_ema_ = roc; // Initialize
             } else {
                 double alpha = 2.0 / (config_.momentum_ema_period + 1);
                 momentum_ema_ = alpha * roc + (1 - alpha) * momentum_ema_;
@@ -155,23 +147,23 @@ public:
         momentum_ema_ = 0;
     }
 
-    bool ready() const override {
-        return sample_count_ >= config_.roc_period + config_.momentum_ema_period;
-    }
+    bool ready() const override { return sample_count_ >= config_.roc_period + config_.momentum_ema_period; }
 
     // =========================================================================
     // Accessors for debugging/dashboard
     // =========================================================================
 
     double current_momentum() const {
-        if (sample_count_ < config_.roc_period) return 0;
+        if (sample_count_ < config_.roc_period)
+            return 0;
 
         size_t old_idx = (price_idx_ + MAX_PRICES - config_.roc_period) % MAX_PRICES;
         double old_price = prices_[old_idx];
         double current_price = prices_[(price_idx_ + MAX_PRICES - 1) % MAX_PRICES];
 
-        if (old_price <= 0) return 0;
-        return ((current_price / old_price) - 1.0) * 100.0;  // As percentage
+        if (old_price <= 0)
+            return 0;
+        return ((current_price / old_price) - 1.0) * 100.0; // As percentage
     }
 
     double momentum_ema() const { return momentum_ema_; }
@@ -185,12 +177,8 @@ private:
     size_t sample_count_ = 0;
     double momentum_ema_ = 0;
 
-    Signal generate_entry_signal(
-        const MarketSnapshot& market,
-        const StrategyPosition& position,
-        MarketRegime regime,
-        double momentum
-    ) {
+    Signal generate_entry_signal(const MarketSnapshot& market, const StrategyPosition& position, MarketRegime regime,
+                                 double momentum) {
         // Use smoothed momentum for entries
         double mom = momentum_ema_;
 
@@ -208,21 +196,22 @@ private:
         } else if (std::abs(mom) >= config_.weak_momentum_pct) {
             strength = SignalStrength::Weak;
         } else {
-            return Signal::none();  // Momentum too weak
+            return Signal::none(); // Momentum too weak
         }
 
         // Check regime alignment
         // Don't buy in downtrend, don't sell in uptrend
         if (mom > 0 && regime == MarketRegime::TrendingDown) {
-            strength = SignalStrength::Weak;  // Downgrade
+            strength = SignalStrength::Weak; // Downgrade
         }
         if (mom < 0 && regime == MarketRegime::TrendingUp) {
-            strength = SignalStrength::Weak;  // Downgrade
+            strength = SignalStrength::Weak; // Downgrade
         }
 
         // Calculate quantity
         double qty = calculate_qty(market, position);
-        if (qty <= 0) return Signal::none();
+        if (qty <= 0)
+            return Signal::none();
 
         // Build signal
         Signal sig;
@@ -246,12 +235,8 @@ private:
         return sig;
     }
 
-    Signal generate_exit_signal(
-        const MarketSnapshot& market,
-        const StrategyPosition& position,
-        MarketRegime regime,
-        double momentum
-    ) {
+    Signal generate_exit_signal(const MarketSnapshot& market, const StrategyPosition& position, MarketRegime regime,
+                                double momentum) {
         double mom = momentum_ema_;
 
         // Exit conditions:
@@ -265,9 +250,12 @@ private:
 
         if (momentum_reversal || regime_unfavorable || strong_opposite) {
             const char* reason = "Momentum exit";
-            if (momentum_reversal) reason = "Momentum reversal - exit";
-            if (regime_unfavorable) reason = "Regime turned bearish - exit";
-            if (strong_opposite) reason = "Strong opposite momentum - exit";
+            if (momentum_reversal)
+                reason = "Momentum reversal - exit";
+            if (regime_unfavorable)
+                reason = "Regime turned bearish - exit";
+            if (strong_opposite)
+                reason = "Strong opposite momentum - exit";
 
             return Signal::exit(position.quantity, reason);
         }
@@ -277,7 +265,8 @@ private:
 
     double calculate_qty(const MarketSnapshot& market, const StrategyPosition& position) const {
         double ask_usd = market.ask_usd(config_.price_scale);
-        if (ask_usd <= 0) return 0;
+        if (ask_usd <= 0)
+            return 0;
 
         // Aggressive position sizing for momentum
         double target_value = position.cash_available * config_.base_position_pct;
@@ -289,5 +278,5 @@ private:
     }
 };
 
-}  // namespace strategy
-}  // namespace hft
+} // namespace strategy
+} // namespace hft

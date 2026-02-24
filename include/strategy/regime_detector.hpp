@@ -12,15 +12,20 @@
  * Latency: <200ns per update (vs 800ns+ with allocations)
  */
 
-#include "../types.hpp"
 #include "../exchange/market_data.hpp"
-#include <cmath>
+#include "../types.hpp"
+
 #include <algorithm>
-#include <string>
 #include <array>
+#include <cmath>
+#include <string>
 
 // Forward declaration to avoid circular dependency
-namespace hft { namespace ipc { struct SharedConfig; } }
+namespace hft {
+namespace ipc {
+struct SharedConfig;
+}
+} // namespace hft
 
 namespace hft {
 namespace strategy {
@@ -30,23 +35,30 @@ namespace strategy {
  */
 enum class MarketRegime {
     Unknown,
-    TrendingUp,      // Strong upward trend
-    TrendingDown,    // Strong downward trend
-    Ranging,         // Sideways, mean-reverting
-    HighVolatility,  // Choppy, high uncertainty
-    LowVolatility,   // Quiet, low movement
-    Spike            // Sudden price spike detected
+    TrendingUp,     // Strong upward trend
+    TrendingDown,   // Strong downward trend
+    Ranging,        // Sideways, mean-reverting
+    HighVolatility, // Choppy, high uncertainty
+    LowVolatility,  // Quiet, low movement
+    Spike           // Sudden price spike detected
 };
 
 inline std::string regime_to_string(MarketRegime regime) {
     switch (regime) {
-        case MarketRegime::TrendingUp: return "TRENDING_UP";
-        case MarketRegime::TrendingDown: return "TRENDING_DOWN";
-        case MarketRegime::Ranging: return "RANGING";
-        case MarketRegime::HighVolatility: return "HIGH_VOL";
-        case MarketRegime::LowVolatility: return "LOW_VOL";
-        case MarketRegime::Spike: return "SPIKE";
-        default: return "UNKNOWN";
+    case MarketRegime::TrendingUp:
+        return "TRENDING_UP";
+    case MarketRegime::TrendingDown:
+        return "TRENDING_DOWN";
+    case MarketRegime::Ranging:
+        return "RANGING";
+    case MarketRegime::HighVolatility:
+        return "HIGH_VOL";
+    case MarketRegime::LowVolatility:
+        return "LOW_VOL";
+    case MarketRegime::Spike:
+        return "SPIKE";
+    default:
+        return "UNKNOWN";
     }
 }
 
@@ -54,16 +66,16 @@ inline std::string regime_to_string(MarketRegime regime) {
  * Regime Detection Configuration
  */
 struct RegimeConfig {
-    int lookback = 20;              // Lookback period for calculations
+    int lookback = 20; // Lookback period for calculations
 
     // Trend detection
-    double trend_threshold = 0.02;   // 2% price change = trend
-    int trend_ma_period = 20;        // MA period for trend
-    double adx_threshold = 25.0;     // ADX > 25 = trending
+    double trend_threshold = 0.02; // 2% price change = trend
+    int trend_ma_period = 20;      // MA period for trend
+    double adx_threshold = 25.0;   // ADX > 25 = trending
 
     // Volatility detection
-    double high_vol_threshold = 0.03;  // 3% daily vol = high
-    double low_vol_threshold = 0.01;   // 1% daily vol = low
+    double high_vol_threshold = 0.03; // 3% daily vol = high
+    double low_vol_threshold = 0.01;  // 1% daily vol = low
 
     // Mean reversion detection based on Hurst Exponent theory:
     // - H = 0.5: Random walk (no predictable pattern)
@@ -104,16 +116,8 @@ public:
     static constexpr size_t MAX_BUFFER_SIZE = 64;
 
     explicit RegimeDetector(const RegimeConfig& config = RegimeConfig())
-        : config_(config)
-        , current_regime_(MarketRegime::Unknown)
-        , trend_strength_(0)
-        , volatility_(0)
-        , mean_reversion_score_(0.5)
-        , price_head_(0)
-        , price_count_(0)
-        , return_sum_(0)
-        , return_sq_sum_(0)
-    {
+        : config_(config), current_regime_(MarketRegime::Unknown), trend_strength_(0), volatility_(0),
+          mean_reversion_score_(0.5), price_head_(0), price_count_(0), return_sum_(0), return_sq_sum_(0) {
         prices_.fill(0);
         highs_.fill(0);
         lows_.fill(0);
@@ -123,7 +127,8 @@ public:
      * Update with new price data - O(1), zero allocation
      */
     void update(double price) {
-        if (price <= 0) return;
+        if (price <= 0)
+            return;
 
         // Calculate return before adding new price (for incremental stats)
         if (price_count_ > 0) {
@@ -151,7 +156,8 @@ public:
         double high = kline.high / 10000.0;
         double low = kline.low / 10000.0;
 
-        if (close <= 0) return;
+        if (close <= 0)
+            return;
 
         // Calculate return before adding
         if (price_count_ > 0) {
@@ -192,31 +198,26 @@ public:
      * Is the market suitable for mean reversion strategies?
      */
     bool is_mean_reverting() const {
-        return current_regime_ == MarketRegime::Ranging ||
-               current_regime_ == MarketRegime::LowVolatility;
+        return current_regime_ == MarketRegime::Ranging || current_regime_ == MarketRegime::LowVolatility;
     }
 
     /**
      * Is the market suitable for trend-following strategies?
      */
     bool is_trending() const {
-        return current_regime_ == MarketRegime::TrendingUp ||
-               current_regime_ == MarketRegime::TrendingDown;
+        return current_regime_ == MarketRegime::TrendingUp || current_regime_ == MarketRegime::TrendingDown;
     }
 
     /**
      * Is there a price spike detected?
      */
-    bool is_spike() const {
-        return current_regime_ == MarketRegime::Spike;
-    }
+    bool is_spike() const { return current_regime_ == MarketRegime::Spike; }
 
     /**
      * Is the market in a dangerous state (high vol or spike)?
      */
     bool is_dangerous() const {
-        return current_regime_ == MarketRegime::HighVolatility ||
-               current_regime_ == MarketRegime::Spike;
+        return current_regime_ == MarketRegime::HighVolatility || current_regime_ == MarketRegime::Spike;
     }
 
     void reset() {
@@ -254,24 +255,25 @@ private:
     alignas(64) std::array<double, MAX_BUFFER_SIZE> highs_;
     alignas(64) std::array<double, MAX_BUFFER_SIZE> lows_;
 
-    size_t price_head_;    // Next write position
-    size_t price_count_;   // Number of valid entries
+    size_t price_head_;  // Next write position
+    size_t price_count_; // Number of valid entries
 
     // Incremental statistics (no std::vector needed)
-    double return_sum_;     // Sum of returns for mean
-    double return_sq_sum_;  // Sum of squared returns for variance
+    double return_sum_;    // Sum of returns for mean
+    double return_sq_sum_; // Sum of squared returns for variance
 
     MarketRegime current_regime_;
-    double trend_strength_;      // -1 (down) to +1 (up), 0 = no trend
-    double volatility_;          // Annualized volatility estimate
-    double mean_reversion_score_; // 0 = strong MR, 0.5 = random, 1 = trending
-    int spike_cooldown_remaining_ = 0;  // Bars remaining in spike cooldown
+    double trend_strength_;            // -1 (down) to +1 (up), 0 = no trend
+    double volatility_;                // Annualized volatility estimate
+    double mean_reversion_score_;      // 0 = strong MR, 0.5 = random, 1 = trending
+    int spike_cooldown_remaining_ = 0; // Bars remaining in spike cooldown
 
     // Ring buffer helpers - O(1), inline
     void add_price(double price) {
         prices_[price_head_] = price;
         price_head_ = (price_head_ + 1) % MAX_BUFFER_SIZE;
-        if (price_count_ < MAX_BUFFER_SIZE) price_count_++;
+        if (price_count_ < MAX_BUFFER_SIZE)
+            price_count_++;
     }
 
     void add_high(double high) {
@@ -286,14 +288,16 @@ private:
 
     // Get price at logical index (0 = oldest, count-1 = newest)
     double get_price(size_t idx) const {
-        if (idx >= price_count_) return 0;
+        if (idx >= price_count_)
+            return 0;
         size_t actual_idx = (price_head_ + MAX_BUFFER_SIZE - price_count_ + idx) % MAX_BUFFER_SIZE;
         return prices_[actual_idx];
     }
 
     // Get most recent price
     double latest_price() const {
-        if (price_count_ == 0) return 0;
+        if (price_count_ == 0)
+            return 0;
         size_t idx = (price_head_ == 0) ? MAX_BUFFER_SIZE - 1 : price_head_ - 1;
         return prices_[idx];
     }
@@ -322,7 +326,8 @@ private:
     }
 
     void calculate_trend() {
-        if (price_count_ < 2) return;
+        if (price_count_ < 2)
+            return;
 
         // Simple trend: compare current price to MA
         // Loop is small (max 20) and predictable - CPU prefetch handles well
@@ -351,10 +356,12 @@ private:
 
     void calculate_volatility() {
         // Use incremental statistics - O(1)
-        if (price_count_ < 2) return;
+        if (price_count_ < 2)
+            return;
 
         size_t n = std::min(price_count_ - 1, MAX_BUFFER_SIZE - 1);
-        if (n == 0) return;
+        if (n == 0)
+            return;
 
         double mean = return_sum_ / static_cast<double>(n);
         double variance = (return_sq_sum_ / static_cast<double>(n)) - (mean * mean);
@@ -369,11 +376,13 @@ private:
     void calculate_mean_reversion() {
         // Simplified mean-reversion estimation - O(1)
         // Uses autocorrelation proxy: if recent returns anti-correlate, market is mean-reverting
-        if (price_count_ < static_cast<size_t>(config_.lookback)) return;
+        if (price_count_ < static_cast<size_t>(config_.lookback))
+            return;
 
         // Use incremental variance
         size_t n = std::min(price_count_ - 1, MAX_BUFFER_SIZE - 1);
-        if (n < 5) return;
+        if (n < 5)
+            return;
 
         double mean = return_sum_ / static_cast<double>(n);
         double variance = (return_sq_sum_ / static_cast<double>(n)) - (mean * mean);
@@ -387,7 +396,8 @@ private:
         double middle = get_price(price_count_ / 2);
         double oldest = get_price(0);
 
-        if (oldest <= 0 || middle <= 0) return;
+        if (oldest <= 0 || middle <= 0)
+            return;
 
         double recent_range = std::abs(latest - middle) / middle;
         double old_range = std::abs(middle - oldest) / oldest;
@@ -410,7 +420,8 @@ private:
         // Calculate the current move (percentage)
         double current_price = latest_price();
         double prev_price = get_price(price_count_ - 2);
-        if (prev_price <= 0) return false;
+        if (prev_price <= 0)
+            return false;
 
         double current_move = std::abs(current_price - prev_price) / prev_price;
 
@@ -482,8 +493,7 @@ private:
 
         if (mean_reversion_score_ > config_.trending_threshold) {
             // Weak trend, determine direction
-            current_regime_ = (trend_strength_ >= 0) ?
-                MarketRegime::TrendingUp : MarketRegime::TrendingDown;
+            current_regime_ = (trend_strength_ >= 0) ? MarketRegime::TrendingUp : MarketRegime::TrendingDown;
             return;
         }
 
@@ -492,8 +502,8 @@ private:
     }
 };
 
-}  // namespace strategy
-}  // namespace hft
+} // namespace strategy
+} // namespace hft
 
 // Implementation requires SharedConfig definition
 #include "../ipc/shared_config.hpp"
@@ -502,7 +512,8 @@ namespace hft {
 namespace strategy {
 
 inline void RegimeDetector::update_from_config(const ipc::SharedConfig* cfg) {
-    if (!cfg) return;
+    if (!cfg)
+        return;
 
     config_.spike_threshold = cfg->spike_threshold();
     config_.spike_lookback = cfg->get_spike_lookback();
@@ -510,5 +521,5 @@ inline void RegimeDetector::update_from_config(const ipc::SharedConfig* cfg) {
     config_.spike_cooldown = cfg->get_spike_cooldown();
 }
 
-}  // namespace strategy
-}  // namespace hft
+} // namespace strategy
+} // namespace hft

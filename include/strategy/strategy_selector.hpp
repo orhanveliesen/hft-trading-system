@@ -1,11 +1,12 @@
 #pragma once
 
 #include "istrategy.hpp"
-#include <vector>
-#include <memory>
-#include <string_view>
+
 #include <algorithm>
 #include <functional>
+#include <memory>
+#include <string_view>
+#include <vector>
 
 namespace hft {
 namespace strategy {
@@ -100,10 +101,7 @@ public:
     }
 
     /// Select with priority list (try each in order)
-    IStrategy* select_priority(
-        std::initializer_list<std::string_view> priority_names,
-        MarketRegime regime
-    ) const {
+    IStrategy* select_priority(std::initializer_list<std::string_view> priority_names, MarketRegime regime) const {
         for (auto name : priority_names) {
             auto* s = select_by_name(name);
             if (s && s->suitable_for_regime(regime) && s->ready()) {
@@ -114,21 +112,15 @@ public:
     }
 
     /// Get default strategy
-    IStrategy* get_default() const {
-        return default_strategy_;
-    }
+    IStrategy* get_default() const { return default_strategy_; }
 
     // =========================================================================
     // Composite/Voting Mode
     // =========================================================================
 
     /// Get signals from all suitable strategies and combine them
-    Signal composite_signal(
-        Symbol symbol,
-        const MarketSnapshot& market,
-        const StrategyPosition& position,
-        MarketRegime regime
-    ) const {
+    Signal composite_signal(Symbol symbol, const MarketSnapshot& market, const StrategyPosition& position,
+                            MarketRegime regime) const {
         std::vector<Signal> signals;
         signals.reserve(strategies_.size());
 
@@ -183,7 +175,7 @@ public:
             return result;
         }
 
-        return Signal::none();  // No consensus
+        return Signal::none(); // No consensus
     }
 
     // =========================================================================
@@ -209,7 +201,7 @@ public:
     // =========================================================================
 
     /// Iterate over all strategies
-    template<typename Func>
+    template <typename Func>
     void for_each(Func&& fn) const {
         for (const auto& s : strategies_) {
             fn(*s);
@@ -248,18 +240,24 @@ struct RegimeStrategyMapping {
     std::string_view ranging_strategy = "TechnicalIndicators";
     std::string_view trending_up_strategy = "Momentum";
     std::string_view trending_down_strategy = "TechnicalIndicators";
-    std::string_view high_volatility_strategy = "";  // Empty = don't trade
+    std::string_view high_volatility_strategy = ""; // Empty = don't trade
     std::string_view low_volatility_strategy = "MarketMaker";
     std::string_view unknown_strategy = "TechnicalIndicators";
 
     std::string_view get_strategy_for_regime(MarketRegime regime) const {
         switch (regime) {
-            case MarketRegime::Ranging: return ranging_strategy;
-            case MarketRegime::TrendingUp: return trending_up_strategy;
-            case MarketRegime::TrendingDown: return trending_down_strategy;
-            case MarketRegime::HighVolatility: return high_volatility_strategy;
-            case MarketRegime::LowVolatility: return low_volatility_strategy;
-            default: return unknown_strategy;
+        case MarketRegime::Ranging:
+            return ranging_strategy;
+        case MarketRegime::TrendingUp:
+            return trending_up_strategy;
+        case MarketRegime::TrendingDown:
+            return trending_down_strategy;
+        case MarketRegime::HighVolatility:
+            return high_volatility_strategy;
+        case MarketRegime::LowVolatility:
+            return low_volatility_strategy;
+        default:
+            return unknown_strategy;
         }
     }
 };
@@ -269,18 +267,13 @@ struct RegimeStrategyMapping {
  */
 class MappedStrategySelector {
 public:
-    MappedStrategySelector(
-        StrategySelector& selector,
-        const RegimeStrategyMapping& mapping = {}
-    )
-        : selector_(selector)
-        , mapping_(mapping)
-    {}
+    MappedStrategySelector(StrategySelector& selector, const RegimeStrategyMapping& mapping = {})
+        : selector_(selector), mapping_(mapping) {}
 
     IStrategy* select(MarketRegime regime) const {
         auto strategy_name = mapping_.get_strategy_for_regime(regime);
         if (strategy_name.empty()) {
-            return nullptr;  // Don't trade in this regime
+            return nullptr; // Don't trade in this regime
         }
         auto* s = selector_.select_by_name(strategy_name);
         if (s && s->ready()) {
@@ -290,9 +283,7 @@ public:
         return selector_.select_for_regime(regime);
     }
 
-    void set_mapping(const RegimeStrategyMapping& mapping) {
-        mapping_ = mapping;
-    }
+    void set_mapping(const RegimeStrategyMapping& mapping) { mapping_ = mapping; }
 
     const RegimeStrategyMapping& mapping() const { return mapping_; }
 
@@ -301,5 +292,5 @@ private:
     RegimeStrategyMapping mapping_;
 };
 
-}  // namespace strategy
-}  // namespace hft
+} // namespace strategy
+} // namespace hft

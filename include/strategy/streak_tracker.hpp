@@ -24,6 +24,7 @@
  */
 
 #include "strategy_constants.hpp"
+
 #include <algorithm>
 #include <cstdint>
 
@@ -76,29 +77,19 @@ public:
     }
 
     // Streak-based checks using StreakThresholds constants
-    bool is_loss_streak_cautious() const {
-        return current_loss_streak_ >= StreakThresholds::LOSSES_TO_CAUTIOUS;
-    }
+    bool is_loss_streak_cautious() const { return current_loss_streak_ >= StreakThresholds::LOSSES_TO_CAUTIOUS; }
 
     bool is_loss_streak_tighten_signal() const {
         return current_loss_streak_ >= StreakThresholds::LOSSES_TO_TIGHTEN_SIGNAL;
     }
 
-    bool is_loss_streak_defensive() const {
-        return current_loss_streak_ >= StreakThresholds::LOSSES_TO_DEFENSIVE;
-    }
+    bool is_loss_streak_defensive() const { return current_loss_streak_ >= StreakThresholds::LOSSES_TO_DEFENSIVE; }
 
-    bool is_loss_streak_pause() const {
-        return current_loss_streak_ >= StreakThresholds::LOSSES_TO_PAUSE;
-    }
+    bool is_loss_streak_pause() const { return current_loss_streak_ >= StreakThresholds::LOSSES_TO_PAUSE; }
 
-    bool is_loss_streak_exit_only() const {
-        return current_loss_streak_ >= StreakThresholds::LOSSES_TO_EXIT_ONLY;
-    }
+    bool is_loss_streak_exit_only() const { return current_loss_streak_ >= StreakThresholds::LOSSES_TO_EXIT_ONLY; }
 
-    bool is_win_streak_aggressive() const {
-        return current_win_streak_ >= StreakThresholds::WINS_TO_AGGRESSIVE;
-    }
+    bool is_win_streak_aggressive() const { return current_win_streak_ >= StreakThresholds::WINS_TO_AGGRESSIVE; }
 
 private:
     void update_max_streaks() {
@@ -114,5 +105,5 @@ private:
     int max_loss_streak_ = 0;
 };
 
-}  // namespace strategy
-}  // namespace hft
+} // namespace strategy
+} // namespace hft

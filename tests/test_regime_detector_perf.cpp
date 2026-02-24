@@ -5,48 +5,53 @@
  * This test file validates the optimized implementation.
  */
 
-#include <iostream>
+#include "../include/strategy/regime_detector.hpp"
+
+#include <array>
 #include <cassert>
 #include <chrono>
-#include <array>
-
-#include "../include/strategy/regime_detector.hpp"
+#include <iostream>
 
 #define TEST(name) void name()
 
-#define RUN_TEST(name) do { \
-    std::cout << "  " << #name << "... "; \
-    try { \
-        name(); \
-        std::cout << "PASSED\n"; \
-    } catch (...) { \
-        std::cout << "FAILED (exception)\n"; \
-        return 1; \
-    } \
-} while(0)
+#define RUN_TEST(name)                                                                                                 \
+    do {                                                                                                               \
+        std::cout << "  " << #name << "... ";                                                                          \
+        try {                                                                                                          \
+            name();                                                                                                    \
+            std::cout << "PASSED\n";                                                                                   \
+        } catch (...) {                                                                                                \
+            std::cout << "FAILED (exception)\n";                                                                       \
+            return 1;                                                                                                  \
+        }                                                                                                              \
+    } while (0)
 
-#define ASSERT_TRUE(expr) do { \
-    if (!(expr)) { \
-        std::cerr << "\nFAIL: " << #expr << " is false\n"; \
-        assert(false); \
-    } \
-} while(0)
+#define ASSERT_TRUE(expr)                                                                                              \
+    do {                                                                                                               \
+        if (!(expr)) {                                                                                                 \
+            std::cerr << "\nFAIL: " << #expr << " is false\n";                                                         \
+            assert(false);                                                                                             \
+        }                                                                                                              \
+    } while (0)
 
-#define ASSERT_EQ(a, b) do { \
-    auto _a = (a); auto _b = (b); \
-    if (_a != _b) { \
-        std::cerr << "\nFAIL: " << #a << " (" << _a << ") != " << #b << " (" << _b << ")\n"; \
-        assert(false); \
-    } \
-} while(0)
+#define ASSERT_EQ(a, b)                                                                                                \
+    do {                                                                                                               \
+        auto _a = (a);                                                                                                 \
+        auto _b = (b);                                                                                                 \
+        if (_a != _b) {                                                                                                \
+            std::cerr << "\nFAIL: " << #a << " (" << _a << ") != " << #b << " (" << _b << ")\n";                       \
+            assert(false);                                                                                             \
+        }                                                                                                              \
+    } while (0)
 
-#define ASSERT_NEAR(a, b, eps) do { \
-    double _a = (a), _b = (b), _eps = (eps); \
-    if (std::abs(_a - _b) > _eps) { \
-        std::cerr << "\nFAIL: " << #a << " (" << _a << ") != " << #b << " (" << _b << ") within " << _eps << "\n"; \
-        assert(false); \
-    } \
-} while(0)
+#define ASSERT_NEAR(a, b, eps)                                                                                         \
+    do {                                                                                                               \
+        double _a = (a), _b = (b), _eps = (eps);                                                                       \
+        if (std::abs(_a - _b) > _eps) {                                                                                \
+            std::cerr << "\nFAIL: " << #a << " (" << _a << ") != " << #b << " (" << _b << ") within " << _eps << "\n"; \
+            assert(false);                                                                                             \
+        }                                                                                                              \
+    } while (0)
 
 using namespace hft::strategy;
 
@@ -59,13 +64,12 @@ TEST(basic_regime_detection) {
     // Feed trending up data
     double base_price = 100.0;
     for (int i = 0; i < 30; ++i) {
-        detector.update(base_price + i * 0.5);  // Steady uptrend
+        detector.update(base_price + i * 0.5); // Steady uptrend
     }
 
     // Should detect trending up
     MarketRegime regime = detector.current_regime();
-    ASSERT_TRUE(regime == MarketRegime::TrendingUp ||
-                regime == MarketRegime::Ranging);  // May need warmup
+    ASSERT_TRUE(regime == MarketRegime::TrendingUp || regime == MarketRegime::Ranging); // May need warmup
 }
 
 // =============================================================================
@@ -109,7 +113,7 @@ TEST(ring_buffer_wrap) {
     }
 
     // Should still work after wrap
-    detector.update(110.0);  // Price spike
+    detector.update(110.0); // Price spike
     detector.update(111.0);
 
     // Should not crash and regime should be valid
@@ -138,7 +142,7 @@ TEST(volatility_calculation) {
     }
 
     vol = detector.volatility();
-    ASSERT_TRUE(vol > 0.0);  // Should detect volatility
+    ASSERT_TRUE(vol > 0.0); // Should detect volatility
 }
 
 // =============================================================================
@@ -149,11 +153,11 @@ TEST(spike_detection) {
 
     // Build stable baseline
     for (int i = 0; i < 30; ++i) {
-        detector.update(100.0 + (i % 3) * 0.01);  // Very small movements
+        detector.update(100.0 + (i % 3) * 0.01); // Very small movements
     }
 
     // Inject spike (>3x average move)
-    detector.update(105.0);  // 5% move vs ~0.01% average
+    detector.update(105.0); // 5% move vs ~0.01% average
 
     ASSERT_TRUE(detector.is_spike());
 }

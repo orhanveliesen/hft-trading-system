@@ -1,18 +1,20 @@
-#include <cassert>
-#include <iostream>
+#include "../include/mock_order_sender.hpp"
 #include "../include/strategy/simple_mean_reversion.hpp"
 #include "../include/trading_engine.hpp"
-#include "../include/mock_order_sender.hpp"
+
+#include <cassert>
+#include <iostream>
 
 using namespace hft;
 using namespace hft::strategy;
 
 #define TEST(name) void name()
-#define RUN_TEST(name) do { \
-    std::cout << "Running " << #name << "... "; \
-    name(); \
-    std::cout << "PASSED\n"; \
-} while(0)
+#define RUN_TEST(name)                                                                                                 \
+    do {                                                                                                               \
+        std::cout << "Running " << #name << "... ";                                                                    \
+        name();                                                                                                        \
+        std::cout << "PASSED\n";                                                                                       \
+    } while (0)
 
 #define ASSERT_EQ(a, b) assert((a) == (b))
 #define ASSERT_NE(a, b) assert((a) != (b))
@@ -90,7 +92,7 @@ TEST(test_respects_max_long_position) {
     // Fiyat düştü ama pozisyon limitte
     auto signal = strategy(9998, 10008, config.max_position);
 
-    EXPECT_EQ(signal, Signal::None);  // Al diyemez, limit dolu
+    EXPECT_EQ(signal, Signal::None); // Al diyemez, limit dolu
 }
 
 TEST(test_respects_max_short_position) {
@@ -103,7 +105,7 @@ TEST(test_respects_max_short_position) {
     // Fiyat çıktı ama short limit dolu
     auto signal = strategy(10003, 10013, -config.max_position);
 
-    EXPECT_EQ(signal, Signal::None);  // Sat diyemez, limit dolu
+    EXPECT_EQ(signal, Signal::None); // Sat diyemez, limit dolu
 }
 
 // ============================================
@@ -165,15 +167,15 @@ TEST(test_integration_with_trading_engine) {
     ASSERT_NE(world, nullptr);
 
     // Simüle: İlk market data
-    world->book().add_order(1, Side::Buy, 10000, 100);   // Bid
-    world->book().add_order(2, Side::Sell, 10010, 100);  // Ask
+    world->book().add_order(1, Side::Buy, 10000, 100);  // Bid
+    world->book().add_order(2, Side::Sell, 10010, 100); // Ask
 
     Price bid = world->best_bid();
     Price ask = world->best_ask();
 
     // Strategy çalıştır
     auto signal = strategy(bid, ask, world->position_qty());
-    EXPECT_EQ(signal, Signal::None);  // İlk tick
+    EXPECT_EQ(signal, Signal::None); // İlk tick
 
     // Simüle: Fiyat düştü
     world->book().cancel_order(1);
@@ -185,7 +187,7 @@ TEST(test_integration_with_trading_engine) {
     ask = world->best_ask();
 
     signal = strategy(bid, ask, world->position_qty());
-    EXPECT_EQ(signal, Signal::Buy);  // Fiyat düştü, al sinyali
+    EXPECT_EQ(signal, Signal::Buy); // Fiyat düştü, al sinyali
 }
 
 // ============================================
@@ -204,7 +206,7 @@ TEST(test_full_trading_cycle) {
     // Tick 2: Fiyat düştü (Buy)
     auto signal = strategy(9990, 10000, position);
     EXPECT_EQ(signal, Signal::Buy);
-    position += config.order_size;  // Simüle fill
+    position += config.order_size; // Simüle fill
 
     // Tick 3: Fiyat düştü (Buy - pozisyon artıyor)
     signal = strategy(9980, 9990, position);

@@ -24,10 +24,10 @@ class OverfittedStrategy {
 public:
     // "Optimized" parameters from backtesting on BTC Jan-Mar 2024
     // These magic numbers were curve-fitted to maximize backtest PnL
-    static constexpr double MAGIC_BB_PERIOD = 13.7;      // Why 13.7? Because it fit the data
-    static constexpr double MAGIC_BB_STD = 2.17;         // Why 2.17? Curve fitting
-    static constexpr double MAGIC_RSI_OVERSOLD = 23.4;   // Why 23.4? Optimized
-    static constexpr double MAGIC_RSI_OVERBOUGHT = 78.2; // Why 78.2? Optimized
+    static constexpr double MAGIC_BB_PERIOD = 13.7;       // Why 13.7? Because it fit the data
+    static constexpr double MAGIC_BB_STD = 2.17;          // Why 2.17? Curve fitting
+    static constexpr double MAGIC_RSI_OVERSOLD = 23.4;    // Why 23.4? Optimized
+    static constexpr double MAGIC_RSI_OVERBOUGHT = 78.2;  // Why 78.2? Optimized
     static constexpr double MAGIC_VOL_THRESHOLD = 0.0342; // Specific to that period
     static constexpr double MAGIC_MOMENTUM_WINDOW = 17;   // Another magic number
     static constexpr double MAGIC_ENTRY_MULT = 1.847;     // Suspiciously precise
@@ -35,12 +35,12 @@ public:
     // Time-of-day "patterns" that worked in backtest
     // (spurious correlations from limited data)
     static constexpr std::array<bool, 24> GOOD_HOURS = {
-        false, false, true,  true,   // 00-03: "BTC dumps at night"
-        true,  false, false, false,  // 04-07: "Asian session weak"
-        true,  true,  true,  false,  // 08-11: "European open good"
-        false, true,  true,  true,   // 12-15: "US pre-market"
-        true,  false, false, false,  // 16-19: "US close bad"
-        false, false, false, false   // 20-23: "Night = no trade"
+        false, false, true,  true,  // 00-03: "BTC dumps at night"
+        true,  false, false, false, // 04-07: "Asian session weak"
+        true,  true,  true,  false, // 08-11: "European open good"
+        false, true,  true,  true,  // 12-15: "US pre-market"
+        true,  false, false, false, // 16-19: "US close bad"
+        false, false, false, false  // 20-23: "Night = no trade"
     };
 
     struct Signal {
@@ -56,7 +56,8 @@ public:
         // Update price buffer
         prices_[price_idx_] = price;
         price_idx_ = (price_idx_ + 1) % BUFFER_SIZE;
-        if (sample_count_ < BUFFER_SIZE) sample_count_++;
+        if (sample_count_ < BUFFER_SIZE)
+            sample_count_++;
 
         current_hour_ = hour_utc;
         last_price_ = price;
@@ -98,21 +99,15 @@ public:
 
         // Complex entry logic with multiple magic numbers
         // This worked PERFECTLY in backtest...
-        if (last_price_ < lower_bb &&
-            rsi < MAGIC_RSI_OVERSOLD &&
-            momentum > -MAGIC_ENTRY_MULT * volatility) {
+        if (last_price_ < lower_bb && rsi < MAGIC_RSI_OVERSOLD && momentum > -MAGIC_ENTRY_MULT * volatility) {
             sig.should_buy = true;
             sig.confidence = (MAGIC_RSI_OVERSOLD - rsi) / MAGIC_RSI_OVERSOLD;
             sig.reason = "oversold + momentum (overfit)";
-        }
-        else if (last_price_ > upper_bb &&
-                 rsi > MAGIC_RSI_OVERBOUGHT &&
-                 momentum < MAGIC_ENTRY_MULT * volatility) {
+        } else if (last_price_ > upper_bb && rsi > MAGIC_RSI_OVERBOUGHT && momentum < MAGIC_ENTRY_MULT * volatility) {
             sig.should_sell = true;
             sig.confidence = (rsi - MAGIC_RSI_OVERBOUGHT) / (100 - MAGIC_RSI_OVERBOUGHT);
             sig.reason = "overbought + momentum (overfit)";
-        }
-        else {
+        } else {
             sig.reason = "no signal";
         }
 
@@ -139,7 +134,8 @@ private:
     double last_price_ = 0;
 
     double calculate_sma(int period) const {
-        if (period > static_cast<int>(sample_count_)) period = sample_count_;
+        if (period > static_cast<int>(sample_count_))
+            period = sample_count_;
         double sum = 0;
         for (int i = 0; i < period; i++) {
             int idx = (price_idx_ - 1 - i + BUFFER_SIZE) % BUFFER_SIZE;
@@ -149,7 +145,8 @@ private:
     }
 
     double calculate_std(int period, double mean) const {
-        if (period > static_cast<int>(sample_count_)) period = sample_count_;
+        if (period > static_cast<int>(sample_count_))
+            period = sample_count_;
         double sum_sq = 0;
         for (int i = 0; i < period; i++) {
             int idx = (price_idx_ - 1 - i + BUFFER_SIZE) % BUFFER_SIZE;
@@ -160,24 +157,29 @@ private:
     }
 
     double calculate_rsi(int period) const {
-        if (period >= static_cast<int>(sample_count_)) return 50.0;
+        if (period >= static_cast<int>(sample_count_))
+            return 50.0;
 
         double gains = 0, losses = 0;
         for (int i = 0; i < period; i++) {
             int idx = (price_idx_ - 1 - i + BUFFER_SIZE) % BUFFER_SIZE;
             int prev_idx = (idx - 1 + BUFFER_SIZE) % BUFFER_SIZE;
             double change = prices_[idx] - prices_[prev_idx];
-            if (change > 0) gains += change;
-            else losses -= change;
+            if (change > 0)
+                gains += change;
+            else
+                losses -= change;
         }
 
-        if (losses == 0) return 100.0;
+        if (losses == 0)
+            return 100.0;
         double rs = gains / losses;
         return 100.0 - (100.0 / (1.0 + rs));
     }
 
     double calculate_momentum(int period) const {
-        if (period >= static_cast<int>(sample_count_)) return 0.0;
+        if (period >= static_cast<int>(sample_count_))
+            return 0.0;
         int old_idx = (price_idx_ - period + BUFFER_SIZE) % BUFFER_SIZE;
         return (last_price_ - prices_[old_idx]) / prices_[old_idx];
     }
@@ -209,5 +211,5 @@ private:
  * - Larger losses than backtest (slippage, execution)
  */
 
-}  // namespace strategy
-}  // namespace hft
+} // namespace strategy
+} // namespace hft

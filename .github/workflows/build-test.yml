@@ -1,0 +1,48 @@
+name: Build and Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  # Wait for Docker image to be ready before running tests
+  wait-for-image:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Wait for Docker build
+        run: sleep 30
+
+  build-and-test:
+    runs-on: ubuntu-22.04
+    needs: [wait-for-image]
+    if: always()  # Run even if wait-for-image is skipped (e.g., on push to main)
+    container: ghcr.io/orhanveliesen/hft-builder:latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure CMake
+        run: |
+          mkdir -p build
+          cd build
+          cmake -DCMAKE_BUILD_TYPE=Release ..
+
+      - name: Build
+        run: |
+          cd build
+          make -j$(nproc)
+
+      - name: Run tests
+        run: |
+          cd build
+          ctest --output-on-failure
+
+      - name: Run magic number checker
+        run: |
+          if [ -f scripts/check_hardcoded.sh ]; then
+            bash scripts/check_hardcoded.sh
+          fi

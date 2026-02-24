@@ -1,19 +1,21 @@
-#include <cassert>
-#include <iostream>
-#include <cstring>
+#include "../include/exchange/ouch_order_sender.hpp"
 #include "../include/ouch/ouch_messages.hpp"
 #include "../include/ouch/ouch_session.hpp"
-#include "../include/exchange/ouch_order_sender.hpp"
+
+#include <cassert>
+#include <cstring>
+#include <iostream>
 
 using namespace hft;
 using namespace hft::ouch;
 
 #define TEST(name) void name()
-#define RUN_TEST(name) do { \
-    std::cout << "  " << #name << "... "; \
-    name(); \
-    std::cout << "PASSED\n"; \
-} while(0)
+#define RUN_TEST(name)                                                                                                 \
+    do {                                                                                                               \
+        std::cout << "  " << #name << "... ";                                                                          \
+        name();                                                                                                        \
+        std::cout << "PASSED\n";                                                                                       \
+    } while (0)
 
 #define ASSERT_EQ(a, b) assert((a) == (b))
 #define ASSERT_NE(a, b) assert((a) != (b))
@@ -165,7 +167,7 @@ TEST(test_enter_order_set_quantity) {
 TEST(test_enter_order_set_price) {
     EnterOrder order;
     order.init();
-    order.set_price(1500000);  // $150.0000 (4 decimals)
+    order.set_price(1500000); // $150.0000 (4 decimals)
 
     const uint8_t* price_bytes = reinterpret_cast<const uint8_t*>(&order.price);
     ASSERT_EQ(read_be32(price_bytes), 1500000u);
@@ -202,7 +204,7 @@ TEST(test_cancel_order_full_cancel) {
     CancelOrder cancel;
     cancel.init();
     cancel.set_token("ORDER12345");
-    cancel.set_quantity(0);  // 0 = full cancel
+    cancel.set_quantity(0); // 0 = full cancel
 
     const uint8_t* qty_bytes = reinterpret_cast<const uint8_t*>(&cancel.quantity);
     ASSERT_EQ(read_be32(qty_bytes), 0u);

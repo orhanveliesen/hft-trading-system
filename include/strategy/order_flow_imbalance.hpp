@@ -2,6 +2,8 @@
 
 #include "../types.hpp"
 
+#include <algorithm>
+
 namespace hft {
 namespace strategy {
 
@@ -19,25 +21,18 @@ namespace strategy {
  * HFT'nin en temel stratejilerinden biri
  */
 
-enum class OFISignal : uint8_t {
-    Hold = 0,
-    Buy  = 1,
-    Sell = 2
-};
+enum class OFISignal : uint8_t { Hold = 0, Buy = 1, Sell = 2 };
 
 struct OFIConfig {
-    double imbalance_threshold = 0.3;  // |0.3| = %30 dengesizlik
-    Quantity min_total_qty = 100;      // Minimum toplam miktar (gürültü filtresi)
+    double imbalance_threshold = 0.3; // |0.3| = %30 dengesizlik
+    Quantity min_total_qty = 100;     // Minimum toplam miktar (gürültü filtresi)
     Quantity order_size = 100;
     int64_t max_position = 1000;
 };
 
 class OrderFlowImbalance {
 public:
-    explicit OrderFlowImbalance(const OFIConfig& config = {})
-        : config_(config)
-        , last_imbalance_(0.0)
-    {}
+    explicit OrderFlowImbalance(const OFIConfig& config = {}) : config_(config), last_imbalance_(0.0) {}
 
     // Ana sinyal fonksiyonu
     OFISignal operator()(Quantity bid_qty, Quantity ask_qty, int64_t position) {
@@ -70,9 +65,7 @@ public:
     }
 
     // Overload: bid/ask price'larla birlikte (spread kontrolü için)
-    OFISignal operator()(Price bid, Price ask,
-                         Quantity bid_qty, Quantity ask_qty,
-                         int64_t position) {
+    OFISignal operator()(Price bid, Price ask, Quantity bid_qty, Quantity ask_qty, int64_t position) {
         // Crossed market kontrolü
         if (bid >= ask || bid == INVALID_PRICE || ask == INVALID_PRICE) {
             return OFISignal::Hold;
@@ -97,9 +90,9 @@ private:
  * Daha güvenilir sinyal verir.
  */
 struct MultiLevelOFIConfig {
-    uint32_t num_levels = 5;           // Kaç seviye analiz et
+    uint32_t num_levels = 5; // Kaç seviye analiz et
     double imbalance_threshold = 0.25;
-    double level_weight_decay = 0.8;   // Her seviyenin ağırlığı bir öncekinin 0.8x'i
+    double level_weight_decay = 0.8; // Her seviyenin ağırlığı bir öncekinin 0.8x'i
     Quantity order_size = 100;
     int64_t max_position = 1000;
 };
@@ -108,15 +101,12 @@ class MultiLevelOFI {
 public:
     static constexpr size_t MAX_LEVELS = 10;
 
-    explicit MultiLevelOFI(const MultiLevelOFIConfig& config = {})
-        : config_(config)
-        , last_imbalance_(0.0)
-    {}
+    explicit MultiLevelOFI(const MultiLevelOFIConfig& config = {}) : config_(config), last_imbalance_(0.0) {}
 
     // Çok seviyeli analiz
-    OFISignal operator()(const Quantity* bid_qtys, const Quantity* ask_qtys,
-                         size_t num_levels, int64_t position) {
-        if (num_levels == 0) return OFISignal::Hold;
+    OFISignal operator()(const Quantity* bid_qtys, const Quantity* ask_qtys, size_t num_levels, int64_t position) {
+        if (num_levels == 0)
+            return OFISignal::Hold;
 
         double weighted_bid = 0.0;
         double weighted_ask = 0.0;
@@ -133,7 +123,8 @@ public:
         }
 
         double total = weighted_bid + weighted_ask;
-        if (total < 1.0) return OFISignal::Hold;
+        if (total < 1.0)
+            return OFISignal::Hold;
 
         double imbalance = (weighted_bid - weighted_ask) / total;
         last_imbalance_ = imbalance;
@@ -159,5 +150,5 @@ private:
     double last_imbalance_;
 };
 
-}  // namespace strategy
-}  // namespace hft
+} // namespace strategy
+} // namespace hft

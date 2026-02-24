@@ -9,17 +9,17 @@
  * Binary-compatible struct for fast IPC and AI responses.
  */
 
-#include <atomic>
-#include <cstdint>
-#include <cstddef>
-#include <cstring>
-#include <algorithm>
-#include <chrono>
-#include <sys/mman.h>
-#include <fcntl.h>
-#include <unistd.h>
-
 #include "../config/defaults.hpp"
+
+#include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
+#include <fcntl.h>
+#include <sys/mman.h>
+#include <unistd.h>
 
 namespace hft {
 namespace ipc {
@@ -41,13 +41,13 @@ struct SymbolTuningConfig {
     // =========================================================================
     // Identity (16 bytes)
     // =========================================================================
-    char symbol[SYMBOL_NAME_LEN];  // "BTCUSDT\0"
+    char symbol[SYMBOL_NAME_LEN]; // "BTCUSDT\0"
 
     // =========================================================================
     // Trading Control (2 bytes)
     // =========================================================================
-    uint8_t enabled;               // 0=skip, 1=trade this symbol
-    uint8_t regime_override;       // 0=auto, 1-5=force specific regime
+    uint8_t enabled;         // 0=skip, 1=trade this symbol
+    uint8_t regime_override; // 0=auto, 1-5=force specific regime
 
     // =========================================================================
     // EMA Deviation Thresholds (6 bytes)
@@ -61,30 +61,30 @@ struct SymbolTuningConfig {
     // Position Sizing (6 bytes)
     // x100, e.g., 200 = 2%
     // =========================================================================
-    int16_t base_position_x100;    // Base position % of capital
-    int16_t max_position_x100;     // Max position % of capital
-    int16_t min_position_x100;     // Min position % of capital (NEW)
+    int16_t base_position_x100; // Base position % of capital
+    int16_t max_position_x100;  // Max position % of capital
+    int16_t min_position_x100;  // Min position % of capital (NEW)
 
     // =========================================================================
     // Trade Filtering (4 bytes)
     // =========================================================================
-    int16_t cooldown_ms;           // Cooldown between trades
-    int8_t signal_strength;        // 1=Medium, 2=Strong
-    int8_t reserved1;              // Padding
+    int16_t cooldown_ms;    // Cooldown between trades
+    int8_t signal_strength; // 1=Medium, 2=Strong
+    int8_t reserved1;       // Padding
 
     // =========================================================================
     // Profit Targets (6 bytes)
     // x100, e.g., 150 = 1.5%
     // =========================================================================
-    int16_t target_pct_x100;       // Profit target %
-    int16_t stop_pct_x100;         // Stop loss %
-    int16_t pullback_pct_x100;     // Trend exit pullback %
+    int16_t target_pct_x100;   // Profit target %
+    int16_t stop_pct_x100;     // Stop loss %
+    int16_t pullback_pct_x100; // Trend exit pullback %
 
     // =========================================================================
     // Trading Costs (4 bytes)
     // =========================================================================
-    int16_t slippage_bps_x100;     // Expected slippage
-    int16_t commission_x10000;     // Commission rate
+    int16_t slippage_bps_x100; // Expected slippage
+    int16_t commission_x10000; // Commission rate
 
     // =========================================================================
     // Order Execution (6 bytes)
@@ -98,66 +98,66 @@ struct SymbolTuningConfig {
     // Mode Thresholds - Streak Based (7 bytes)
     // Per-symbol mode transitions based on consecutive wins/losses
     // =========================================================================
-    int8_t losses_to_cautious;        // Consecutive losses → CAUTIOUS (default: 2)
-    int8_t reserved_mode1;            // Was: losses_to_tighten_signal (unused, use SharedConfig)
-    int8_t losses_to_defensive;       // Consecutive losses → DEFENSIVE (default: 4)
-    int8_t losses_to_pause;           // Consecutive losses → PAUSE trading (default: 5)
-    int8_t losses_to_exit_only;       // Consecutive losses → EXIT_ONLY (default: 6)
-    int8_t wins_to_aggressive;        // Consecutive wins → can be AGGRESSIVE (default: 3)
-    int8_t reserved_mode2;            // Was: wins_max_aggressive (unused, use SharedConfig)
+    int8_t losses_to_cautious;  // Consecutive losses → CAUTIOUS (default: 2)
+    int8_t reserved_mode1;      // Was: losses_to_tighten_signal (unused, use SharedConfig)
+    int8_t losses_to_defensive; // Consecutive losses → DEFENSIVE (default: 4)
+    int8_t losses_to_pause;     // Consecutive losses → PAUSE trading (default: 5)
+    int8_t losses_to_exit_only; // Consecutive losses → EXIT_ONLY (default: 6)
+    int8_t wins_to_aggressive;  // Consecutive wins → can be AGGRESSIVE (default: 3)
+    int8_t reserved_mode2;      // Was: wins_max_aggressive (unused, use SharedConfig)
 
     // =========================================================================
     // Drawdown Thresholds (4 bytes)
     // x100, e.g., 300 = 3%
     // =========================================================================
-    int16_t drawdown_defensive_x100;  // Drawdown % → DEFENSIVE (default: 300 = 3%)
-    int16_t drawdown_exit_x100;       // Drawdown % → EXIT_ONLY (default: 500 = 5%)
+    int16_t drawdown_defensive_x100; // Drawdown % → DEFENSIVE (default: 300 = 3%)
+    int16_t drawdown_exit_x100;      // Drawdown % → EXIT_ONLY (default: 500 = 5%)
 
     // =========================================================================
     // Sharpe Ratio Thresholds (6 bytes)
     // x100, e.g., 100 = 1.0
     // =========================================================================
-    int16_t sharpe_aggressive_x100;   // Sharpe > this → AGGRESSIVE (default: 100 = 1.0)
-    int16_t sharpe_cautious_x100;     // Sharpe < this → CAUTIOUS (default: 30 = 0.3)
-    int16_t sharpe_defensive_x100;    // Sharpe < this → DEFENSIVE (default: 0 = 0.0)
+    int16_t sharpe_aggressive_x100; // Sharpe > this → AGGRESSIVE (default: 100 = 1.0)
+    int16_t sharpe_cautious_x100;   // Sharpe < this → CAUTIOUS (default: 30 = 0.3)
+    int16_t sharpe_defensive_x100;  // Sharpe < this → DEFENSIVE (default: 0 = 0.0)
 
     // =========================================================================
     // Win Rate Thresholds (2 bytes)
     // x100, e.g., 60 = 60%
     // =========================================================================
-    int8_t win_rate_aggressive_x100;  // Win rate > this → AGGRESSIVE (default: 60)
-    int8_t win_rate_cautious_x100;    // Win rate < this → CAUTIOUS (default: 40)
+    int8_t win_rate_aggressive_x100; // Win rate > this → AGGRESSIVE (default: 60)
+    int8_t win_rate_cautious_x100;   // Win rate < this → CAUTIOUS (default: 40)
 
     // =========================================================================
     // Signal Thresholds by Mode (4 bytes)
     // x100, e.g., 50 = 0.5
     // =========================================================================
-    int8_t signal_aggressive_x100;    // Signal threshold when AGGRESSIVE (default: 30)
-    int8_t signal_normal_x100;        // Signal threshold when NORMAL (default: 50)
-    int8_t signal_cautious_x100;      // Signal threshold when CAUTIOUS (default: 70)
-    int8_t min_confidence_x100;       // Below this, no signal (default: 30)
+    int8_t signal_aggressive_x100; // Signal threshold when AGGRESSIVE (default: 30)
+    int8_t signal_normal_x100;     // Signal threshold when NORMAL (default: 50)
+    int8_t signal_cautious_x100;   // Signal threshold when CAUTIOUS (default: 70)
+    int8_t min_confidence_x100;    // Below this, no signal (default: 30)
 
     // =========================================================================
     // Risk/Reward (1 byte)
     // =========================================================================
-    int8_t min_risk_reward_x100;      // Min risk/reward ratio (default: 60 = 0.6)
+    int8_t min_risk_reward_x100; // Min risk/reward ratio (default: 60 = 0.6)
 
     // =========================================================================
     // Current State - Trader Updates (3 bytes)
     // These are updated by trader, NOT tuner
     // =========================================================================
-    int8_t consecutive_losses;        // Current loss streak
-    int8_t consecutive_wins;          // Current win streak
-    int8_t current_mode;              // 0=AGGRESSIVE, 1=NORMAL, 2=CAUTIOUS, 3=DEFENSIVE, 4=EXIT_ONLY
+    int8_t consecutive_losses; // Current loss streak
+    int8_t consecutive_wins;   // Current win streak
+    int8_t current_mode;       // 0=AGGRESSIVE, 1=NORMAL, 2=CAUTIOUS, 3=DEFENSIVE, 4=EXIT_ONLY
 
     // =========================================================================
     // Performance Tracking (24 bytes)
     // Trader updates these, tuner reads them
     // =========================================================================
-    int32_t total_trades;             // Total trades
-    int32_t winning_trades;           // Winning trades
-    int64_t total_pnl_x100;           // Total P&L in cents
-    int64_t last_update_ns;           // Last tuner update timestamp
+    int32_t total_trades;   // Total trades
+    int32_t winning_trades; // Winning trades
+    int64_t total_pnl_x100; // Total P&L in cents
+    int64_t last_update_ns; // Last tuner update timestamp
 
     // =========================================================================
     // Accumulation Control (8 bytes) - Tuner controls these
@@ -218,12 +218,12 @@ struct SymbolTuningConfig {
 
         // Mode thresholds (streak-based)
         losses_to_cautious = smart_strategy::LOSSES_TO_CAUTIOUS;
-        reserved_mode1 = 0;  // Was: losses_to_tighten_signal (use SharedConfig)
+        reserved_mode1 = 0; // Was: losses_to_tighten_signal (use SharedConfig)
         losses_to_defensive = smart_strategy::LOSSES_TO_DEFENSIVE;
         losses_to_pause = smart_strategy::LOSSES_TO_PAUSE;
         losses_to_exit_only = smart_strategy::LOSSES_TO_EXIT_ONLY;
         wins_to_aggressive = smart_strategy::WINS_TO_AGGRESSIVE;
-        reserved_mode2 = 0;  // Was: wins_max_aggressive (use SharedConfig)
+        reserved_mode2 = 0; // Was: wins_max_aggressive (use SharedConfig)
 
         // Drawdown thresholds
         drawdown_defensive_x100 = smart_strategy::DRAWDOWN_DEFENSIVE_X100;
@@ -263,7 +263,7 @@ struct SymbolTuningConfig {
 
         // Feature flags
         enabled = 1;
-        regime_override = 0;  // auto
+        regime_override = 0; // auto
     }
 
     // =========================================================================
@@ -392,7 +392,7 @@ struct SymbolTuningConfig {
     void reset_state() {
         consecutive_losses = 0;
         consecutive_wins = 0;
-        current_mode = 1;  // NORMAL
+        current_mode = 1; // NORMAL
     }
 };
 #pragma pack(pop)
@@ -405,7 +405,7 @@ static_assert(sizeof(SymbolTuningConfig) == 128, "SymbolTuningConfig must be 128
  */
 #pragma pack(push, 1)
 struct TunerCommand {
-    static constexpr uint32_t MAGIC = 0x54554E45;  // "TUNE" in little-endian
+    static constexpr uint32_t MAGIC = 0x54554E45; // "TUNE" in little-endian
     static constexpr uint8_t VERSION = 1;
 
     enum class Action : uint8_t {
@@ -415,8 +415,8 @@ struct TunerCommand {
         ResumeSymbol = 3,
         PauseAllTrading = 4,
         ResumeAllTrading = 5,
-        EmergencyExitSymbol = 6,  // Close position for symbol
-        EmergencyExitAll = 7      // Close all positions
+        EmergencyExitSymbol = 6, // Close position for symbol
+        EmergencyExitAll = 7     // Close all positions
     };
 
     // Header
@@ -426,25 +426,23 @@ struct TunerCommand {
     uint16_t reserved_header;
 
     // Target
-    char symbol[SYMBOL_NAME_LEN];  // Target symbol or "*" for all
+    char symbol[SYMBOL_NAME_LEN]; // Target symbol or "*" for all
 
     // Config update (when action == UpdateSymbolConfig)
     SymbolTuningConfig config;
 
     // Confidence and reasoning
-    uint8_t confidence;           // 0-100 confidence score
-    uint8_t urgency;              // 0=low, 1=medium, 2=high
+    uint8_t confidence; // 0-100 confidence score
+    uint8_t urgency;    // 0=low, 1=medium, 2=high
     uint16_t reserved_meta;
-    char reason[64];              // Human-readable reason
+    char reason[64]; // Human-readable reason
 
     // Checksum
     uint32_t checksum;
 
     // === Helper methods ===
 
-    bool is_valid() const {
-        return magic == MAGIC && version == VERSION && verify_checksum();
-    }
+    bool is_valid() const { return magic == MAGIC && version == VERSION && verify_checksum(); }
 
     void finalize() {
         magic = MAGIC;
@@ -465,9 +463,7 @@ struct TunerCommand {
         return sum;
     }
 
-    bool verify_checksum() const {
-        return checksum == calculate_checksum();
-    }
+    bool verify_checksum() const { return checksum == calculate_checksum(); }
 };
 #pragma pack(pop)
 
@@ -478,22 +474,22 @@ static_assert(sizeof(TunerCommand) == 224, "TunerCommand must be 224 bytes");
  * HFT reads, Tuner writes
  */
 struct SharedSymbolConfigs {
-    static constexpr uint64_t MAGIC = 0x53594D43464700ULL;  // "SYMCFG\0"
+    static constexpr uint64_t MAGIC = 0x53594D43464700ULL; // "SYMCFG\0"
     static constexpr uint32_t VERSION = 1;
 
     // Header
     uint64_t magic;
     uint32_t version;
-    std::atomic<uint32_t> sequence;  // Incremented on each change
+    std::atomic<uint32_t> sequence; // Incremented on each change
 
     // Symbol configs
     std::atomic<uint32_t> symbol_count;
     SymbolTuningConfig symbols[MAX_TUNED_SYMBOLS];
 
     // Global tuner state
-    std::atomic<int64_t> last_tune_ns;     // Last AI tuning timestamp
-    std::atomic<uint32_t> tune_count;      // Total tuning operations
-    std::atomic<uint8_t> tuner_connected;  // Is tuner process alive?
+    std::atomic<int64_t> last_tune_ns;    // Last AI tuning timestamp
+    std::atomic<uint32_t> tune_count;     // Total tuning operations
+    std::atomic<uint8_t> tuner_connected; // Is tuner process alive?
 
     // === Methods ===
 
@@ -508,9 +504,7 @@ struct SharedSymbolConfigs {
         std::memset(symbols, 0, sizeof(symbols));
     }
 
-    bool is_valid() const {
-        return magic == MAGIC && version == VERSION;
-    }
+    bool is_valid() const { return magic == MAGIC && version == VERSION; }
 
     // Find or create symbol config
     SymbolTuningConfig* get_or_create(const char* sym) {
@@ -548,7 +542,8 @@ struct SharedSymbolConfigs {
     // Update symbol config (from tuner)
     bool update(const char* sym, const SymbolTuningConfig& cfg) {
         auto* existing = get_or_create(sym);
-        if (!existing) return false;
+        if (!existing)
+            return false;
 
         // Copy config but preserve performance stats
         int32_t trades = existing->total_trades;
@@ -570,7 +565,8 @@ struct SharedSymbolConfigs {
         auto* cfg = get_or_create(sym);
         if (cfg) {
             cfg->total_trades++;
-            if (win) cfg->winning_trades++;
+            if (win)
+                cfg->winning_trades++;
             cfg->total_pnl_x100 += static_cast<int64_t>(pnl * 100);
         }
     }
@@ -579,18 +575,19 @@ struct SharedSymbolConfigs {
 
     static SharedSymbolConfigs* create(const char* name) {
         int fd = shm_open(name, O_CREAT | O_RDWR, 0666);
-        if (fd < 0) return nullptr;
+        if (fd < 0)
+            return nullptr;
 
         if (ftruncate(fd, sizeof(SharedSymbolConfigs)) < 0) {
             close(fd);
             return nullptr;
         }
 
-        void* ptr = mmap(nullptr, sizeof(SharedSymbolConfigs),
-                         PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+        void* ptr = mmap(nullptr, sizeof(SharedSymbolConfigs), PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
         close(fd);
 
-        if (ptr == MAP_FAILED) return nullptr;
+        if (ptr == MAP_FAILED)
+            return nullptr;
 
         auto* cfg = static_cast<SharedSymbolConfigs*>(ptr);
         cfg->init();
@@ -599,13 +596,14 @@ struct SharedSymbolConfigs {
 
     static SharedSymbolConfigs* open(const char* name) {
         int fd = shm_open(name, O_RDONLY, 0666);
-        if (fd < 0) return nullptr;
+        if (fd < 0)
+            return nullptr;
 
-        void* ptr = mmap(nullptr, sizeof(SharedSymbolConfigs),
-                         PROT_READ, MAP_SHARED, fd, 0);
+        void* ptr = mmap(nullptr, sizeof(SharedSymbolConfigs), PROT_READ, MAP_SHARED, fd, 0);
         close(fd);
 
-        if (ptr == MAP_FAILED) return nullptr;
+        if (ptr == MAP_FAILED)
+            return nullptr;
 
         auto* cfg = static_cast<SharedSymbolConfigs*>(ptr);
         if (!cfg->is_valid()) {
@@ -617,13 +615,14 @@ struct SharedSymbolConfigs {
 
     static SharedSymbolConfigs* open_rw(const char* name) {
         int fd = shm_open(name, O_RDWR, 0666);
-        if (fd < 0) return nullptr;
+        if (fd < 0)
+            return nullptr;
 
-        void* ptr = mmap(nullptr, sizeof(SharedSymbolConfigs),
-                         PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+        void* ptr = mmap(nullptr, sizeof(SharedSymbolConfigs), PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
         close(fd);
 
-        if (ptr == MAP_FAILED) return nullptr;
+        if (ptr == MAP_FAILED)
+            return nullptr;
 
         auto* cfg = static_cast<SharedSymbolConfigs*>(ptr);
         if (!cfg->is_valid()) {
@@ -634,5 +633,5 @@ struct SharedSymbolConfigs {
     }
 };
 
-}  // namespace ipc
-}  // namespace hft
+} // namespace ipc
+} // namespace hft

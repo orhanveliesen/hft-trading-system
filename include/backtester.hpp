@@ -1,14 +1,15 @@
 #pragma once
 
-#include "types.hpp"
 #include "trading_simulator.hpp"
-#include <vector>
-#include <string>
-#include <fstream>
-#include <sstream>
-#include <cmath>
+#include "types.hpp"
+
 #include <algorithm>
+#include <cmath>
+#include <fstream>
 #include <iostream>
+#include <sstream>
+#include <string>
+#include <vector>
 
 namespace hft {
 
@@ -44,11 +45,7 @@ enum class FillMode {
 class Backtester {
 public:
     explicit Backtester(const SimulatorConfig& config, FillMode fill_mode = FillMode::Aggressive)
-        : simulator_(config)
-        , fill_mode_(fill_mode)
-        , current_bid_order_id_(0)
-        , current_ask_order_id_(0)
-    {}
+        : simulator_(config), fill_mode_(fill_mode), current_bid_order_id_(0), current_ask_order_id_(0) {}
 
     // Load tick data from CSV file
     // Expected format: timestamp,bid,ask,bid_size,ask_size
@@ -83,9 +80,7 @@ public:
     }
 
     // Add tick data programmatically
-    void add_tick(const TickData& tick) {
-        ticks_.push_back(tick);
-    }
+    void add_tick(const TickData& tick) { ticks_.push_back(tick); }
 
     void add_tick(Timestamp ts, Price bid, Price ask, Quantity bid_size, Quantity ask_size) {
         ticks_.push_back(TickData{ts, bid, ask, bid_size, ask_size});
@@ -112,9 +107,7 @@ public:
             }
 
             // Generate new quotes
-            current_quote = simulator_.on_market_data(
-                tick.bid, tick.ask, tick.bid_size, tick.ask_size
-            );
+            current_quote = simulator_.on_market_data(tick.bid, tick.ask, tick.bid_size, tick.ask_size);
 
             // Track P&L and drawdown
             int64_t current_pnl = simulator_.total_pnl();
@@ -131,7 +124,8 @@ public:
             // Track position
             int64_t pos = std::abs(simulator_.position());
             position_sum += pos;
-            if (pos > max_pos) max_pos = pos;
+            if (pos > max_pos)
+                max_pos = pos;
         }
 
         // Calculate metrics
@@ -171,7 +165,7 @@ private:
     FillMode fill_mode_;
     std::vector<TickData> ticks_;
     std::vector<int64_t> pnl_history_;
-    std::vector<int64_t> trade_results_;  // P&L per trade
+    std::vector<int64_t> trade_results_; // P&L per trade
 
     OrderId current_bid_order_id_;
     OrderId current_ask_order_id_;
@@ -181,19 +175,24 @@ private:
         std::string token;
 
         try {
-            if (!std::getline(ss, token, ',')) return false;
+            if (!std::getline(ss, token, ','))
+                return false;
             tick.timestamp = std::stoull(token);
 
-            if (!std::getline(ss, token, ',')) return false;
+            if (!std::getline(ss, token, ','))
+                return false;
             tick.bid = static_cast<Price>(std::stoul(token));
 
-            if (!std::getline(ss, token, ',')) return false;
+            if (!std::getline(ss, token, ','))
+                return false;
             tick.ask = static_cast<Price>(std::stoul(token));
 
-            if (!std::getline(ss, token, ',')) return false;
+            if (!std::getline(ss, token, ','))
+                return false;
             tick.bid_size = static_cast<Quantity>(std::stoul(token));
 
-            if (!std::getline(ss, token, ',')) return false;
+            if (!std::getline(ss, token, ','))
+                return false;
             tick.ask_size = static_cast<Quantity>(std::stoul(token));
 
             return true;
@@ -220,44 +219,46 @@ private:
 
     bool should_fill_bid(const TickData& tick, const strategy::Quote& quote) const {
         switch (fill_mode_) {
-            case FillMode::Aggressive:
-                // Fill if market ask <= our bid (someone willing to sell at or below our bid)
-                return tick.ask <= quote.bid_price;
-            case FillMode::Passive:
-                // Fill if market ask touches our bid
-                return tick.ask == quote.bid_price;
-            case FillMode::Probabilistic:
-                // TODO: Implement probabilistic fill
-                return tick.ask <= quote.bid_price;
+        case FillMode::Aggressive:
+            // Fill if market ask <= our bid (someone willing to sell at or below our bid)
+            return tick.ask <= quote.bid_price;
+        case FillMode::Passive:
+            // Fill if market ask touches our bid
+            return tick.ask == quote.bid_price;
+        case FillMode::Probabilistic:
+            // TODO: Implement probabilistic fill
+            return tick.ask <= quote.bid_price;
         }
         return false;
     }
 
     bool should_fill_ask(const TickData& tick, const strategy::Quote& quote) const {
         switch (fill_mode_) {
-            case FillMode::Aggressive:
-                // Fill if market bid >= our ask (someone willing to buy at or above our ask)
-                return tick.bid >= quote.ask_price;
-            case FillMode::Passive:
-                return tick.bid == quote.ask_price;
-            case FillMode::Probabilistic:
-                return tick.bid >= quote.ask_price;
+        case FillMode::Aggressive:
+            // Fill if market bid >= our ask (someone willing to buy at or above our ask)
+            return tick.bid >= quote.ask_price;
+        case FillMode::Passive:
+            return tick.bid == quote.ask_price;
+        case FillMode::Probabilistic:
+            return tick.bid >= quote.ask_price;
         }
         return false;
     }
 
     double calculate_sharpe() const {
-        if (pnl_history_.size() < 2) return 0.0;
+        if (pnl_history_.size() < 2)
+            return 0.0;
 
         // Calculate returns
         std::vector<double> returns;
         for (size_t i = 1; i < pnl_history_.size(); ++i) {
-            returns.push_back(static_cast<double>(pnl_history_[i] - pnl_history_[i-1]));
+            returns.push_back(static_cast<double>(pnl_history_[i] - pnl_history_[i - 1]));
         }
 
         // Mean return
         double sum = 0;
-        for (double r : returns) sum += r;
+        for (double r : returns)
+            sum += r;
         double mean = sum / returns.size();
 
         // Std dev
@@ -267,7 +268,8 @@ private:
         }
         double std_dev = std::sqrt(sq_sum / returns.size());
 
-        if (std_dev == 0) return 0.0;
+        if (std_dev == 0)
+            return 0.0;
 
         // Annualize (assuming ~252 trading days, ~6.5 hours, ~23400 seconds)
         // Sharpe = mean / std * sqrt(N) where N is periods per year
@@ -276,14 +278,16 @@ private:
     }
 
     double calculate_win_rate() const {
-        if (trade_results_.empty()) return 0.0;
+        if (trade_results_.empty())
+            return 0.0;
 
         int wins = 0;
         for (int64_t pnl : trade_results_) {
-            if (pnl > 0) ++wins;
+            if (pnl > 0)
+                ++wins;
         }
         return static_cast<double>(wins) / trade_results_.size();
     }
 };
 
-}  // namespace hft
+} // namespace hft

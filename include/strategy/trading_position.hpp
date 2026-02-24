@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../types.hpp"
+
 #include <cmath>
 
 namespace hft {
@@ -15,8 +16,8 @@ namespace strategy {
  * - Live trading
  */
 struct TradingPosition {
-    double quantity = 0;      // Positive = long, negative = short
-    double avg_price = 0;     // Average entry price (as double for precision)
+    double quantity = 0;  // Positive = long, negative = short
+    double avg_price = 0; // Average entry price (as double for precision)
     Timestamp entry_time = 0;
 
     bool is_flat() const { return quantity == 0; }
@@ -26,7 +27,8 @@ struct TradingPosition {
 
     // Calculate unrealized P&L at given price
     double unrealized_pnl(double current_price) const {
-        if (is_flat()) return 0;
+        if (is_flat())
+            return 0;
         if (is_long()) {
             return (current_price - avg_price) * quantity;
         } else {
@@ -36,7 +38,8 @@ struct TradingPosition {
 
     // Calculate P&L percentage
     double pnl_percent(double current_price) const {
-        if (is_flat() || avg_price == 0) return 0;
+        if (is_flat() || avg_price == 0)
+            return 0;
         if (is_long()) {
             return (current_price - avg_price) / avg_price * 100;
         } else {
@@ -45,5 +48,5 @@ struct TradingPosition {
     }
 };
 
-}  // namespace strategy
-}  // namespace hft
+} // namespace strategy
+} // namespace hft

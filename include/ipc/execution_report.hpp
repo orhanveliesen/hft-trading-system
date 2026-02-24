@@ -1,8 +1,9 @@
 #pragma once
 
+#include "../types.hpp" // For hft::Side
+
 #include <cstdint>
 #include <cstring>
-#include "../types.hpp"  // For hft::Side
 
 namespace hft {
 namespace ipc {
@@ -12,11 +13,11 @@ namespace ipc {
  * Matches FIX protocol ExecType (Tag 150)
  */
 enum class ExecType : uint8_t {
-    New = 0,            // Order accepted
-    Trade = 1,          // Partial or full fill
-    Cancelled = 2,      // Order cancelled
-    Rejected = 3,       // Order rejected
-    Expired = 4         // Order expired (GTD/IOC)
+    New = 0,       // Order accepted
+    Trade = 1,     // Partial or full fill
+    Cancelled = 2, // Order cancelled
+    Rejected = 3,  // Order rejected
+    Expired = 4    // Order expired (GTD/IOC)
 };
 
 /**
@@ -24,7 +25,7 @@ enum class ExecType : uint8_t {
  * Matches FIX protocol OrdStatus (Tag 39)
  */
 enum class OrderStatus : uint8_t {
-    New = 0,            // Order acknowledged
+    New = 0, // Order acknowledged
     PartiallyFilled = 1,
     Filled = 2,
     Cancelled = 3,
@@ -35,10 +36,7 @@ enum class OrderStatus : uint8_t {
 /**
  * Order type
  */
-enum class OrderType : uint8_t {
-    Market = 0,
-    Limit = 1
-};
+enum class OrderType : uint8_t { Market = 0, Limit = 1 };
 
 // Use hft::Side from types.hpp (no duplicate definition)
 
@@ -57,46 +55,40 @@ enum class OrderType : uint8_t {
  */
 struct alignas(64) ExecutionReport {
     // Identification (16 bytes)
-    char symbol[8];                 // Symbol string (e.g., "BTCUSDT\0")
-    uint64_t order_id;              // Internal order ID
+    char symbol[8];    // Symbol string (e.g., "BTCUSDT\0")
+    uint64_t order_id; // Internal order ID
 
     // Execution details (24 bytes)
-    double filled_qty;              // Quantity filled in this execution
-    double filled_price;            // Execution price
-    double commission;              // Commission charged (from exchange)
+    double filled_qty;   // Quantity filled in this execution
+    double filled_price; // Execution price
+    double commission;   // Commission charged (from exchange)
 
     // Timestamps (16 bytes)
-    uint64_t order_timestamp_ns;    // When order was placed
-    uint64_t exec_timestamp_ns;     // When this execution occurred
+    uint64_t order_timestamp_ns; // When order was placed
+    uint64_t exec_timestamp_ns;  // When this execution occurred
 
     // Status (4 bytes)
-    ExecType exec_type;             // What happened
-    OrderStatus status;             // Current order state
-    OrderType order_type;           // Market or Limit
-    hft::Side side;                      // Buy or Sell
+    ExecType exec_type;   // What happened
+    OrderStatus status;   // Current order state
+    OrderType order_type; // Market or Limit
+    hft::Side side;       // Buy or Sell
 
     // Cumulative info (8 bytes) - total fills for this order
-    double cum_qty;                 // Total quantity filled so far
+    double cum_qty; // Total quantity filled so far
 
     // Commission asset (8 bytes)
-    char commission_asset[8];       // Asset used for commission (e.g., "USDT\0")
+    char commission_asset[8]; // Asset used for commission (e.g., "USDT\0")
 
     // Reject/Error info (24 bytes)
-    char reject_reason[24];         // Reason if rejected
+    char reject_reason[24]; // Reason if rejected
 
     // Helper methods
-    void clear() {
-        std::memset(this, 0, sizeof(ExecutionReport));
-    }
+    void clear() { std::memset(this, 0, sizeof(ExecutionReport)); }
 
-    bool is_fill() const {
-        return exec_type == ExecType::Trade;
-    }
+    bool is_fill() const { return exec_type == ExecType::Trade; }
 
     bool is_final() const {
-        return status == OrderStatus::Filled ||
-               status == OrderStatus::Cancelled ||
-               status == OrderStatus::Rejected ||
+        return status == OrderStatus::Filled || status == OrderStatus::Cancelled || status == OrderStatus::Rejected ||
                status == OrderStatus::Expired;
     }
 
@@ -104,15 +96,8 @@ struct alignas(64) ExecutionReport {
     bool is_sell() const { return side == hft::Side::Sell; }
 
     // Factory methods for common reports
-    static ExecutionReport market_fill(
-        const char* sym,
-        uint64_t oid,
-        hft::Side s,
-        double qty,
-        double price,
-        double comm,
-        uint64_t timestamp
-    ) {
+    static ExecutionReport market_fill(const char* sym, uint64_t oid, hft::Side s, double qty, double price,
+                                       double comm, uint64_t timestamp) {
         ExecutionReport r;
         r.clear();
         std::strncpy(r.symbol, sym, sizeof(r.symbol) - 1);
@@ -131,12 +116,7 @@ struct alignas(64) ExecutionReport {
         return r;
     }
 
-    static ExecutionReport limit_accepted(
-        const char* sym,
-        uint64_t oid,
-        hft::Side s,
-        uint64_t timestamp
-    ) {
+    static ExecutionReport limit_accepted(const char* sym, uint64_t oid, hft::Side s, uint64_t timestamp) {
         ExecutionReport r;
         r.clear();
         std::strncpy(r.symbol, sym, sizeof(r.symbol) - 1);
@@ -150,16 +130,8 @@ struct alignas(64) ExecutionReport {
         return r;
     }
 
-    static ExecutionReport limit_fill(
-        const char* sym,
-        uint64_t oid,
-        hft::Side s,
-        double qty,
-        double price,
-        double comm,
-        uint64_t order_ts,
-        uint64_t exec_ts
-    ) {
+    static ExecutionReport limit_fill(const char* sym, uint64_t oid, hft::Side s, double qty, double price, double comm,
+                                      uint64_t order_ts, uint64_t exec_ts) {
         ExecutionReport r;
         r.clear();
         std::strncpy(r.symbol, sym, sizeof(r.symbol) - 1);
@@ -178,14 +150,8 @@ struct alignas(64) ExecutionReport {
         return r;
     }
 
-    static ExecutionReport rejected(
-        const char* sym,
-        uint64_t oid,
-        hft::Side s,
-        OrderType ot,
-        const char* reason,
-        uint64_t timestamp
-    ) {
+    static ExecutionReport rejected(const char* sym, uint64_t oid, hft::Side s, OrderType ot, const char* reason,
+                                    uint64_t timestamp) {
         ExecutionReport r;
         r.clear();
         std::strncpy(r.symbol, sym, sizeof(r.symbol) - 1);
@@ -206,5 +172,5 @@ struct alignas(64) ExecutionReport {
 static_assert(sizeof(ExecutionReport) == 128, "ExecutionReport size mismatch");
 static_assert(alignof(ExecutionReport) == 64, "ExecutionReport must be cache-line aligned");
 
-}  // namespace ipc
-}  // namespace hft
+} // namespace ipc
+} // namespace hft

@@ -22,13 +22,13 @@
  *     cfg->set_spread_multiplier(20);  // 2.0x
  */
 
-#include <atomic>
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <cstring>
-#include <sys/mman.h>
 #include <fcntl.h>
+#include <sys/mman.h>
 #include <unistd.h>
 
 namespace hft {
@@ -39,28 +39,26 @@ namespace ipc {
  * Used by SharedConfig::get/set_strategy_for_regime()
  */
 enum class StrategyType : uint8_t {
-    NONE = 0,       // No trading
-    MOMENTUM = 1,   // Momentum/trend following
-    MEAN_REV = 2,   // Mean reversion
-    MKT_MAKER = 3,  // Market making
-    DEFENSIVE = 4,  // Defensive (reduced risk)
-    CAUTIOUS = 5,   // Extra cautious (high vol)
-    SMART = 6       // Smart/adaptive strategy
+    NONE = 0,      // No trading
+    MOMENTUM = 1,  // Momentum/trend following
+    MEAN_REV = 2,  // Mean reversion
+    MKT_MAKER = 3, // Market making
+    DEFENSIVE = 4, // Defensive (reduced risk)
+    CAUTIOUS = 5,  // Extra cautious (high vol)
+    SMART = 6      // Smart/adaptive strategy
 };
 
 constexpr size_t STRATEGY_TYPE_COUNT = 7;
 
 // Strategy name lookup table: {long_name, short_name}
 // Index matches StrategyType enum value - no branching needed
-constexpr std::array<std::pair<const char*, const char*>, STRATEGY_TYPE_COUNT> STRATEGY_NAMES = {{
-    {"NONE", "OFF"},
-    {"MOMENTUM", "MOM"},
-    {"MEAN_REV", "MRV"},
-    {"MKT_MAKER", "MMK"},
-    {"DEFENSIVE", "DEF"},
-    {"CAUTIOUS", "CAU"},
-    {"SMART", "SMT"}
-}};
+constexpr std::array<std::pair<const char*, const char*>, STRATEGY_TYPE_COUNT> STRATEGY_NAMES = {{{"NONE", "OFF"},
+                                                                                                  {"MOMENTUM", "MOM"},
+                                                                                                  {"MEAN_REV", "MRV"},
+                                                                                                  {"MKT_MAKER", "MMK"},
+                                                                                                  {"DEFENSIVE", "DEF"},
+                                                                                                  {"CAUTIOUS", "CAU"},
+                                                                                                  {"SMART", "SMT"}}};
 
 inline const char* strategy_type_to_string(StrategyType type) {
     const auto idx = static_cast<size_t>(type);
@@ -85,18 +83,14 @@ inline const char* strategy_type_to_short(StrategyType type) {
  *         Tuner does NOT make changes (last config preserved)
  */
 enum class TunerState : uint8_t {
-    OFF = 0,      // Traditional strategies (regime-based)
-    ON = 1,       // AI tuning active, ConfigStrategy runs
-    PAUSED = 2    // ConfigStrategy runs with frozen config
+    OFF = 0,   // Traditional strategies (regime-based)
+    ON = 1,    // AI tuning active, ConfigStrategy runs
+    PAUSED = 2 // ConfigStrategy runs with frozen config
 };
 
 constexpr size_t TUNER_STATE_COUNT = 3;
 
-constexpr std::array<const char*, TUNER_STATE_COUNT> TUNER_STATE_NAMES = {{
-    "OFF",
-    "ON",
-    "PAUSED"
-}};
+constexpr std::array<const char*, TUNER_STATE_COUNT> TUNER_STATE_NAMES = {{"OFF", "ON", "PAUSED"}};
 
 inline const char* tuner_state_to_string(TunerState state) {
     const auto idx = static_cast<size_t>(state);
@@ -104,45 +98,45 @@ inline const char* tuner_state_to_string(TunerState state) {
 }
 
 struct SharedConfig {
-    static constexpr uint64_t MAGIC = 0x4846544346494700ULL;  // "HFTCFG\0"
+    static constexpr uint64_t MAGIC = 0x4846544346494700ULL; // "HFTCFG\0"
 #ifdef TRADER_BUILD_HASH
     static constexpr uint32_t VERSION = util::hex_to_u32(TRADER_BUILD_HASH);
 #else
-    static constexpr uint32_t VERSION = 0;  // Fallback
+    static constexpr uint32_t VERSION = 0; // Fallback
 #endif
 
     // Header
     uint64_t magic;
     uint32_t version;
-    std::atomic<uint32_t> sequence;  // Incremented on each change
+    std::atomic<uint32_t> sequence; // Incremented on each change
 
     // ReviewGate config
-    std::atomic<int32_t> spread_multiplier_x10;  // Default: 15 (1.5x)
+    std::atomic<int32_t> spread_multiplier_x10;   // Default: 15 (1.5x)
     std::atomic<int32_t> drawdown_threshold_x100; // Default: 200 (2%)
     std::atomic<int32_t> loss_streak_threshold;   // Default: 2
 
     // SmartStrategy config - Position sizing
-    std::atomic<int32_t> base_position_pct_x100;  // Default: 200 (2%)
-    std::atomic<int32_t> max_position_pct_x100;   // Default: 500 (5%)
-    std::atomic<int32_t> min_position_pct_x100;   // Default: 100 (1%)
-    std::atomic<int32_t> target_pct_x100;         // Default: 150 (1.5%)
-    std::atomic<int32_t> stop_pct_x100;           // Default: 300 (3%)
-    std::atomic<int32_t> pullback_pct_x100;       // Default: 50 (0.5%) - trend exit threshold
+    std::atomic<int32_t> base_position_pct_x100; // Default: 200 (2%)
+    std::atomic<int32_t> max_position_pct_x100;  // Default: 500 (5%)
+    std::atomic<int32_t> min_position_pct_x100;  // Default: 100 (1%)
+    std::atomic<int32_t> target_pct_x100;        // Default: 150 (1.5%)
+    std::atomic<int32_t> stop_pct_x100;          // Default: 300 (3%)
+    std::atomic<int32_t> pullback_pct_x100;      // Default: 50 (0.5%) - trend exit threshold
 
     // SmartStrategy config - Performance tracking
-    std::atomic<int32_t> performance_window;      // Default: 20 (track last N trades)
-    std::atomic<int32_t> min_confidence_x100;     // Default: 30 (0.3 - below this, no signal)
+    std::atomic<int32_t> performance_window;  // Default: 20 (track last N trades)
+    std::atomic<int32_t> min_confidence_x100; // Default: 30 (0.3 - below this, no signal)
 
     // SmartStrategy config - Mode transitions (streak-based)
-    std::atomic<int32_t> losses_to_cautious;      // Default: 2
+    std::atomic<int32_t> losses_to_cautious;       // Default: 2
     std::atomic<int32_t> losses_to_tighten_signal; // Default: 3
-    std::atomic<int32_t> losses_to_defensive;     // Default: 4
-    std::atomic<int32_t> losses_to_pause;         // Default: 5
-    std::atomic<int32_t> losses_to_exit_only;     // Default: 6
+    std::atomic<int32_t> losses_to_defensive;      // Default: 4
+    std::atomic<int32_t> losses_to_pause;          // Default: 5
+    std::atomic<int32_t> losses_to_exit_only;      // Default: 6
 
     // SmartStrategy config - Win streak thresholds
-    std::atomic<int32_t> wins_to_aggressive;      // Default: 3
-    std::atomic<int32_t> wins_max_aggressive;     // Default: 5
+    std::atomic<int32_t> wins_to_aggressive;  // Default: 3
+    std::atomic<int32_t> wins_max_aggressive; // Default: 5
 
     // SmartStrategy config - Mode transitions (drawdown-based)
     std::atomic<int32_t> drawdown_defensive_x100; // Default: 300 (3%)
@@ -153,102 +147,102 @@ struct SharedConfig {
     std::atomic<int32_t> win_rate_cautious_x100;   // Default: 40 (<40% → CAUTIOUS)
 
     // SmartStrategy config - Sharpe ratio thresholds
-    std::atomic<int32_t> sharpe_aggressive_x100;  // Default: 100 (>1.0 → AGGRESSIVE)
-    std::atomic<int32_t> sharpe_cautious_x100;    // Default: 30 (<0.3 → CAUTIOUS)
-    std::atomic<int32_t> sharpe_defensive_x100;   // Default: 0 (<0 → DEFENSIVE)
+    std::atomic<int32_t> sharpe_aggressive_x100; // Default: 100 (>1.0 → AGGRESSIVE)
+    std::atomic<int32_t> sharpe_cautious_x100;   // Default: 30 (<0.3 → CAUTIOUS)
+    std::atomic<int32_t> sharpe_defensive_x100;  // Default: 0 (<0 → DEFENSIVE)
 
     // SmartStrategy config - Signal thresholds by mode
-    std::atomic<int32_t> signal_aggressive_x100;  // Default: 30 (0.3)
-    std::atomic<int32_t> signal_normal_x100;      // Default: 50 (0.5)
-    std::atomic<int32_t> signal_cautious_x100;    // Default: 70 (0.7)
+    std::atomic<int32_t> signal_aggressive_x100; // Default: 30 (0.3)
+    std::atomic<int32_t> signal_normal_x100;     // Default: 50 (0.5)
+    std::atomic<int32_t> signal_cautious_x100;   // Default: 70 (0.7)
 
     // SmartStrategy config - Risk/reward
-    std::atomic<int32_t> min_risk_reward_x100;    // Default: 60 (0.6)
+    std::atomic<int32_t> min_risk_reward_x100; // Default: 60 (0.6)
 
     // Trading costs (for paper trading simulation)
-    std::atomic<int32_t> commission_rate_x10000;  // Default: 10 (0.1% = 0.001)
-    std::atomic<int32_t> slippage_bps_x100;       // Default: 0 (slippage in basis points)
+    std::atomic<int32_t> commission_rate_x10000; // Default: 10 (0.1% = 0.001)
+    std::atomic<int32_t> slippage_bps_x100;      // Default: 0 (slippage in basis points)
 
     // Trade filtering (anti-overtrading)
-    std::atomic<int32_t> min_trade_value_x100;    // Default: 10000 ($100 minimum trade)
-    std::atomic<int32_t> cooldown_ms;             // Default: 2000 (2 second cooldown)
-    std::atomic<int32_t> signal_strength;         // Default: 2 (1=Medium, 2=Strong)
+    std::atomic<int32_t> min_trade_value_x100; // Default: 10000 ($100 minimum trade)
+    std::atomic<int32_t> cooldown_ms;          // Default: 2000 (2 second cooldown)
+    std::atomic<int32_t> signal_strength;      // Default: 2 (1=Medium, 2=Strong)
 
     // EMA deviation thresholds (max % above EMA to allow buy)
-    std::atomic<int32_t> ema_dev_trending_x1000;  // Default: 10 (1% = 0.01)
-    std::atomic<int32_t> ema_dev_ranging_x1000;   // Default: 5 (0.5% = 0.005)
-    std::atomic<int32_t> ema_dev_highvol_x1000;   // Default: 2 (0.2% = 0.002)
+    std::atomic<int32_t> ema_dev_trending_x1000; // Default: 10 (1% = 0.01)
+    std::atomic<int32_t> ema_dev_ranging_x1000;  // Default: 5 (0.5% = 0.005)
+    std::atomic<int32_t> ema_dev_highvol_x1000;  // Default: 2 (0.2% = 0.002)
 
     // Spike detection thresholds (regime detector)
     // Based on statistical significance: spike = move > N standard deviations
-    std::atomic<int32_t> spike_threshold_x100;    // Default: 300 (3.0σ - 99.7% significance)
-    std::atomic<int32_t> spike_lookback;          // Default: 10 (bars for avg calculation)
-    std::atomic<int32_t> spike_min_move_x10000;   // Default: 50 (0.5% minimum move filter)
-    std::atomic<int32_t> spike_cooldown;          // Default: 5 (bars between detections)
+    std::atomic<int32_t> spike_threshold_x100;  // Default: 300 (3.0σ - 99.7% significance)
+    std::atomic<int32_t> spike_lookback;        // Default: 10 (bars for avg calculation)
+    std::atomic<int32_t> spike_min_move_x10000; // Default: 50 (0.5% minimum move filter)
+    std::atomic<int32_t> spike_cooldown;        // Default: 5 (bars between detections)
 
     // Mode overrides
-    std::atomic<uint8_t> force_mode;    // 0 = auto, 1-5 = force specific mode
-    std::atomic<uint8_t> trading_enabled;  // 0 = paused, 1 = active
-    std::atomic<uint8_t> paper_trading;    // 1 = paper trading mode (simulation)
+    std::atomic<uint8_t> force_mode;      // 0 = auto, 1-5 = force specific mode
+    std::atomic<uint8_t> trading_enabled; // 0 = paused, 1 = active
+    std::atomic<uint8_t> paper_trading;   // 1 = paper trading mode (simulation)
 
     // Tuner integration (simplified - single state enum)
     // TunerState: OFF=traditional strategies, ON=AI-controlled, PAUSED=frozen config
-    std::atomic<uint8_t> tuner_state;      // TunerState enum value
-    std::atomic<uint8_t> manual_override;   // 1 = manual override active (dashboard controls strategy)
-    std::atomic<uint8_t> reserved_tuner2;  // Padding for alignment
-    std::atomic<uint8_t> reserved_tuner3;  // Padding for alignment
+    std::atomic<uint8_t> tuner_state;     // TunerState enum value
+    std::atomic<uint8_t> manual_override; // 1 = manual override active (dashboard controls strategy)
+    std::atomic<uint8_t> reserved_tuner2; // Padding for alignment
+    std::atomic<uint8_t> reserved_tuner3; // Padding for alignment
 
     // Manual tune trigger (dashboard can request immediate tuning)
-    std::atomic<int64_t> manual_tune_request_ns;  // Non-zero = tune immediately, then clear
+    std::atomic<int64_t> manual_tune_request_ns; // Non-zero = tune immediately, then clear
 
     // Tuner scheduling (dashboard can adjust interval)
-    std::atomic<int32_t> tuner_interval_sec;      // Tuning interval in seconds (default: 300 = 5 min)
+    std::atomic<int32_t> tuner_interval_sec; // Tuning interval in seconds (default: 300 = 5 min)
 
     // Order execution defaults (global, symbols can override)
-    std::atomic<uint8_t> order_type_default;      // 0=Auto, 1=MarketOnly, 2=LimitOnly, 3=Adaptive
-    std::atomic<int16_t> limit_offset_bps_x100;   // Default limit offset (bps * 100)
-    std::atomic<int32_t> limit_timeout_ms;        // Default adaptive timeout (ms)
+    std::atomic<uint8_t> order_type_default;    // 0=Auto, 1=MarketOnly, 2=LimitOnly, 3=Adaptive
+    std::atomic<int16_t> limit_offset_bps_x100; // Default limit offset (bps * 100)
+    std::atomic<int32_t> limit_timeout_ms;      // Default adaptive timeout (ms)
 
     // Trader writes these (dashboard reads)
-    std::atomic<uint8_t> active_mode;   // Current active mode (Trader sets this)
-    std::atomic<uint8_t> active_signals; // Number of active signals
+    std::atomic<uint8_t> active_mode;        // Current active mode (Trader sets this)
+    std::atomic<uint8_t> active_signals;     // Number of active signals
     std::atomic<int32_t> consecutive_losses; // Current loss streak
     std::atomic<int32_t> consecutive_wins;   // Current win streak
 
     // Trader lifecycle (heartbeat)
     std::atomic<int64_t> heartbeat_ns;  // Last update timestamp (epoch ns)
-    std::atomic<int32_t> trader_pid;       // Trader process ID
-    std::atomic<uint8_t> trader_status;    // 0=stopped, 1=starting, 2=running, 3=shutting_down
+    std::atomic<int32_t> trader_pid;    // Trader process ID
+    std::atomic<uint8_t> trader_status; // 0=stopped, 1=starting, 2=running, 3=shutting_down
 
     // Trader start time (for dashboard restart detection)
-    std::atomic<int64_t> trader_start_time_ns;  // When Trader process started
+    std::atomic<int64_t> trader_start_time_ns; // When Trader process started
 
     // WebSocket connection status (Trader writes, dashboard reads)
-    std::atomic<uint8_t> ws_market_status;     // 0=disconnected, 1=degraded, 2=healthy
-    std::atomic<uint8_t> ws_user_status;       // 0=disconnected, 1=degraded, 2=healthy
-    std::atomic<uint8_t> ws_reserved1;         // Padding for alignment
-    std::atomic<uint8_t> ws_reserved2;         // Padding for alignment
-    std::atomic<uint32_t> ws_reconnect_count;  // Total reconnection attempts
-    std::atomic<int64_t> ws_last_message_ns;   // Last received message timestamp
+    std::atomic<uint8_t> ws_market_status;    // 0=disconnected, 1=degraded, 2=healthy
+    std::atomic<uint8_t> ws_user_status;      // 0=disconnected, 1=degraded, 2=healthy
+    std::atomic<uint8_t> ws_reserved1;        // Padding for alignment
+    std::atomic<uint8_t> ws_reserved2;        // Padding for alignment
+    std::atomic<uint32_t> ws_reconnect_count; // Total reconnection attempts
+    std::atomic<int64_t> ws_last_message_ns;  // Last received message timestamp
 
     // Build info
-    char build_hash[12];  // Git commit hash (8 chars + null + padding)
+    char build_hash[12]; // Git commit hash (8 chars + null + padding)
 
     // Display settings (dashboard uses these)
-    std::atomic<int32_t> price_decimals;   // Decimal places for prices (default 4)
-    std::atomic<int32_t> money_decimals;   // Decimal places for money/P&L (default 2)
-    std::atomic<int32_t> qty_decimals;     // Decimal places for quantities (default 4)
+    std::atomic<int32_t> price_decimals; // Decimal places for prices (default 4)
+    std::atomic<int32_t> money_decimals; // Decimal places for money/P&L (default 2)
+    std::atomic<int32_t> qty_decimals;   // Decimal places for quantities (default 4)
 
     // Regime → Strategy mapping (configurable)
     // Index: 0=Unknown, 1=TrendingUp, 2=TrendingDown, 3=Ranging, 4=HighVol, 5=LowVol, 6=Spike
     // Value: StrategyType enum (0=NONE, 1=MOMENTUM, 2=MEAN_REV, 3=MKT_MAKER, 4=DEFENSIVE, 5=CAUTIOUS, 6=SMART)
-    std::atomic<uint8_t> regime_strategy[8];  // 7 regimes + 1 padding
+    std::atomic<uint8_t> regime_strategy[8]; // 7 regimes + 1 padding
 
     // Position sizing mode
     // 0 = Percentage-based (use portfolio_value * position_pct, recommended)
     // 1 = Unit-based (use max_units directly)
     std::atomic<uint8_t> position_sizing_mode;
-    std::atomic<int32_t> max_position_units;  // Max units when unit-based mode (default: 10)
+    std::atomic<int32_t> max_position_units; // Max units when unit-based mode (default: 10)
 
     // === Accessors ===
     double spread_multiplier() const { return spread_multiplier_x10.load() / 10.0; }
@@ -325,26 +319,19 @@ struct SharedConfig {
     int32_t get_max_position_units() const { return max_position_units.load(); }
 
     // Check if manual tune was requested
-    bool should_tune_now() const {
-        return manual_tune_request_ns.load() > 0;
-    }
+    bool should_tune_now() const { return manual_tune_request_ns.load() > 0; }
 
     // Trigger manual tune (dashboard calls this)
     void request_manual_tune() {
         auto now = std::chrono::steady_clock::now().time_since_epoch();
-        manual_tune_request_ns.store(
-            std::chrono::duration_cast<std::chrono::nanoseconds>(now).count());
+        manual_tune_request_ns.store(std::chrono::duration_cast<std::chrono::nanoseconds>(now).count());
     }
 
     // Clear manual tune request (tuner calls this after processing)
-    void clear_manual_tune_request() {
-        manual_tune_request_ns.store(0);
-    }
+    void clear_manual_tune_request() { manual_tune_request_ns.store(0); }
 
     // Get manual tune request timestamp
-    int64_t get_manual_tune_request_ns() const {
-        return manual_tune_request_ns.load();
-    }
+    int64_t get_manual_tune_request_ns() const { return manual_tune_request_ns.load(); }
 
     // Order execution accessors
     uint8_t get_order_type_default() const { return order_type_default.load(); }
@@ -368,12 +355,14 @@ struct SharedConfig {
     // Regime → Strategy mapping accessors
     // regime_idx: 0=Unknown, 1=TrendingUp, 2=TrendingDown, 3=Ranging, 4=HighVol, 5=LowVol, 6=Spike
     uint8_t get_strategy_for_regime(int regime_idx) const {
-        if (regime_idx < 0 || regime_idx > 6) return 0;
+        if (regime_idx < 0 || regime_idx > 6)
+            return 0;
         return regime_strategy[regime_idx].load();
     }
 
     void set_strategy_for_regime(int regime_idx, uint8_t strategy_type) {
-        if (regime_idx < 0 || regime_idx > 6) return;
+        if (regime_idx < 0 || regime_idx > 6)
+            return;
         regime_strategy[regime_idx].store(strategy_type);
         sequence.fetch_add(1);
     }
@@ -534,15 +523,15 @@ struct SharedConfig {
     }
     // EMA deviation setters (val as percentage, e.g., 1.0 for 1%)
     void set_ema_dev_trending(double val) {
-        ema_dev_trending_x1000.store(static_cast<int32_t>(val * 10));  // 1.0% -> 10
+        ema_dev_trending_x1000.store(static_cast<int32_t>(val * 10)); // 1.0% -> 10
         sequence.fetch_add(1);
     }
     void set_ema_dev_ranging(double val) {
-        ema_dev_ranging_x1000.store(static_cast<int32_t>(val * 10));   // 0.5% -> 5
+        ema_dev_ranging_x1000.store(static_cast<int32_t>(val * 10)); // 0.5% -> 5
         sequence.fetch_add(1);
     }
     void set_ema_dev_highvol(double val) {
-        ema_dev_highvol_x1000.store(static_cast<int32_t>(val * 10));   // 0.2% -> 2
+        ema_dev_highvol_x1000.store(static_cast<int32_t>(val * 10)); // 0.2% -> 2
         sequence.fetch_add(1);
     }
     // Spike detection setters
@@ -628,9 +617,18 @@ struct SharedConfig {
     int get_price_decimals() const { return price_decimals.load(); }
     int get_money_decimals() const { return money_decimals.load(); }
     int get_qty_decimals() const { return qty_decimals.load(); }
-    void set_price_decimals(int val) { price_decimals.store(val); sequence.fetch_add(1); }
-    void set_money_decimals(int val) { money_decimals.store(val); sequence.fetch_add(1); }
-    void set_qty_decimals(int val) { qty_decimals.store(val); sequence.fetch_add(1); }
+    void set_price_decimals(int val) {
+        price_decimals.store(val);
+        sequence.fetch_add(1);
+    }
+    void set_money_decimals(int val) {
+        money_decimals.store(val);
+        sequence.fetch_add(1);
+    }
+    void set_qty_decimals(int val) {
+        qty_decimals.store(val);
+        sequence.fetch_add(1);
+    }
 
     // Trader lifecycle
     void set_trader_status(uint8_t status) { trader_status.store(status); }
@@ -667,7 +665,8 @@ struct SharedConfig {
         auto now = std::chrono::steady_clock::now().time_since_epoch();
         int64_t now_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(now).count();
         int64_t last = ws_last_message_ns.load();
-        if (last == 0) return false;  // Never received a message
+        if (last == 0)
+            return false; // Never received a message
         int64_t diff_ns = now_ns - last;
         return diff_ns < (timeout_seconds * 1'000'000'000LL);
     }
@@ -675,10 +674,14 @@ struct SharedConfig {
     // WebSocket status names for display
     static const char* ws_status_name(uint8_t status) {
         switch (status) {
-            case 0: return "Disconnected";
-            case 1: return "Degraded";
-            case 2: return "Healthy";
-            default: return "Unknown";
+        case 0:
+            return "Disconnected";
+        case 1:
+            return "Degraded";
+        case 2:
+            return "Healthy";
+        default:
+            return "Unknown";
         }
     }
 
@@ -775,17 +778,17 @@ struct SharedConfig {
         spike_cooldown.store(config::spike::COOLDOWN_BARS);
 
         // Feature flags
-        force_mode.store(0);                  // auto
+        force_mode.store(0); // auto
         trading_enabled.store(config::flags::TRADING_ENABLED ? 1 : 0);
         paper_trading.store(config::flags::PAPER_TRADING ? 1 : 0);
 
         // Tuner state (simplified - single enum)
-        tuner_state.store(static_cast<uint8_t>(TunerState::ON));   // ON by default
+        tuner_state.store(static_cast<uint8_t>(TunerState::ON)); // ON by default
         manual_override.store(0);
         reserved_tuner2.store(0);
         reserved_tuner3.store(0);
         manual_tune_request_ns.store(0);
-        tuner_interval_sec.store(300);  // Default: 5 minutes
+        tuner_interval_sec.store(300); // Default: 5 minutes
 
         // Order execution settings
         order_type_default.store(config::execution::ORDER_TYPE_AUTO);
@@ -799,21 +802,21 @@ struct SharedConfig {
 
         // Regime → Strategy mapping
         // StrategyType: 0=NONE, 1=MOMENTUM, 2=MEAN_REV, 3=MKT_MAKER, 4=DEFENSIVE, 5=CAUTIOUS, 6=SMART
-        regime_strategy[0].store(0);  // Unknown → NONE
-        regime_strategy[1].store(1);  // TrendingUp → MOMENTUM
-        regime_strategy[2].store(4);  // TrendingDown → DEFENSIVE
-        regime_strategy[3].store(3);  // Ranging → MKT_MAKER
-        regime_strategy[4].store(5);  // HighVolatility → CAUTIOUS
-        regime_strategy[5].store(3);  // LowVolatility → MKT_MAKER
-        regime_strategy[6].store(0);  // Spike → NONE
-        regime_strategy[7].store(0);  // padding
+        regime_strategy[0].store(0); // Unknown → NONE
+        regime_strategy[1].store(1); // TrendingUp → MOMENTUM
+        regime_strategy[2].store(4); // TrendingDown → DEFENSIVE
+        regime_strategy[3].store(3); // Ranging → MKT_MAKER
+        regime_strategy[4].store(5); // HighVolatility → CAUTIOUS
+        regime_strategy[5].store(3); // LowVolatility → MKT_MAKER
+        regime_strategy[6].store(0); // Spike → NONE
+        regime_strategy[7].store(0); // padding
 
         // Position sizing mode
-        position_sizing_mode.store(0);        // percentage-based
+        position_sizing_mode.store(0); // percentage-based
         max_position_units.store(config::position::MAX_UNITS);
 
         // Trader status
-        active_mode.store(2);                 // NORMAL
+        active_mode.store(2); // NORMAL
         active_signals.store(0);
         consecutive_losses.store(0);
         consecutive_wins.store(0);
@@ -821,16 +824,16 @@ struct SharedConfig {
         // Trader lifecycle
         heartbeat_ns.store(0);
         trader_pid.store(0);
-        trader_status.store(0);               // stopped
-        trader_start_time_ns.store(0);           // not started yet
+        trader_status.store(0);        // stopped
+        trader_start_time_ns.store(0); // not started yet
 
         // WebSocket connection status
-        ws_market_status.store(0);            // disconnected
-        ws_user_status.store(0);              // disconnected
+        ws_market_status.store(0); // disconnected
+        ws_user_status.store(0);   // disconnected
         ws_reserved1.store(0);
         ws_reserved2.store(0);
-        ws_reconnect_count.store(0);          // no reconnects yet
-        ws_last_message_ns.store(0);          // no messages yet
+        ws_reconnect_count.store(0); // no reconnects yet
+        ws_last_message_ns.store(0); // no messages yet
 
         // Build info
 #ifdef TRADER_BUILD_HASH
@@ -843,25 +846,24 @@ struct SharedConfig {
 
     const char* get_build_hash() const { return build_hash; }
 
-    bool is_valid() const {
-        return magic == MAGIC && version == VERSION;
-    }
+    bool is_valid() const { return magic == MAGIC && version == VERSION; }
 
     // === Shared Memory Factory ===
     static SharedConfig* create(const char* name) {
         int fd = shm_open(name, O_CREAT | O_RDWR, 0666);
-        if (fd < 0) return nullptr;
+        if (fd < 0)
+            return nullptr;
 
         if (ftruncate(fd, sizeof(SharedConfig)) < 0) {
             close(fd);
             return nullptr;
         }
 
-        void* ptr = mmap(nullptr, sizeof(SharedConfig),
-                         PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+        void* ptr = mmap(nullptr, sizeof(SharedConfig), PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
         close(fd);
 
-        if (ptr == MAP_FAILED) return nullptr;
+        if (ptr == MAP_FAILED)
+            return nullptr;
 
         auto* cfg = static_cast<SharedConfig*>(ptr);
         cfg->init();
@@ -870,13 +872,14 @@ struct SharedConfig {
 
     static SharedConfig* open(const char* name) {
         int fd = shm_open(name, O_RDONLY, 0666);
-        if (fd < 0) return nullptr;
+        if (fd < 0)
+            return nullptr;
 
-        void* ptr = mmap(nullptr, sizeof(SharedConfig),
-                         PROT_READ, MAP_SHARED, fd, 0);
+        void* ptr = mmap(nullptr, sizeof(SharedConfig), PROT_READ, MAP_SHARED, fd, 0);
         close(fd);
 
-        if (ptr == MAP_FAILED) return nullptr;
+        if (ptr == MAP_FAILED)
+            return nullptr;
 
         auto* cfg = static_cast<SharedConfig*>(ptr);
         if (!cfg->is_valid()) {
@@ -888,13 +891,14 @@ struct SharedConfig {
 
     static SharedConfig* open_rw(const char* name) {
         int fd = shm_open(name, O_RDWR, 0666);
-        if (fd < 0) return nullptr;
+        if (fd < 0)
+            return nullptr;
 
-        void* ptr = mmap(nullptr, sizeof(SharedConfig),
-                         PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+        void* ptr = mmap(nullptr, sizeof(SharedConfig), PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
         close(fd);
 
-        if (ptr == MAP_FAILED) return nullptr;
+        if (ptr == MAP_FAILED)
+            return nullptr;
 
         auto* cfg = static_cast<SharedConfig*>(ptr);
         if (!cfg->is_valid()) {
@@ -904,10 +908,8 @@ struct SharedConfig {
         return cfg;
     }
 
-    static void destroy(const char* name) {
-        shm_unlink(name);
-    }
+    static void destroy(const char* name) { shm_unlink(name); }
 };
 
-}  // namespace ipc
-}  // namespace hft
+} // namespace ipc
+} // namespace hft

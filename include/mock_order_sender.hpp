@@ -1,8 +1,9 @@
 #pragma once
 
 #include "order_sender.hpp"
-#include <vector>
+
 #include <utility>
+#include <vector>
 
 namespace hft {
 
@@ -77,9 +78,7 @@ private:
 };
 
 // Verify implementations satisfy the concept
-static_assert(concepts::OrderSender<MockOrderSender>,
-              "MockOrderSender must satisfy OrderSender concept");
-static_assert(concepts::OrderSender<NullOrderSender>,
-              "NullOrderSender must satisfy OrderSender concept");
+static_assert(concepts::OrderSender<MockOrderSender>, "MockOrderSender must satisfy OrderSender concept");
+static_assert(concepts::OrderSender<NullOrderSender>, "NullOrderSender must satisfy OrderSender concept");
 
-}  // namespace hft
+} // namespace hft

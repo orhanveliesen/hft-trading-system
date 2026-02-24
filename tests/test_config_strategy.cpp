@@ -8,64 +8,72 @@
  * 4. ConfigStrategy signal generation
  */
 
-#include <iostream>
-#include <cassert>
-#include <cstring>
-
+#include "../include/config/defaults.hpp"
 #include "../include/ipc/shared_config.hpp"
 #include "../include/ipc/symbol_config.hpp"
 #include "../include/ipc/tuner_event.hpp"
-#include "../include/config/defaults.hpp"
+
+#include <cassert>
+#include <cstring>
+#include <iostream>
 
 #define TEST(name) void name()
 
-#define RUN_TEST(name) do { \
-    std::cout << "  " << #name << "... "; \
-    try { \
-        name(); \
-        std::cout << "PASSED\n"; \
-    } catch (...) { \
-        std::cout << "FAILED (exception)\n"; \
-        return 1; \
-    } \
-} while(0)
+#define RUN_TEST(name)                                                                                                 \
+    do {                                                                                                               \
+        std::cout << "  " << #name << "... ";                                                                          \
+        try {                                                                                                          \
+            name();                                                                                                    \
+            std::cout << "PASSED\n";                                                                                   \
+        } catch (...) {                                                                                                \
+            std::cout << "FAILED (exception)\n";                                                                       \
+            return 1;                                                                                                  \
+        }                                                                                                              \
+    } while (0)
 
-#define ASSERT_EQ(a, b) do { \
-    if ((a) != (b)) { \
-        std::cerr << "\nFAIL: " << #a << " != " << #b << "\n"; \
-        assert(false); \
-    } \
-} while(0)
+#define ASSERT_EQ(a, b)                                                                                                \
+    do {                                                                                                               \
+        if ((a) != (b)) {                                                                                              \
+            std::cerr << "\nFAIL: " << #a << " != " << #b << "\n";                                                     \
+            assert(false);                                                                                             \
+        }                                                                                                              \
+    } while (0)
 
 // For enum class types (TunerState, etc.)
-#define ASSERT_EQ_ENUM(a, b) do { \
-    if ((a) != (b)) { \
-        std::cerr << "\nFAIL: " << #a << " (" << static_cast<int>(a) << ") != " << #b << " (" << static_cast<int>(b) << ")\n"; \
-        assert(false); \
-    } \
-} while(0)
+#define ASSERT_EQ_ENUM(a, b)                                                                                           \
+    do {                                                                                                               \
+        if ((a) != (b)) {                                                                                              \
+            std::cerr << "\nFAIL: " << #a << " (" << static_cast<int>(a) << ") != " << #b << " ("                      \
+                      << static_cast<int>(b) << ")\n";                                                                 \
+            assert(false);                                                                                             \
+        }                                                                                                              \
+    } while (0)
 
-#define ASSERT_TRUE(expr) do { \
-    if (!(expr)) { \
-        std::cerr << "\nFAIL: " << #expr << " is false\n"; \
-        assert(false); \
-    } \
-} while(0)
+#define ASSERT_TRUE(expr)                                                                                              \
+    do {                                                                                                               \
+        if (!(expr)) {                                                                                                 \
+            std::cerr << "\nFAIL: " << #expr << " is false\n";                                                         \
+            assert(false);                                                                                             \
+        }                                                                                                              \
+    } while (0)
 
-#define ASSERT_FALSE(expr) do { \
-    if ((expr)) { \
-        std::cerr << "\nFAIL: " << #expr << " is true (expected false)\n"; \
-        assert(false); \
-    } \
-} while(0)
+#define ASSERT_FALSE(expr)                                                                                             \
+    do {                                                                                                               \
+        if ((expr)) {                                                                                                  \
+            std::cerr << "\nFAIL: " << #expr << " is true (expected false)\n";                                         \
+            assert(false);                                                                                             \
+        }                                                                                                              \
+    } while (0)
 
-#define ASSERT_NEAR(a, b, eps) do { \
-    double diff = std::abs((a) - (b)); \
-    if (diff > (eps)) { \
-        std::cerr << "\nFAIL: " << #a << " (" << (a) << ") != " << #b << " (" << (b) << ") within " << (eps) << "\n"; \
-        assert(false); \
-    } \
-} while(0)
+#define ASSERT_NEAR(a, b, eps)                                                                                         \
+    do {                                                                                                               \
+        double diff = std::abs((a) - (b));                                                                             \
+        if (diff > (eps)) {                                                                                            \
+            std::cerr << "\nFAIL: " << #a << " (" << (a) << ") != " << #b << " (" << (b) << ") within " << (eps)       \
+                      << "\n";                                                                                         \
+            assert(false);                                                                                             \
+        }                                                                                                              \
+    } while (0)
 
 // =============================================================================
 // PART 1: TunerState Tests (SharedConfig)
@@ -136,7 +144,7 @@ TEST(shared_config_old_tuner_fields_removed) {
     // cfg.tuner_paused;       // REMOVED (integrated into tuner_state)
 
     // Only tuner_state should exist
-    ASSERT_TRUE(true);  // If we get here, old fields are removed
+    ASSERT_TRUE(true); // If we get here, old fields are removed
 }
 
 // =============================================================================
@@ -241,7 +249,7 @@ TEST(symbol_config_state_fields_init) {
     // State fields should be zero on init
     ASSERT_EQ(cfg.consecutive_losses, 0);
     ASSERT_EQ(cfg.consecutive_wins, 0);
-    ASSERT_EQ(cfg.current_mode, 0);  // 0 = AGGRESSIVE (or NORMAL depending on design)
+    ASSERT_EQ(cfg.current_mode, 0); // 0 = AGGRESSIVE (or NORMAL depending on design)
 }
 
 // TEST 2.7: min_position_x100 field exists and is initialized
@@ -272,7 +280,7 @@ TEST(symbol_config_use_global_removed) {
     // cfg.use_global_filtering();     // REMOVED
     // cfg.use_global_ema();           // REMOVED
 
-    ASSERT_TRUE(true);  // If we get here, use_global_flags is removed
+    ASSERT_TRUE(true); // If we get here, use_global_flags is removed
 }
 
 // =============================================================================
@@ -293,13 +301,13 @@ TEST(symbol_config_record_win) {
     ASSERT_EQ(cfg.winning_trades, 0);
 
     // Record a win
-    cfg.record_trade(true, 1.5);  // won 1.5%
+    cfg.record_trade(true, 1.5); // won 1.5%
 
     ASSERT_EQ(cfg.consecutive_wins, 1);
     ASSERT_EQ(cfg.consecutive_losses, 0);
     ASSERT_EQ(cfg.total_trades, 1);
     ASSERT_EQ(cfg.winning_trades, 1);
-    ASSERT_EQ(cfg.total_pnl_x100, 150);  // 1.5% * 100
+    ASSERT_EQ(cfg.total_pnl_x100, 150); // 1.5% * 100
 
     // Record another win
     cfg.record_trade(true, 2.0);
@@ -326,7 +334,7 @@ TEST(symbol_config_record_loss_resets_wins) {
     // Record a loss
     cfg.record_trade(false, -0.5);
 
-    ASSERT_EQ(cfg.consecutive_wins, 0);  // Reset
+    ASSERT_EQ(cfg.consecutive_wins, 0); // Reset
     ASSERT_EQ(cfg.consecutive_losses, 1);
     ASSERT_EQ(cfg.total_trades, 4);
     ASSERT_EQ(cfg.winning_trades, 3);
@@ -347,7 +355,7 @@ TEST(symbol_config_record_win_resets_losses) {
     // Record a win
     cfg.record_trade(true, 1.5);
 
-    ASSERT_EQ(cfg.consecutive_losses, 0);  // Reset
+    ASSERT_EQ(cfg.consecutive_losses, 0); // Reset
     ASSERT_EQ(cfg.consecutive_wins, 1);
 }
 
@@ -357,13 +365,7 @@ TEST(symbol_config_record_win_resets_losses) {
 
 // Mode enum for testing
 namespace {
-    enum class Mode : int8_t {
-        AGGRESSIVE = 0,
-        NORMAL = 1,
-        CAUTIOUS = 2,
-        DEFENSIVE = 3,
-        EXIT_ONLY = 4
-    };
+enum class Mode : int8_t { AGGRESSIVE = 0, NORMAL = 1, CAUTIOUS = 2, DEFENSIVE = 3, EXIT_ONLY = 4 };
 }
 
 // TEST 4.1: Mode calculation based on loss streak
@@ -422,8 +424,8 @@ TEST(symbol_configs_find_and_update) {
     ASSERT_TRUE(btc != nullptr);
 
     // Modify its thresholds
-    btc->losses_to_cautious = 5;  // More tolerant
-    btc->wins_to_aggressive = 2;  // More aggressive
+    btc->losses_to_cautious = 5; // More tolerant
+    btc->wins_to_aggressive = 2; // More aggressive
 
     // Find it again
     const auto* found = configs.find("BTCUSDT");
@@ -445,10 +447,10 @@ TEST(symbol_configs_independent_state) {
     // Record different trades
     btc->record_trade(false, -1.0);
     btc->record_trade(false, -1.0);
-    btc->record_trade(false, -1.0);  // 3 losses
+    btc->record_trade(false, -1.0); // 3 losses
 
     eth->record_trade(true, 1.0);
-    eth->record_trade(true, 1.0);  // 2 wins
+    eth->record_trade(true, 1.0); // 2 wins
 
     // Verify independent state
     ASSERT_EQ(btc->consecutive_losses, 3);
@@ -491,7 +493,7 @@ TEST(config_strategy_trading_disabled) {
 
     SharedConfig global_config;
     global_config.init();
-    global_config.set_trading_enabled(false);  // Disable trading
+    global_config.set_trading_enabled(false); // Disable trading
 
     SharedSymbolConfigs symbol_configs;
     symbol_configs.init();
@@ -517,7 +519,7 @@ TEST(config_strategy_symbol_disabled) {
     SharedSymbolConfigs symbol_configs;
     symbol_configs.init();
     auto* sym = symbol_configs.get_or_create("BTCUSDT");
-    sym->enabled = 0;  // Disable symbol
+    sym->enabled = 0; // Disable symbol
 
     ConfigStrategy strategy(&global_config, &symbol_configs, "BTCUSDT");
 
@@ -542,7 +544,7 @@ TEST(config_strategy_symbol_specific_mode_threshold) {
 
     // Create BTCUSDT with custom threshold
     auto* btc = symbol_configs.get_or_create("BTCUSDT");
-    btc->losses_to_cautious = 5;  // Custom: 5 losses to CAUTIOUS
+    btc->losses_to_cautious = 5; // Custom: 5 losses to CAUTIOUS
 
     // Create ETHUSDT with default threshold (2)
     auto* eth = symbol_configs.get_or_create("ETHUSDT");
@@ -579,7 +581,7 @@ TEST(config_strategy_mode_loss_streak_transition) {
     auto* sym = symbol_configs.get_or_create("BTCUSDT");
 
     // Initially should be NORMAL or AGGRESSIVE
-    ASSERT_TRUE(sym->current_mode <= 1);  // 0=AGGRESSIVE, 1=NORMAL
+    ASSERT_TRUE(sym->current_mode <= 1); // 0=AGGRESSIVE, 1=NORMAL
 
     // Record losses up to CAUTIOUS threshold
     for (int i = 0; i < sym->losses_to_cautious; ++i) {
@@ -606,7 +608,7 @@ TEST(config_strategy_exit_only_mode) {
     auto* sym = symbol_configs.get_or_create("BTCUSDT");
 
     // Force EXIT_ONLY mode
-    sym->current_mode = 4;  // EXIT_ONLY
+    sym->current_mode = 4; // EXIT_ONLY
 
     // Warm up strategy
     MarketSnapshot market{100000, 100100, 10, 10, 100050, 0};
@@ -636,7 +638,7 @@ TEST(config_strategy_exit_only_allows_exit) {
     auto* sym = symbol_configs.get_or_create("BTCUSDT");
 
     // Force EXIT_ONLY mode
-    sym->current_mode = 4;  // EXIT_ONLY
+    sym->current_mode = 4; // EXIT_ONLY
 
     // Warm up strategy
     MarketSnapshot market{100000, 100100, 10, 10, 100050, 0};
@@ -775,8 +777,7 @@ TEST(accumulation_factor_no_position) {
     // Position at 0% (no position)
     StrategyPosition no_position{0, 0, 0, 0, 10000, 100};
 
-    double factor = strategy.calculate_accumulation_factor(
-        sym, no_position, MarketRegime::Ranging, 0.6);
+    double factor = strategy.calculate_accumulation_factor(sym, no_position, MarketRegime::Ranging, 0.6);
 
     // With no position, base = 1.0, should return 1.0
     ASSERT_NEAR(factor, 1.0, 0.01);
@@ -799,8 +800,7 @@ TEST(accumulation_factor_ranging_regime) {
     // Position at 80% (base = 0.2, floor should dominate)
     StrategyPosition high_position{80, 99000, 8000, 0, 10000, 100};
 
-    double factor = strategy.calculate_accumulation_factor(
-        sym, high_position, MarketRegime::Ranging, 0.6);
+    double factor = strategy.calculate_accumulation_factor(sym, high_position, MarketRegime::Ranging, 0.6);
 
     // Floor for ranging = 0.30, base = 0.20, floor dominates
     ASSERT_NEAR(factor, 0.30, 0.01);
@@ -823,8 +823,7 @@ TEST(accumulation_factor_trending_regime) {
     // Position at 80%
     StrategyPosition high_position{80, 99000, 8000, 0, 10000, 100};
 
-    double factor = strategy.calculate_accumulation_factor(
-        sym, high_position, MarketRegime::TrendingUp, 0.6);
+    double factor = strategy.calculate_accumulation_factor(sym, high_position, MarketRegime::TrendingUp, 0.6);
 
     // Floor for trending = 0.50
     ASSERT_NEAR(factor, 0.50, 0.01);
@@ -852,8 +851,7 @@ TEST(accumulation_factor_win_streak_boost) {
     // Position at 80%
     StrategyPosition high_position{80, 99000, 8000, 0, 10000, 100};
 
-    double factor = strategy.calculate_accumulation_factor(
-        sym, high_position, MarketRegime::Ranging, 0.6);
+    double factor = strategy.calculate_accumulation_factor(sym, high_position, MarketRegime::Ranging, 0.6);
 
     // Floor for ranging = 0.30, boost per win = 0.10, 2 wins = +0.20
     // Expected: 0.30 + 0.20 = 0.50
@@ -883,8 +881,7 @@ TEST(accumulation_factor_loss_streak_penalty) {
     // Position at 80%
     StrategyPosition high_position{80, 99000, 8000, 0, 10000, 100};
 
-    double factor = strategy.calculate_accumulation_factor(
-        sym, high_position, MarketRegime::TrendingUp, 0.6);
+    double factor = strategy.calculate_accumulation_factor(sym, high_position, MarketRegime::TrendingUp, 0.6);
 
     // Floor for trending = 0.50, penalty per loss = 0.10, 3 losses = -0.30
     // Expected: 0.50 - 0.30 = 0.20
@@ -911,8 +908,7 @@ TEST(accumulation_factor_tuner_modified) {
     // Position at 80%
     StrategyPosition high_position{80, 99000, 8000, 0, 10000, 100};
 
-    double factor = strategy.calculate_accumulation_factor(
-        sym, high_position, MarketRegime::Ranging, 0.6);
+    double factor = strategy.calculate_accumulation_factor(sym, high_position, MarketRegime::Ranging, 0.6);
 
     // New floor = 0.50
     ASSERT_NEAR(factor, 0.50, 0.01);
@@ -940,8 +936,7 @@ TEST(accumulation_factor_clamped_to_max) {
     // Position at 80%
     StrategyPosition high_position{80, 99000, 8000, 0, 10000, 100};
 
-    double factor = strategy.calculate_accumulation_factor(
-        sym, high_position, MarketRegime::TrendingUp, 0.8);
+    double factor = strategy.calculate_accumulation_factor(sym, high_position, MarketRegime::TrendingUp, 0.8);
 
     // Floor 0.50 + 5*0.10 + 0.10(signal) = 1.10, but max = 0.80
     double max_factor = sym->accum_max_x100 / 100.0;
@@ -953,16 +948,14 @@ TEST(accumulation_factor_clamped_to_max) {
 TEST(accumulation_event_creation) {
     using namespace hft::ipc;
 
-    TunerEvent event = TunerEvent::make_accumulation(
-        "BTCUSDT",
-        0.8,       // position_pct
-        0.6,       // signal_strength
-        50,        // factor_x100
-        static_cast<uint8_t>(hft::strategy::MarketRegime::Ranging),
-        2,         // wins
-        0,         // losses
-        "Ranging regime, win streak boost"
-    );
+    TunerEvent event = TunerEvent::make_accumulation("BTCUSDT",
+                                                     0.8, // position_pct
+                                                     0.6, // signal_strength
+                                                     50,  // factor_x100
+                                                     static_cast<uint8_t>(hft::strategy::MarketRegime::Ranging),
+                                                     2, // wins
+                                                     0, // losses
+                                                     "Ranging regime, win streak boost");
 
     ASSERT_EQ(event.type, TunerEventType::AccumulationDecision);
     ASSERT_EQ(std::strcmp(event.symbol, "BTCUSDT"), 0);
@@ -996,13 +989,12 @@ TEST(config_strategy_position_sizing_btc) {
     // Expected: $100,000 * 0.02 = $2,000 target value
     // Expected qty: $2,000 / $50,000 = 0.04 BTC
 
-    sym->base_position_x100 = 200;  // 2%
+    sym->base_position_x100 = 200; // 2%
 
     StrategyPosition position{0, 0, 0, 0, 100000.0, 100000.0};
-    double current_price = 50000.0;  // BTC @ $50,000
+    double current_price = 50000.0; // BTC @ $50,000
 
-    double qty = strategy.calculate_position_size(
-        sym, position, ConfigMode::NORMAL, 1.0, current_price);
+    double qty = strategy.calculate_position_size(sym, position, ConfigMode::NORMAL, 1.0, current_price);
 
     // 2% of $100k = $2,000 / $50,000 = 0.04 BTC
     ASSERT_NEAR(qty, 0.04, 0.001);
@@ -1025,13 +1017,12 @@ TEST(config_strategy_position_sizing_aggressive) {
     // Setup: same as above but AGGRESSIVE mode (1.25x multiplier)
     // Expected: $2,000 * 1.25 = $2,500 / $50,000 = 0.05 BTC
 
-    sym->base_position_x100 = 200;  // 2%
+    sym->base_position_x100 = 200; // 2%
 
     StrategyPosition position{0, 0, 0, 0, 100000.0, 100000.0};
     double current_price = 50000.0;
 
-    double qty = strategy.calculate_position_size(
-        sym, position, ConfigMode::AGGRESSIVE, 1.0, current_price);
+    double qty = strategy.calculate_position_size(sym, position, ConfigMode::AGGRESSIVE, 1.0, current_price);
 
     // 2% * 1.25 = 2.5% of $100k = $2,500 / $50,000 = 0.05 BTC
     ASSERT_NEAR(qty, 0.05, 0.001);
@@ -1054,13 +1045,12 @@ TEST(config_strategy_position_sizing_low_price) {
     // Setup: $100,000 cash, 2% base position, SEI @ $0.07
     // Expected: $2,000 / $0.07 = 28,571 SEI
 
-    sym->base_position_x100 = 200;  // 2%
+    sym->base_position_x100 = 200; // 2%
 
     StrategyPosition position{0, 0, 0, 0, 100000.0, 100000.0};
-    double current_price = 0.07;  // SEI @ $0.07
+    double current_price = 0.07; // SEI @ $0.07
 
-    double qty = strategy.calculate_position_size(
-        sym, position, ConfigMode::NORMAL, 1.0, current_price);
+    double qty = strategy.calculate_position_size(sym, position, ConfigMode::NORMAL, 1.0, current_price);
 
     // 2% of $100k = $2,000 / $0.07 = 28,571.43 SEI
     ASSERT_NEAR(qty, 28571.43, 10.0);
@@ -1083,13 +1073,12 @@ TEST(config_strategy_position_sizing_confidence) {
     // Setup: $100,000 cash, 2% base, 80% confidence, ETH @ $2,000
     // Expected: $100,000 * 0.02 * 0.8 = $1,600 / $2,000 = 0.8 ETH
 
-    sym->base_position_x100 = 200;  // 2%
+    sym->base_position_x100 = 200; // 2%
 
     StrategyPosition position{0, 0, 0, 0, 100000.0, 100000.0};
-    double current_price = 2000.0;  // ETH @ $2,000
+    double current_price = 2000.0; // ETH @ $2,000
 
-    double qty = strategy.calculate_position_size(
-        sym, position, ConfigMode::NORMAL, 0.8, current_price);
+    double qty = strategy.calculate_position_size(sym, position, ConfigMode::NORMAL, 0.8, current_price);
 
     // 2% * 0.8 = 1.6% of $100k = $1,600 / $2,000 = 0.8 ETH
     ASSERT_NEAR(qty, 0.8, 0.01);
@@ -1112,13 +1101,12 @@ TEST(config_strategy_position_sizing_cautious) {
     // Setup: $100,000 cash, 2% base, CAUTIOUS mode (0.75x), SOL @ $80
     // Expected: $2,000 * 0.75 = $1,500 / $80 = 18.75 SOL
 
-    sym->base_position_x100 = 200;  // 2%
+    sym->base_position_x100 = 200; // 2%
 
     StrategyPosition position{0, 0, 0, 0, 100000.0, 100000.0};
-    double current_price = 80.0;  // SOL @ $80
+    double current_price = 80.0; // SOL @ $80
 
-    double qty = strategy.calculate_position_size(
-        sym, position, ConfigMode::CAUTIOUS, 1.0, current_price);
+    double qty = strategy.calculate_position_size(sym, position, ConfigMode::CAUTIOUS, 1.0, current_price);
 
     // 2% * 0.75 = 1.5% of $100k = $1,500 / $80 = 18.75 SOL
     ASSERT_NEAR(qty, 18.75, 0.1);
@@ -1141,13 +1129,12 @@ TEST(config_strategy_position_sizing_defensive) {
     // Setup: $100,000 cash, 2% base, DEFENSIVE mode (0.5x), BTC @ $50,000
     // Expected: $2,000 * 0.5 = $1,000 / $50,000 = 0.02 BTC
 
-    sym->base_position_x100 = 200;  // 2%
+    sym->base_position_x100 = 200; // 2%
 
     StrategyPosition position{0, 0, 0, 0, 100000.0, 100000.0};
     double current_price = 50000.0;
 
-    double qty = strategy.calculate_position_size(
-        sym, position, ConfigMode::DEFENSIVE, 1.0, current_price);
+    double qty = strategy.calculate_position_size(sym, position, ConfigMode::DEFENSIVE, 1.0, current_price);
 
     // 2% * 0.5 = 1% of $100k = $1,000 / $50,000 = 0.02 BTC
     ASSERT_NEAR(qty, 0.02, 0.001);
@@ -1168,14 +1155,13 @@ TEST(config_strategy_position_sizing_max_clamp) {
     auto* sym = symbol_configs.get_or_create("BTCUSDT");
 
     // Setup: 10% base with AGGRESSIVE (1.25x) = 12.5%, but max is 10%
-    sym->base_position_x100 = 1000;  // 10%
-    sym->max_position_x100 = 1000;   // 10% max
+    sym->base_position_x100 = 1000; // 10%
+    sym->max_position_x100 = 1000;  // 10% max
 
     StrategyPosition position{0, 0, 0, 0, 100000.0, 100000.0};
     double current_price = 50000.0;
 
-    double qty = strategy.calculate_position_size(
-        sym, position, ConfigMode::AGGRESSIVE, 1.0, current_price);
+    double qty = strategy.calculate_position_size(sym, position, ConfigMode::AGGRESSIVE, 1.0, current_price);
 
     // 10% * 1.25 = 12.5%, but clamped to 10%
     // 10% of $100k = $10,000 / $50,000 = 0.2 BTC
@@ -1254,19 +1240,16 @@ TEST(config_strategy_buy_signal_on_bullish_conditions) {
 
     ConfigStrategy strategy(&global_config, &symbol_configs, "BTCUSDT");
     auto* sym = symbol_configs.get_or_create("BTCUSDT");
-    sym->signal_normal_x100 = 20;  // Lower threshold for easier signal
+    sym->signal_normal_x100 = 20; // Lower threshold for easier signal
 
     // Simulate a downtrend followed by reversal (for EMA crossover + oversold RSI)
     // Start high, go low, then reverse up
-    int64_t prices[] = {
-        // Downtrend (creates oversold RSI)
-        510000000, 508000000, 506000000, 504000000, 502000000,
-        500000000, 498000000, 496000000, 494000000, 492000000,
-        490000000, 488000000, 486000000, 484000000, 482000000,
-        // Start reversal (fast EMA crosses above slow)
-        484000000, 486000000, 488000000, 490000000, 492000000,
-        494000000, 496000000, 498000000, 500000000, 502000000
-    };
+    int64_t prices[] = {// Downtrend (creates oversold RSI)
+                        510000000, 508000000, 506000000, 504000000, 502000000, 500000000, 498000000, 496000000,
+                        494000000, 492000000, 490000000, 488000000, 486000000, 484000000, 482000000,
+                        // Start reversal (fast EMA crosses above slow)
+                        484000000, 486000000, 488000000, 490000000, 492000000, 494000000, 496000000, 498000000,
+                        500000000, 502000000};
 
     for (int i = 0; i < 25; ++i) {
         MarketSnapshot market{prices[i] - 50000, prices[i] + 50000, 1000, 1000, prices[i], 0};
@@ -1303,18 +1286,15 @@ TEST(config_strategy_sell_signal_on_bearish_conditions) {
 
     ConfigStrategy strategy(&global_config, &symbol_configs, "ETHUSDT");
     auto* sym = symbol_configs.get_or_create("ETHUSDT");
-    sym->signal_normal_x100 = 20;  // Lower threshold for easier signal
+    sym->signal_normal_x100 = 20; // Lower threshold for easier signal
 
     // Simulate an uptrend followed by reversal (for EMA crossover + overbought RSI)
-    int64_t prices[] = {
-        // Uptrend (creates overbought RSI)
-        200000000, 202000000, 204000000, 206000000, 208000000,
-        210000000, 212000000, 214000000, 216000000, 218000000,
-        220000000, 222000000, 224000000, 226000000, 228000000,
-        // Start reversal (fast EMA crosses below slow)
-        226000000, 224000000, 222000000, 220000000, 218000000,
-        216000000, 214000000, 212000000, 210000000, 208000000
-    };
+    int64_t prices[] = {// Uptrend (creates overbought RSI)
+                        200000000, 202000000, 204000000, 206000000, 208000000, 210000000, 212000000, 214000000,
+                        216000000, 218000000, 220000000, 222000000, 224000000, 226000000, 228000000,
+                        // Start reversal (fast EMA crosses below slow)
+                        226000000, 224000000, 222000000, 220000000, 218000000, 216000000, 214000000, 212000000,
+                        210000000, 208000000};
 
     for (int i = 0; i < 25; ++i) {
         MarketSnapshot market{prices[i] - 50000, prices[i] + 50000, 1000, 1000, prices[i], 0};
@@ -1325,7 +1305,7 @@ TEST(config_strategy_sell_signal_on_bearish_conditions) {
 
     // Generate signal with bearish imbalance
     MarketSnapshot market{208000000 - 50000, 208000000 + 50000, 500, 1500, 208000000, 0};
-    StrategyPosition position{1.0, 200000000, 1, 0, 100000, 100000};  // Has long position
+    StrategyPosition position{1.0, 200000000, 1, 0, 100000, 100000}; // Has long position
     Signal signal = strategy.generate(0, market, position, MarketRegime::TrendingDown);
 
     // Should generate a sell signal due to:
@@ -1362,14 +1342,14 @@ TEST(config_strategy_reduced_ob_imbalance_weight) {
     // Even with extreme imbalance (100% bid), signal should be weak without indicator confirmation
     // Previous: 1.0 * 2.0 = 2.0 (strong signal)
     // Now: 1.0 * 0.2 = 0.2 (weak signal, below threshold)
-    MarketSnapshot market{800000000, 800100000, 2000, 0, 800050000, 0};  // All bids
+    MarketSnapshot market{800000000, 800100000, 2000, 0, 800050000, 0}; // All bids
     StrategyPosition position{0, 0, 0, 0, 100000, 100000};
     Signal signal = strategy.generate(0, market, position, MarketRegime::Ranging);
 
     // With only OB imbalance (no indicator confirmation), signal should be None or weak
     // because OB weight is reduced from 2.0 to 0.2
     // This verifies multi-factor approach is working
-    ASSERT_TRUE(true);  // If we get here without error, test passes
+    ASSERT_TRUE(true); // If we get here without error, test passes
 }
 
 // TEST 9.6: ConfigStrategy reset clears indicators

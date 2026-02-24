@@ -1,12 +1,13 @@
 #pragma once
 
-#include "paper_trading_engine.hpp"
 #include "../strategy/regime_detector.hpp"
-#include <iostream>
-#include <iomanip>
+#include "paper_trading_engine.hpp"
+
 #include <chrono>
-#include <sstream>
 #include <cstdio>
+#include <iomanip>
+#include <iostream>
+#include <sstream>
 
 namespace hft {
 namespace paper {
@@ -15,23 +16,23 @@ namespace paper {
  * Terminal color codes
  */
 namespace color {
-    constexpr const char* RESET   = "\033[0m";
-    constexpr const char* RED     = "\033[31m";
-    constexpr const char* GREEN   = "\033[32m";
-    constexpr const char* YELLOW  = "\033[33m";
-    constexpr const char* BLUE    = "\033[34m";
-    constexpr const char* MAGENTA = "\033[35m";
-    constexpr const char* CYAN    = "\033[36m";
-    constexpr const char* WHITE   = "\033[37m";
-    constexpr const char* BOLD    = "\033[1m";
-    constexpr const char* DIM     = "\033[2m";
-}
+constexpr const char* RESET = "\033[0m";
+constexpr const char* RED = "\033[31m";
+constexpr const char* GREEN = "\033[32m";
+constexpr const char* YELLOW = "\033[33m";
+constexpr const char* BLUE = "\033[34m";
+constexpr const char* MAGENTA = "\033[35m";
+constexpr const char* CYAN = "\033[36m";
+constexpr const char* WHITE = "\033[37m";
+constexpr const char* BOLD = "\033[1m";
+constexpr const char* DIM = "\033[2m";
+} // namespace color
 
 /**
  * Dashboard Configuration
  */
 struct DashboardConfig {
-    uint64_t refresh_interval_ms = 100;     // Update every 100ms
+    uint64_t refresh_interval_ms = 100; // Update every 100ms
     bool use_colors = true;
     bool show_regime = true;
     bool show_positions = true;
@@ -55,22 +56,17 @@ struct DashboardConfig {
 class LiveDashboard {
 public:
     explicit LiveDashboard(PaperTradingEngine& engine, const DashboardConfig& config = {})
-        : engine_(engine)
-        , config_(config)
-        , last_update_ms_(0)
-        , frame_count_(0)
-    {}
+        : engine_(engine), config_(config), last_update_ms_(0), frame_count_(0) {}
 
     /**
      * Update dashboard (respects refresh interval)
      */
     void update() {
         auto now = std::chrono::steady_clock::now();
-        auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-            now.time_since_epoch()).count();
+        auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
 
         if (now_ms - last_update_ms_ < static_cast<int64_t>(config_.refresh_interval_ms)) {
-            return;  // Too soon
+            return; // Too soon
         }
 
         last_update_ms_ = now_ms;
@@ -82,9 +78,7 @@ public:
     /**
      * Force immediate refresh
      */
-    void refresh() {
-        render();
-    }
+    void refresh() { render(); }
 
     void set_symbol_info(Symbol id, const std::string& ticker, Price bid, Price ask) {
         symbols_[id] = {ticker, bid, ask};
@@ -107,7 +101,7 @@ private:
         std::ostringstream out;
 
         if (config_.clear_screen) {
-            out << "\033[2J\033[H";  // Clear screen and move to top
+            out << "\033[2J\033[H"; // Clear screen and move to top
         }
 
         render_header(out);
@@ -147,7 +141,8 @@ private:
     }
 
     void render_regime(std::ostringstream& out) {
-        if (!config_.show_regime) return;
+        if (!config_.show_regime)
+            return;
 
         const char* b = config_.use_colors ? color::BOLD : "";
         const char* r = config_.use_colors ? color::RESET : "";
@@ -159,30 +154,29 @@ private:
 
         if (config_.use_colors) {
             switch (regime) {
-                case strategy::MarketRegime::TrendingUp:
-                    regime_color = color::GREEN;
-                    break;
-                case strategy::MarketRegime::TrendingDown:
-                    regime_color = color::RED;
-                    break;
-                case strategy::MarketRegime::Ranging:
-                    regime_color = color::BLUE;
-                    break;
-                case strategy::MarketRegime::HighVolatility:
-                    regime_color = color::YELLOW;
-                    break;
-                case strategy::MarketRegime::LowVolatility:
-                    regime_color = color::CYAN;
-                    break;
-                default:
-                    regime_color = color::DIM;
-                    break;
+            case strategy::MarketRegime::TrendingUp:
+                regime_color = color::GREEN;
+                break;
+            case strategy::MarketRegime::TrendingDown:
+                regime_color = color::RED;
+                break;
+            case strategy::MarketRegime::Ranging:
+                regime_color = color::BLUE;
+                break;
+            case strategy::MarketRegime::HighVolatility:
+                regime_color = color::YELLOW;
+                break;
+            case strategy::MarketRegime::LowVolatility:
+                regime_color = color::CYAN;
+                break;
+            default:
+                regime_color = color::DIM;
+                break;
             }
         }
 
         out << "  Regime: " << regime_color << strategy::regime_to_string(regime) << r;
-        out << "  Confidence: " << std::fixed << std::setprecision(1)
-            << (engine_.regime_confidence() * 100) << "%\n";
+        out << "  Confidence: " << std::fixed << std::setprecision(1) << (engine_.regime_confidence() * 100) << "%\n";
 
         out << "  Volatility: " << std::setprecision(2) << (engine_.volatility() * 100) << "%";
         out << "  Trend: ";
@@ -199,18 +193,15 @@ private:
     }
 
     void render_positions(std::ostringstream& out) {
-        if (!config_.show_positions) return;
+        if (!config_.show_positions)
+            return;
 
         const char* b = config_.use_colors ? color::BOLD : "";
         const char* r = config_.use_colors ? color::RESET : "";
 
         out << b << "── Positions ──────────────────────────────────────────────\n" << r;
-        out << "  " << std::left << std::setw(8) << "Symbol"
-            << std::right << std::setw(10) << "Qty"
-            << std::setw(12) << "Entry"
-            << std::setw(12) << "Bid"
-            << std::setw(12) << "Ask"
-            << std::setw(12) << "Unreal P&L"
+        out << "  " << std::left << std::setw(8) << "Symbol" << std::right << std::setw(10) << "Qty" << std::setw(12)
+            << "Entry" << std::setw(12) << "Bid" << std::setw(12) << "Ask" << std::setw(12) << "Unreal P&L"
             << "\n";
         out << "  " << std::string(68, '-') << "\n";
 
@@ -219,8 +210,7 @@ private:
 
             out << "  " << std::left << std::setw(8) << info.ticker;
             out << std::right << std::setw(10) << pos.quantity;
-            out << std::setw(12) << std::fixed << std::setprecision(4)
-                << (pos.avg_entry_price / 10000.0);
+            out << std::setw(12) << std::fixed << std::setprecision(4) << (pos.avg_entry_price / 10000.0);
             out << std::setw(12) << (info.bid / 10000.0);
             out << std::setw(12) << (info.ask / 10000.0);
 
@@ -239,7 +229,8 @@ private:
     }
 
     void render_pnl(std::ostringstream& out) {
-        if (!config_.show_pnl) return;
+        if (!config_.show_pnl)
+            return;
 
         const char* b = config_.use_colors ? color::BOLD : "";
         const char* r = config_.use_colors ? color::RESET : "";
@@ -267,7 +258,8 @@ private:
     }
 
     void render_orders(std::ostringstream& out) {
-        if (!config_.show_orders) return;
+        if (!config_.show_orders)
+            return;
 
         const char* b = config_.use_colors ? color::BOLD : "";
         const char* r = config_.use_colors ? color::RESET : "";
@@ -295,18 +287,14 @@ private:
  */
 class StatusLine {
 public:
-    explicit StatusLine(PaperTradingEngine& engine)
-        : engine_(engine)
-        , last_update_ms_(0)
-    {}
+    explicit StatusLine(PaperTradingEngine& engine) : engine_(engine), last_update_ms_(0) {}
 
     /**
      * Print status line (max 10 updates/sec)
      */
     void print() {
         auto now = std::chrono::steady_clock::now();
-        auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-            now.time_since_epoch()).count();
+        auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
 
         if (now_ms - last_update_ms_ < 100) {
             return;
@@ -319,12 +307,9 @@ public:
         std::tm* tm = std::localtime(&time);
 
         // Clear line and print
-        std::printf("\r\033[K[%02d:%02d:%02d] %s | P&L: %+.2f | DD: %.1f%% | Orders: %lu  ",
-                   tm->tm_hour, tm->tm_min, tm->tm_sec,
-                   strategy::regime_to_string(engine_.current_regime()).c_str(),
-                   engine_.total_pnl(),
-                   engine_.drawdown() * 100,
-                   engine_.total_orders());
+        std::printf("\r\033[K[%02d:%02d:%02d] %s | P&L: %+.2f | DD: %.1f%% | Orders: %lu  ", tm->tm_hour, tm->tm_min,
+                    tm->tm_sec, strategy::regime_to_string(engine_.current_regime()).c_str(), engine_.total_pnl(),
+                    engine_.drawdown() * 100, engine_.total_orders());
         std::fflush(stdout);
     }
 
@@ -333,5 +318,5 @@ private:
     int64_t last_update_ms_;
 };
 
-}  // namespace paper
-}  // namespace hft
+} // namespace paper
+} // namespace hft

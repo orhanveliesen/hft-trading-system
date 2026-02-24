@@ -7,22 +7,23 @@
  * - Controller: Updates views when models change (dirty flag)
  */
 
-#include "../include/ipc/trade_event.hpp"
 #include "../include/ipc/shared_ring_buffer.hpp"
-#include <iostream>
-#include <iomanip>
-#include <sstream>
-#include <fstream>
-#include <chrono>
-#include <thread>
-#include <csignal>
+#include "../include/ipc/trade_event.hpp"
+
 #include <atomic>
+#include <chrono>
+#include <csignal>
 #include <cstring>
 #include <deque>
-#include <vector>
+#include <fstream>
 #include <functional>
+#include <iomanip>
+#include <iostream>
+#include <sstream>
 #include <sys/ioctl.h>
+#include <thread>
 #include <unistd.h>
+#include <vector>
 
 using namespace hft::ipc;
 
@@ -31,39 +32,39 @@ using namespace hft::ipc;
 // ============================================================================
 
 namespace term {
-    constexpr const char* RESET      = "\033[0m";
-    constexpr const char* BOLD       = "\033[1m";
-    constexpr const char* DIM        = "\033[2m";
-    constexpr const char* RED        = "\033[31m";
-    constexpr const char* GREEN      = "\033[32m";
-    constexpr const char* YELLOW     = "\033[33m";
-    constexpr const char* CYAN       = "\033[36m";
-    constexpr const char* BRED       = "\033[91m";
-    constexpr const char* BGREEN     = "\033[92m";
-    constexpr const char* BYELLOW    = "\033[93m";
-    constexpr const char* BCYAN      = "\033[96m";
-    constexpr const char* BWHITE     = "\033[97m";
-    constexpr const char* CLEAR      = "\033[2J";
-    constexpr const char* HOME       = "\033[H";
-    constexpr const char* HIDE_CURSOR = "\033[?25l";
-    constexpr const char* SHOW_CURSOR = "\033[?25h";
-    constexpr const char* CLEAR_LINE = "\033[K";
+constexpr const char* RESET = "\033[0m";
+constexpr const char* BOLD = "\033[1m";
+constexpr const char* DIM = "\033[2m";
+constexpr const char* RED = "\033[31m";
+constexpr const char* GREEN = "\033[32m";
+constexpr const char* YELLOW = "\033[33m";
+constexpr const char* CYAN = "\033[36m";
+constexpr const char* BRED = "\033[91m";
+constexpr const char* BGREEN = "\033[92m";
+constexpr const char* BYELLOW = "\033[93m";
+constexpr const char* BCYAN = "\033[96m";
+constexpr const char* BWHITE = "\033[97m";
+constexpr const char* CLEAR = "\033[2J";
+constexpr const char* HOME = "\033[H";
+constexpr const char* HIDE_CURSOR = "\033[?25l";
+constexpr const char* SHOW_CURSOR = "\033[?25h";
+constexpr const char* CLEAR_LINE = "\033[K";
 
-    void move_to(int row, int col) {
-        std::cout << "\033[" << row << ";" << col << "H";
-    }
+void move_to(int row, int col) {
+    std::cout << "\033[" << row << ";" << col << "H";
 }
+} // namespace term
 
 namespace box {
-    constexpr const char* TL = "╔";
-    constexpr const char* TR = "╗";
-    constexpr const char* BL = "╚";
-    constexpr const char* BR = "╝";
-    constexpr const char* H  = "═";
-    constexpr const char* V  = "║";
-    constexpr const char* LT = "╠";
-    constexpr const char* RT = "╣";
-}
+constexpr const char* TL = "╔";
+constexpr const char* TR = "╗";
+constexpr const char* BL = "╚";
+constexpr const char* BR = "╝";
+constexpr const char* H = "═";
+constexpr const char* V = "║";
+constexpr const char* LT = "╠";
+constexpr const char* RT = "╣";
+} // namespace box
 
 // ============================================================================
 // MODELS - Pure data, no rendering logic
@@ -71,7 +72,7 @@ namespace box {
 
 struct StatsModel {
     uint64_t total_events = 0;
-    uint64_t total_status = 0;  // Status events count
+    uint64_t total_status = 0; // Status events count
     int64_t elapsed_seconds = 0;
     double rate = 0.0;
     bool dirty = true;
@@ -119,13 +120,25 @@ struct TradeStatsModel {
     uint64_t fills = 0;
     uint64_t targets = 0;
     uint64_t stops = 0;
-    uint64_t status_events = 0;  // Status/debug events
+    uint64_t status_events = 0; // Status/debug events
     bool dirty = true;
 
-    void add_fill() { fills++; dirty = true; }
-    void add_target() { targets++; dirty = true; }
-    void add_stop() { stops++; dirty = true; }
-    void add_status() { status_events++; dirty = true; }
+    void add_fill() {
+        fills++;
+        dirty = true;
+    }
+    void add_target() {
+        targets++;
+        dirty = true;
+    }
+    void add_stop() {
+        stops++;
+        dirty = true;
+    }
+    void add_status() {
+        status_events++;
+        dirty = true;
+    }
 };
 
 struct EventEntry {
@@ -155,23 +168,31 @@ class View {
 protected:
     int start_row_;
     int width_;
-    std::vector<std::string> lines_;  // Cached rendered lines
+    std::vector<std::string> lines_; // Cached rendered lines
 
     std::string pad(const std::string& s, int w) const {
-        if ((int)s.length() >= w) return s.substr(0, w);
+        if ((int)s.length() >= w)
+            return s.substr(0, w);
         return s + std::string(w - s.length(), ' ');
     }
 
     std::string hline(bool is_top = false, bool is_bottom = false) const {
         std::ostringstream ss;
         ss << term::BCYAN;
-        if (is_top) ss << box::TL;
-        else if (is_bottom) ss << box::BL;
-        else ss << box::LT;
-        for (int i = 0; i < width_ - 2; i++) ss << box::H;
-        if (is_top) ss << box::TR;
-        else if (is_bottom) ss << box::BR;
-        else ss << box::RT;
+        if (is_top)
+            ss << box::TL;
+        else if (is_bottom)
+            ss << box::BL;
+        else
+            ss << box::LT;
+        for (int i = 0; i < width_ - 2; i++)
+            ss << box::H;
+        if (is_top)
+            ss << box::TR;
+        else if (is_bottom)
+            ss << box::BR;
+        else
+            ss << box::RT;
         ss << term::RESET;
         return ss.str();
     }
@@ -231,6 +252,7 @@ public:
 // Stats View
 class StatsView : public View {
     std::vector<std::string> prev_lines_;
+
 public:
     StatsView(int row, int width) : View(row, width) {}
 
@@ -244,8 +266,8 @@ public:
 
         std::ostringstream ss;
         ss << term::BCYAN << box::V << term::RESET << "  ";
-        ss << "Runtime: " << std::setfill('0') << std::setw(2) << hours << ":"
-           << std::setw(2) << mins << ":" << std::setw(2) << secs << std::setfill(' ');
+        ss << "Runtime: " << std::setfill('0') << std::setw(2) << hours << ":" << std::setw(2) << mins << ":"
+           << std::setw(2) << secs << std::setfill(' ');
         ss << "  |  Events: " << std::setw(8) << model.total_events;
         ss << "  |  Rate: " << std::fixed << std::setprecision(1) << std::setw(8) << model.rate << "/s";
         ss << std::string(std::max(0, width_ - 68), ' ');
@@ -256,13 +278,15 @@ public:
     }
 
     void render_if_dirty(bool dirty) {
-        if (dirty) render_to_screen(prev_lines_);
+        if (dirty)
+            render_to_screen(prev_lines_);
     }
 };
 
 // P&L View
 class PnLView : public View {
     std::vector<std::string> prev_lines_;
+
 public:
     PnLView(int row, int width) : View(row, width) {}
 
@@ -279,11 +303,13 @@ public:
         lines_.push_back(ss.str());
 
         // P&L value row
-        ss.str(""); ss.clear();
+        ss.str("");
+        ss.clear();
         ss << term::BCYAN << box::V << term::RESET << "  ";
 
         std::ostringstream pnl_ss;
-        pnl_ss << std::fixed << std::setprecision(2) << (model.realized_pnl >= 0 ? "+" : "") << "$" << std::abs(model.realized_pnl);
+        pnl_ss << std::fixed << std::setprecision(2) << (model.realized_pnl >= 0 ? "+" : "") << "$"
+               << std::abs(model.realized_pnl);
 
         if (model.realized_pnl >= 0) {
             ss << term::BGREEN << term::BOLD << std::setw(12) << pnl_ss.str() << term::RESET;
@@ -299,10 +325,13 @@ public:
         lines_.push_back(ss.str());
 
         // Profit/Loss breakdown
-        ss.str(""); ss.clear();
+        ss.str("");
+        ss.clear();
         ss << term::BCYAN << box::V << term::RESET << "  ";
-        ss << term::GREEN << "Profit: +$" << std::fixed << std::setprecision(2) << std::setw(10) << model.total_profit << term::RESET << "  ";
-        ss << term::RED << "Loss: -$" << std::fixed << std::setprecision(2) << std::setw(10) << model.total_loss << term::RESET;
+        ss << term::GREEN << "Profit: +$" << std::fixed << std::setprecision(2) << std::setw(10) << model.total_profit
+           << term::RESET << "  ";
+        ss << term::RED << "Loss: -$" << std::fixed << std::setprecision(2) << std::setw(10) << model.total_loss
+           << term::RESET;
         ss << std::string(std::max(0, width_ - 52), ' ');
         ss << term::BCYAN << box::V << term::RESET;
         lines_.push_back(ss.str());
@@ -311,13 +340,15 @@ public:
     }
 
     void render_if_dirty(bool dirty) {
-        if (dirty) render_to_screen(prev_lines_);
+        if (dirty)
+            render_to_screen(prev_lines_);
     }
 };
 
 // Trade Stats View
 class TradeStatsView : public View {
     std::vector<std::string> prev_lines_;
+
 public:
     TradeStatsView(int row, int width) : View(row, width) {}
 
@@ -339,7 +370,8 @@ public:
     }
 
     void render_if_dirty(bool dirty) {
-        if (dirty) render_to_screen(prev_lines_);
+        if (dirty)
+            render_to_screen(prev_lines_);
     }
 };
 
@@ -347,9 +379,9 @@ public:
 class EventsView : public View {
     std::vector<std::string> prev_lines_;
     int visible_rows_;
+
 public:
-    EventsView(int row, int width, int visible_rows)
-        : View(row, width), visible_rows_(visible_rows) {}
+    EventsView(int row, int width, int visible_rows) : View(row, width), visible_rows_(visible_rows) {}
 
     void set_visible_rows(int rows) { visible_rows_ = rows; }
 
@@ -368,9 +400,11 @@ public:
         // Events
         int displayed = 0;
         for (const auto& ev : model.events) {
-            if (displayed >= visible_rows_) break;
+            if (displayed >= visible_rows_)
+                break;
 
-            ss.str(""); ss.clear();
+            ss.str("");
+            ss.clear();
             ss << term::BCYAN << box::V << term::RESET;
             ss << ev.color << "  " << pad(ev.text, width_ - 4) << term::RESET;
             ss << term::BCYAN << box::V << term::RESET;
@@ -380,7 +414,8 @@ public:
 
         // Fill empty rows
         while (displayed < visible_rows_) {
-            ss.str(""); ss.clear();
+            ss.str("");
+            ss.clear();
             ss << term::BCYAN << box::V << term::RESET;
             ss << std::string(width_ - 2, ' ');
             ss << term::BCYAN << box::V << term::RESET;
@@ -390,7 +425,8 @@ public:
     }
 
     void render_if_dirty(bool dirty) {
-        if (dirty) render_to_screen(prev_lines_);
+        if (dirty)
+            render_to_screen(prev_lines_);
     }
 };
 
@@ -450,117 +486,108 @@ class DashboardController {
         events_view_.set_visible_rows(event_rows);
 
         int row = 1;
-        header_view_.set_start_row(row); row += 3;
-        stats_view_.set_start_row(row); row += 2;
-        pnl_view_.set_start_row(row); row += 4;
-        trade_stats_view_.set_start_row(row); row += 2;
-        events_view_.set_start_row(row); row += event_rows + 1;
+        header_view_.set_start_row(row);
+        row += 3;
+        stats_view_.set_start_row(row);
+        row += 2;
+        pnl_view_.set_start_row(row);
+        row += 4;
+        trade_stats_view_.set_start_row(row);
+        row += 2;
+        events_view_.set_start_row(row);
+        row += event_rows + 1;
         footer_view_.set_start_row(row);
     }
 
 public:
     DashboardController()
-        : header_view_(1, 80)
-        , stats_view_(4, 80)
-        , pnl_view_(6, 80)
-        , trade_stats_view_(10, 80)
-        , events_view_(12, 80, 10)
-        , footer_view_(23, 80)
-        , start_time_(std::chrono::steady_clock::now())
-    {}
+        : header_view_(1, 80), stats_view_(4, 80), pnl_view_(6, 80), trade_stats_view_(10, 80),
+          events_view_(12, 80, 10), footer_view_(23, 80), start_time_(std::chrono::steady_clock::now()) {}
 
     void process_event(const TradeEvent& e) {
-        if (first_event_ts_ == 0) first_event_ts_ = e.timestamp_ns;
+        if (first_event_ts_ == 0)
+            first_event_ts_ = e.timestamp_ns;
 
         double rel_sec = (e.timestamp_ns - first_event_ts_) / 1e9;
         std::ostringstream ss;
 
         switch (e.type) {
-            case EventType::Fill: {
-                trade_stats_.add_fill();
-                std::string ticker(e.ticker, 3);
-                ss << std::fixed << std::setprecision(1) << std::setw(6) << rel_sec << "s  "
-                   << (e.side == 0 ? "BUY  " : "SELL ")
-                   << std::setw(4) << ticker << "  "
-                   << std::setw(5) << e.quantity << " @ $"
-                   << std::setprecision(2) << e.price;
-                events_.add(ss.str(), (e.side == 0) ? term::BGREEN : term::BYELLOW);
-                break;
+        case EventType::Fill: {
+            trade_stats_.add_fill();
+            std::string ticker(e.ticker, 3);
+            ss << std::fixed << std::setprecision(1) << std::setw(6) << rel_sec << "s  "
+               << (e.side == 0 ? "BUY  " : "SELL ") << std::setw(4) << ticker << "  " << std::setw(5) << e.quantity
+               << " @ $" << std::setprecision(2) << e.price;
+            events_.add(ss.str(), (e.side == 0) ? term::BGREEN : term::BYELLOW);
+            break;
+        }
+        case EventType::TargetHit: {
+            trade_stats_.add_target();
+            pnl_.add_win(e.pnl);
+
+            std::string ticker(e.ticker, 3);
+            ss << std::fixed << std::setprecision(1) << std::setw(6) << rel_sec << "s  "
+               << "TARGET " << std::setw(4) << ticker << "  +" << std::setprecision(2) << "$" << e.pnl;
+            events_.add(ss.str(), term::BGREEN);
+            break;
+        }
+        case EventType::StopLoss: {
+            trade_stats_.add_stop();
+            pnl_.add_loss(e.pnl);
+
+            std::string ticker(e.ticker, 3);
+            ss << std::fixed << std::setprecision(1) << std::setw(6) << rel_sec << "s  "
+               << "STOP   " << std::setw(4) << ticker << "  " << std::setprecision(2) << "$" << e.pnl;
+            events_.add(ss.str(), term::BRED);
+            break;
+        }
+        case EventType::Signal: {
+            std::string ticker(e.ticker, 3);
+            ss << std::fixed << std::setprecision(1) << std::setw(6) << rel_sec << "s  "
+               << "SIGNAL " << std::setw(4) << ticker << "  " << (e.side == 0 ? "BUY" : "SELL");
+            events_.add(ss.str(), term::BCYAN);
+            break;
+        }
+        case EventType::Status: {
+            trade_stats_.add_status();
+            std::string ticker(e.ticker, 4);
+            const char* code_name = TradeEvent::status_code_name(e.get_status_code());
+
+            // Format status message based on code
+            ss << std::fixed << std::setprecision(1) << std::setw(6) << rel_sec << "s  " << std::setw(10) << code_name
+               << "  " << std::setw(4) << ticker;
+
+            // Add price if available
+            if (e.price > 0) {
+                ss << "  $" << std::setprecision(2) << e.price;
             }
-            case EventType::TargetHit: {
-                trade_stats_.add_target();
-                pnl_.add_win(e.pnl);
 
-                std::string ticker(e.ticker, 3);
-                ss << std::fixed << std::setprecision(1) << std::setw(6) << rel_sec << "s  "
-                   << "TARGET " << std::setw(4) << ticker << "  +"
-                   << std::setprecision(2) << "$" << e.pnl;
-                events_.add(ss.str(), term::BGREEN);
-                break;
+            // Add signal strength if relevant
+            if (e.signal_strength > 0) {
+                ss << "  Str:" << (int)e.signal_strength;
             }
-            case EventType::StopLoss: {
-                trade_stats_.add_stop();
-                pnl_.add_loss(e.pnl);
 
-                std::string ticker(e.ticker, 3);
-                ss << std::fixed << std::setprecision(1) << std::setw(6) << rel_sec << "s  "
-                   << "STOP   " << std::setw(4) << ticker << "  "
-                   << std::setprecision(2) << "$" << e.pnl;
-                events_.add(ss.str(), term::BRED);
-                break;
+            // Color based on status type
+            const char* color = term::DIM;
+            StatusCode sc = e.get_status_code();
+            if (sc == StatusCode::Heartbeat) {
+                color = term::DIM; // Dim for routine heartbeat
+            } else if (sc == StatusCode::AutoTuneRelaxed) {
+                color = term::BGREEN; // Green - good news (relaxed params)
+            } else if (sc == StatusCode::IndicatorsWarmup || sc == StatusCode::AutoTuneCooldown ||
+                       sc == StatusCode::AutoTuneSignal || sc == StatusCode::AutoTuneMinTrade) {
+                color = term::YELLOW; // Yellow - warning/adjustment
+            } else if (sc == StatusCode::CashLow || sc == StatusCode::TradingDisabled ||
+                       sc == StatusCode::AutoTunePaused || sc == StatusCode::VolatilitySpike ||
+                       sc == StatusCode::DrawdownAlert) {
+                color = term::BRED; // Red - alert!
             }
-            case EventType::Signal: {
-                std::string ticker(e.ticker, 3);
-                ss << std::fixed << std::setprecision(1) << std::setw(6) << rel_sec << "s  "
-                   << "SIGNAL " << std::setw(4) << ticker << "  "
-                   << (e.side == 0 ? "BUY" : "SELL");
-                events_.add(ss.str(), term::BCYAN);
-                break;
-            }
-            case EventType::Status: {
-                trade_stats_.add_status();
-                std::string ticker(e.ticker, 4);
-                const char* code_name = TradeEvent::status_code_name(e.get_status_code());
 
-                // Format status message based on code
-                ss << std::fixed << std::setprecision(1) << std::setw(6) << rel_sec << "s  "
-                   << std::setw(10) << code_name << "  " << std::setw(4) << ticker;
-
-                // Add price if available
-                if (e.price > 0) {
-                    ss << "  $" << std::setprecision(2) << e.price;
-                }
-
-                // Add signal strength if relevant
-                if (e.signal_strength > 0) {
-                    ss << "  Str:" << (int)e.signal_strength;
-                }
-
-                // Color based on status type
-                const char* color = term::DIM;
-                StatusCode sc = e.get_status_code();
-                if (sc == StatusCode::Heartbeat) {
-                    color = term::DIM;  // Dim for routine heartbeat
-                } else if (sc == StatusCode::AutoTuneRelaxed) {
-                    color = term::BGREEN;  // Green - good news (relaxed params)
-                } else if (sc == StatusCode::IndicatorsWarmup ||
-                           sc == StatusCode::AutoTuneCooldown ||
-                           sc == StatusCode::AutoTuneSignal ||
-                           sc == StatusCode::AutoTuneMinTrade) {
-                    color = term::YELLOW;  // Yellow - warning/adjustment
-                } else if (sc == StatusCode::CashLow ||
-                           sc == StatusCode::TradingDisabled ||
-                           sc == StatusCode::AutoTunePaused ||
-                           sc == StatusCode::VolatilitySpike ||
-                           sc == StatusCode::DrawdownAlert) {
-                    color = term::BRED;  // Red - alert!
-                }
-
-                events_.add(ss.str(), color);
-                break;
-            }
-            default:
-                return;
+            events_.add(ss.str(), color);
+            break;
+        }
+        default:
+            return;
         }
     }
 
@@ -570,11 +597,8 @@ public:
         // Update stats model
         auto now = std::chrono::steady_clock::now();
         auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - start_time_).count();
-        stats_.update(
-            trade_stats_.fills + trade_stats_.targets + trade_stats_.stops,
-            trade_stats_.status_events,
-            elapsed
-        );
+        stats_.update(trade_stats_.fills + trade_stats_.targets + trade_stats_.stops, trade_stats_.status_events,
+                      elapsed);
 
         // First render - full screen clear and draw
         if (first_render_) {
@@ -656,12 +680,12 @@ public:
         std::cout << std::flush;
     }
 
-    void cleanup() {
-        std::cout << term::SHOW_CURSOR << term::RESET;
-    }
+    void cleanup() { std::cout << term::SHOW_CURSOR << term::RESET; }
 
     // Getters for final summary
-    uint64_t total_events() const { return trade_stats_.fills + trade_stats_.targets + trade_stats_.stops + trade_stats_.status_events; }
+    uint64_t total_events() const {
+        return trade_stats_.fills + trade_stats_.targets + trade_stats_.stops + trade_stats_.status_events;
+    }
     uint64_t total_status() const { return trade_stats_.status_events; }
     double realized_pnl() const { return pnl_.realized_pnl; }
     int wins() const { return pnl_.winning_trades; }
@@ -765,31 +789,32 @@ int main(int argc, char* argv[]) {
             if (stream_mode) {
                 const char* type_str = "";
                 switch (event.type) {
-                    case EventType::Fill: type_str = "FILL"; break;
-                    case EventType::TargetHit: type_str = "TARGET"; break;
-                    case EventType::StopLoss: type_str = "STOP"; break;
-                    case EventType::Status: {
-                        // Show status with code name
-                        std::cout << "STATUS " << std::string(event.ticker, 4) << " "
-                                  << TradeEvent::status_code_name(event.get_status_code())
-                                  << " $" << event.price << "\n";
-                        continue;
-                    }
-                    default: continue;
+                case EventType::Fill:
+                    type_str = "FILL";
+                    break;
+                case EventType::TargetHit:
+                    type_str = "TARGET";
+                    break;
+                case EventType::StopLoss:
+                    type_str = "STOP";
+                    break;
+                case EventType::Status: {
+                    // Show status with code name
+                    std::cout << "STATUS " << std::string(event.ticker, 4) << " "
+                              << TradeEvent::status_code_name(event.get_status_code()) << " $" << event.price << "\n";
+                    continue;
                 }
-                std::cout << type_str << " " << std::string(event.ticker, 3)
-                          << " " << event.price << "\n";
+                default:
+                    continue;
+                }
+                std::cout << type_str << " " << std::string(event.ticker, 3) << " " << event.price << "\n";
             }
 
             // Log
             if (log_stream) {
-                log_stream << event.timestamp_ns << ","
-                           << (int)event.type << ","
-                           << std::string(event.ticker, 3) << ","
-                           << (int)event.side << ","
-                           << event.price << ","
-                           << event.quantity << ","
-                           << event.pnl << "\n";
+                log_stream << event.timestamp_ns << "," << (int)event.type << "," << std::string(event.ticker, 3) << ","
+                           << (int)event.side << "," << event.price << "," << event.quantity << "," << event.pnl
+                           << "\n";
             }
         }
 
@@ -798,7 +823,7 @@ int main(int argc, char* argv[]) {
             auto now = std::chrono::steady_clock::now();
             auto since_render = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_render).count();
 
-            if (since_render >= 100) {  // 10 FPS
+            if (since_render >= 100) { // 10 FPS
                 controller.render();
                 last_render = now;
             }

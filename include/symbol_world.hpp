@@ -1,15 +1,16 @@
 #pragma once
 
-#include "types.hpp"
-#include "orderbook.hpp"
 #include "matching_engine.hpp"
+#include "orderbook.hpp"
 #include "strategy/market_maker.hpp"
 #include "strategy/position.hpp"
 #include "strategy/risk_manager.hpp"
 #include "top_of_book.hpp"
+#include "types.hpp"
+
 #include <memory>
-#include <string>
 #include <optional>
+#include <string>
 #include <unordered_map>
 
 namespace hft {
@@ -41,13 +42,10 @@ struct OurOrder {
 class SymbolWorld {
 public:
     SymbolWorld(Symbol id, const std::string& ticker, const SymbolConfig& config)
-        : id_(id)
-        , ticker_(ticker)
-        , config_(config)
-        , book_(std::make_unique<OrderBook>(config.base_price, config.price_range))
-        , matching_engine_(std::make_unique<MatchingEngine>(config.base_price, config.price_range))
-        , position_(std::make_unique<strategy::PositionTracker>())
-    {
+        : id_(id), ticker_(ticker), config_(config),
+          book_(std::make_unique<OrderBook>(config.base_price, config.price_range)),
+          matching_engine_(std::make_unique<MatchingEngine>(config.base_price, config.price_range)),
+          position_(std::make_unique<strategy::PositionTracker>()) {
         // Initialize market maker if configured
         if (config.enable_market_making) {
             strategy::MarketMakerConfig mm_config;
@@ -145,8 +143,10 @@ public:
     // Apply snapshot to initialize book
     void apply_snapshot(const L1Snapshot& snap) { top_of_book_.apply_snapshot(snap); }
 
-    template<size_t N>
-    void apply_snapshot(const L2Snapshot<N>& snap) { top_of_book_.apply_snapshot(snap); }
+    template <size_t N>
+    void apply_snapshot(const L2Snapshot<N>& snap) {
+        top_of_book_.apply_snapshot(snap);
+    }
 
     // ========================================
     // Trading Operations
@@ -158,9 +158,7 @@ public:
     }
 
     // Cancel order
-    bool cancel_order(OrderId id) {
-        return matching_engine_->cancel_order(id);
-    }
+    bool cancel_order(OrderId id) { return matching_engine_->cancel_order(id); }
 
     // Record a fill
     void on_fill(Side side, Quantity qty, Price price) {
@@ -174,10 +172,12 @@ public:
 
     // Get market maker quote (if enabled)
     std::optional<strategy::Quote> get_quote() const {
-        if (!market_maker_) return std::nullopt;
+        if (!market_maker_)
+            return std::nullopt;
 
         Price mid = mid_price();
-        if (mid == INVALID_PRICE) return std::nullopt;
+        if (mid == INVALID_PRICE)
+            return std::nullopt;
 
         return market_maker_->generate_quotes(mid, position_->position());
     }
@@ -203,14 +203,10 @@ public:
     }
 
     // Remove order (cancelled or fully filled)
-    void untrack_order(OrderId id) {
-        our_orders_.erase(id);
-    }
+    void untrack_order(OrderId id) { our_orders_.erase(id); }
 
     // Get all our open orders
-    const std::unordered_map<OrderId, OurOrder>& our_orders() const {
-        return our_orders_;
-    }
+    const std::unordered_map<OrderId, OurOrder>& our_orders() const { return our_orders_; }
 
     size_t our_order_count() const { return our_orders_.size(); }
 
@@ -226,7 +222,7 @@ private:
 
     // Strategy components
     std::unique_ptr<strategy::PositionTracker> position_;
-    std::unique_ptr<strategy::MarketMaker> market_maker_;  // Optional
+    std::unique_ptr<strategy::MarketMaker> market_maker_; // Optional
     std::unique_ptr<strategy::RiskManager> risk_manager_;
 
     // Our open orders (sent to exchange, awaiting fill/cancel)
@@ -236,4 +232,4 @@ private:
     TopOfBook top_of_book_;
 };
 
-}  // namespace hft
+} // namespace hft

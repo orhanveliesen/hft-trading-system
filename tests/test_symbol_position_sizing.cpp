@@ -5,47 +5,52 @@
  * ConfigStrategy uses these directly for position calculations.
  */
 
-#include <iostream>
-#include <cassert>
-#include <cstring>
-
 #include "../include/ipc/shared_config.hpp"
 #include "../include/ipc/symbol_config.hpp"
 
+#include <cassert>
+#include <cstring>
+#include <iostream>
+
 #define TEST(name) void name()
 
-#define RUN_TEST(name) do { \
-    std::cout << "  " << #name << "... "; \
-    try { \
-        name(); \
-        std::cout << "PASSED\n"; \
-    } catch (...) { \
-        std::cout << "FAILED (exception)\n"; \
-        return 1; \
-    } \
-} while(0)
+#define RUN_TEST(name)                                                                                                 \
+    do {                                                                                                               \
+        std::cout << "  " << #name << "... ";                                                                          \
+        try {                                                                                                          \
+            name();                                                                                                    \
+            std::cout << "PASSED\n";                                                                                   \
+        } catch (...) {                                                                                                \
+            std::cout << "FAILED (exception)\n";                                                                       \
+            return 1;                                                                                                  \
+        }                                                                                                              \
+    } while (0)
 
-#define ASSERT_EQ(a, b) do { \
-    if ((a) != (b)) { \
-        std::cerr << "\nFAIL: " << #a << " (" << (a) << ") != " << #b << " (" << (b) << ")\n"; \
-        assert(false); \
-    } \
-} while(0)
+#define ASSERT_EQ(a, b)                                                                                                \
+    do {                                                                                                               \
+        if ((a) != (b)) {                                                                                              \
+            std::cerr << "\nFAIL: " << #a << " (" << (a) << ") != " << #b << " (" << (b) << ")\n";                     \
+            assert(false);                                                                                             \
+        }                                                                                                              \
+    } while (0)
 
-#define ASSERT_TRUE(expr) do { \
-    if (!(expr)) { \
-        std::cerr << "\nFAIL: " << #expr << " is false\n"; \
-        assert(false); \
-    } \
-} while(0)
+#define ASSERT_TRUE(expr)                                                                                              \
+    do {                                                                                                               \
+        if (!(expr)) {                                                                                                 \
+            std::cerr << "\nFAIL: " << #expr << " is false\n";                                                         \
+            assert(false);                                                                                             \
+        }                                                                                                              \
+    } while (0)
 
-#define ASSERT_NEAR(a, b, epsilon) do { \
-    double diff = std::abs((a) - (b)); \
-    if (diff > (epsilon)) { \
-        std::cerr << "\nFAIL: " << #a << " (" << (a) << ") not near " << #b << " (" << (b) << "), diff=" << diff << "\n"; \
-        assert(false); \
-    } \
-} while(0)
+#define ASSERT_NEAR(a, b, epsilon)                                                                                     \
+    do {                                                                                                               \
+        double diff = std::abs((a) - (b));                                                                             \
+        if (diff > (epsilon)) {                                                                                        \
+            std::cerr << "\nFAIL: " << #a << " (" << (a) << ") not near " << #b << " (" << (b) << "), diff=" << diff   \
+                      << "\n";                                                                                         \
+            assert(false);                                                                                             \
+        }                                                                                                              \
+    } while (0)
 
 // =============================================================================
 // TEST 1: Default position sizing values
@@ -57,9 +62,9 @@ TEST(symbol_config_default_position_sizing) {
     cfg.init("BTCUSDT");
 
     // Default values (from defaults.hpp)
-    ASSERT_NEAR(cfg.base_position_pct(), 2.0, 0.01);  // 2%
-    ASSERT_NEAR(cfg.max_position_pct(), 5.0, 0.01);   // 5%
-    ASSERT_NEAR(cfg.min_position_pct(), 1.0, 0.01);   // 1% (MIN_POSITION_X100 = 100)
+    ASSERT_NEAR(cfg.base_position_pct(), 2.0, 0.01); // 2%
+    ASSERT_NEAR(cfg.max_position_pct(), 5.0, 0.01);  // 5%
+    ASSERT_NEAR(cfg.min_position_pct(), 1.0, 0.01);  // 1% (MIN_POSITION_X100 = 100)
 }
 
 // =============================================================================
@@ -74,16 +79,16 @@ TEST(symbol_config_custom_position_sizing) {
     // BTC: aggressive
     auto* btc = configs.get_or_create("BTCUSDT");
     ASSERT_TRUE(btc != nullptr);
-    btc->base_position_x100 = 400;  // 4%
-    btc->max_position_x100 = 1000;  // 10%
-    btc->min_position_x100 = 100;   // 1%
+    btc->base_position_x100 = 400; // 4%
+    btc->max_position_x100 = 1000; // 10%
+    btc->min_position_x100 = 100;  // 1%
 
     // ETH: conservative
     auto* eth = configs.get_or_create("ETHUSDT");
     ASSERT_TRUE(eth != nullptr);
-    eth->base_position_x100 = 100;  // 1%
-    eth->max_position_x100 = 300;   // 3%
-    eth->min_position_x100 = 50;    // 0.5%
+    eth->base_position_x100 = 100; // 1%
+    eth->max_position_x100 = 300;  // 3%
+    eth->min_position_x100 = 50;   // 0.5%
 
     // Verify BTC values
     ASSERT_NEAR(btc->base_position_pct(), 4.0, 0.01);
@@ -108,14 +113,14 @@ TEST(symbol_configs_update_position_sizing) {
     // Create initial config
     auto* btc = configs.get_or_create("BTCUSDT");
     ASSERT_TRUE(btc != nullptr);
-    ASSERT_NEAR(btc->base_position_pct(), 2.0, 0.01);  // Default
+    ASSERT_NEAR(btc->base_position_pct(), 2.0, 0.01); // Default
 
     // Create update with new values
     SymbolTuningConfig new_cfg;
     new_cfg.init("BTCUSDT");
-    new_cfg.base_position_x100 = 500;  // 5%
-    new_cfg.max_position_x100 = 1500;  // 15%
-    new_cfg.min_position_x100 = 200;   // 2%
+    new_cfg.base_position_x100 = 500; // 5%
+    new_cfg.max_position_x100 = 1500; // 15%
+    new_cfg.min_position_x100 = 200;  // 2%
 
     // Apply update
     bool updated = configs.update("BTCUSDT", new_cfg);
@@ -155,8 +160,8 @@ TEST(symbols_have_independent_configs) {
     // Modifying one doesn't affect others
     btc->base_position_x100 = 600;
     ASSERT_NEAR(configs.find("BTCUSDT")->base_position_pct(), 6.0, 0.01);
-    ASSERT_NEAR(configs.find("ETHUSDT")->base_position_pct(), 2.0, 0.01);  // Unchanged
-    ASSERT_NEAR(configs.find("SOLUSDT")->base_position_pct(), 1.0, 0.01);  // Unchanged
+    ASSERT_NEAR(configs.find("ETHUSDT")->base_position_pct(), 2.0, 0.01); // Unchanged
+    ASSERT_NEAR(configs.find("SOLUSDT")->base_position_pct(), 1.0, 0.01); // Unchanged
 }
 
 // =============================================================================

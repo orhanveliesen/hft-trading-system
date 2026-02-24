@@ -11,15 +11,16 @@
 
 #include "../ipc/symbol_config.hpp"
 #include "../ipc/tuner_event.hpp"
-#include <string>
-#include <vector>
-#include <sstream>
-#include <iomanip>
-#include <iostream>
-#include <fstream>
+
 #include <cstring>
 #include <curl/curl.h>
-#include <unistd.h>  // for getcwd
+#include <fstream>
+#include <iomanip>
+#include <iostream>
+#include <sstream>
+#include <string>
+#include <unistd.h> // for getcwd
+#include <vector>
 
 namespace hft {
 namespace tuner {
@@ -38,54 +39,56 @@ struct ClaudeResponse {
 
 // Cost metrics for AI tuner - CRITICAL for profitability analysis
 struct CostMetrics {
-    double total_commissions;      // Total commission fees paid
-    double total_slippage;         // Total slippage cost
-    double total_costs;            // Commission + slippage
-    double total_volume;           // Total traded volume
-    uint32_t total_fills;          // Total number of fills
-    uint32_t total_targets;        // Number of take-profit hits
-    uint32_t total_stops;          // Number of stop-loss hits
-    double cost_per_trade;         // Average cost per trade
-    double avg_trade_value;        // Average trade size
-    double cost_pct_per_trade;     // Cost as % of trade value
-    double round_trip_cost_pct;    // Round-trip cost (buy+sell)
+    double total_commissions;   // Total commission fees paid
+    double total_slippage;      // Total slippage cost
+    double total_costs;         // Commission + slippage
+    double total_volume;        // Total traded volume
+    uint32_t total_fills;       // Total number of fills
+    uint32_t total_targets;     // Number of take-profit hits
+    uint32_t total_stops;       // Number of stop-loss hits
+    double cost_per_trade;      // Average cost per trade
+    double avg_trade_value;     // Average trade size
+    double cost_pct_per_trade;  // Cost as % of trade value
+    double round_trip_cost_pct; // Round-trip cost (buy+sell)
 
     // Calculated metrics
-    double gross_pnl;              // P&L before costs
-    double net_pnl;                // P&L after costs
-    double win_rate;               // Win rate %
-    double profit_factor;          // Gross profit / Gross loss
+    double gross_pnl;     // P&L before costs
+    double net_pnl;       // P&L after costs
+    double win_rate;      // Win rate %
+    double profit_factor; // Gross profit / Gross loss
 
     // Trading frequency
     uint32_t session_duration_sec; // How long we've been trading
     double trades_per_hour;        // Fill rate
 
     // Expected vs Observed costs (CRITICAL for AI to understand)
-    double configured_slippage_bps;    // Expected slippage (default: 5 bps)
-    double configured_commission_bps;  // Expected commission (default: 10 bps)
-    double observed_slippage_bps;      // Actual slippage per fill
-    double observed_commission_bps;    // Actual commission per fill
-    double expected_round_trip_pct;    // Expected round-trip (default: 0.3%)
-    double actual_round_trip_pct;      // Actual observed round-trip
+    double configured_slippage_bps;   // Expected slippage (default: 5 bps)
+    double configured_commission_bps; // Expected commission (default: 10 bps)
+    double observed_slippage_bps;     // Actual slippage per fill
+    double observed_commission_bps;   // Actual commission per fill
+    double expected_round_trip_pct;   // Expected round-trip (default: 0.3%)
+    double actual_round_trip_pct;     // Actual observed round-trip
 
     // Cost efficiency - AI will interpret these
     bool costs_exceed_profits() const { return total_costs > (gross_pnl > 0 ? gross_pnl : 0); }
     bool slippage_exceeds_expected() const { return observed_slippage_bps > configured_slippage_bps * 1.5; }
-    double slippage_ratio() const { return configured_slippage_bps > 0 ? observed_slippage_bps / configured_slippage_bps : 0; }
+    double slippage_ratio() const {
+        return configured_slippage_bps > 0 ? observed_slippage_bps / configured_slippage_bps : 0;
+    }
 };
 
 // Market snapshot data for AI tuner
 struct MarketSnapshotData {
-    double price_high;         // Highest price in last ~60s
-    double price_low;          // Lowest price in last ~60s
-    double price_open;         // Price at start of window
-    double ema_20;             // EMA-20
-    double atr_14;             // ATR-14
-    double volume_sum;         // Total volume in window
-    double volatility_pct;     // Volatility as %
-    double price_range_pct;    // High-low range as %
-    int32_t tick_count;        // Number of ticks in window
-    int8_t trend_direction;    // -1=down, 0=flat, 1=up
+    double price_high;      // Highest price in last ~60s
+    double price_low;       // Lowest price in last ~60s
+    double price_open;      // Price at start of window
+    double ema_20;          // EMA-20
+    double atr_14;          // ATR-14
+    double volume_sum;      // Total volume in window
+    double volatility_pct;  // Volatility as %
+    double price_range_pct; // High-low range as %
+    int32_t tick_count;     // Number of ticks in window
+    int8_t trend_direction; // -1=down, 0=flat, 1=up
 };
 
 // Symbol data for tuning request
@@ -112,10 +115,10 @@ struct SymbolTuningData {
 // Valid Claude model IDs - updated for 2025/2026
 static constexpr const char* VALID_CLAUDE_MODELS[] = {
     // Current generation (2025+)
-    "claude-opus-4-5-20251101",     // Most capable - complex reasoning (DEFAULT)
-    "claude-sonnet-4-5-20241022",   // Balanced performance/cost
-    "claude-sonnet-4-20250514",     // Sonnet 4
-    "claude-haiku-3-5-20241022",    // Fast model
+    "claude-opus-4-5-20251101",   // Most capable - complex reasoning (DEFAULT)
+    "claude-sonnet-4-5-20241022", // Balanced performance/cost
+    "claude-sonnet-4-20250514",   // Sonnet 4
+    "claude-haiku-3-5-20241022",  // Fast model
     // Legacy models (may still work)
     "claude-3-opus-20240229",
     "claude-3-5-sonnet-20241022",
@@ -152,12 +155,13 @@ public:
             if (is_valid_model(model_env)) {
                 model_ = model_env;
             } else {
-                std::cerr << "[WARN] Invalid model ID '" << model_env
-                          << "' - falling back to " << DEFAULT_MODEL << "\n";
+                std::cerr << "[WARN] Invalid model ID '" << model_env << "' - falling back to " << DEFAULT_MODEL
+                          << "\n";
                 std::cerr << "[WARN] Valid models: ";
                 for (size_t i = 0; i < VALID_MODEL_COUNT; ++i) {
                     std::cerr << VALID_CLAUDE_MODELS[i];
-                    if (i < VALID_MODEL_COUNT - 1) std::cerr << ", ";
+                    if (i < VALID_MODEL_COUNT - 1)
+                        std::cerr << ", ";
                 }
                 std::cerr << "\n";
                 model_ = DEFAULT_MODEL;
@@ -180,7 +184,7 @@ public:
             curl_easy_setopt(curl_, CURLOPT_URL, api_url_.c_str());
             curl_easy_setopt(curl_, CURLOPT_POST, 1L);
             curl_easy_setopt(curl_, CURLOPT_WRITEFUNCTION, write_callback);
-            curl_easy_setopt(curl_, CURLOPT_TIMEOUT, 30L);  // 30 second timeout
+            curl_easy_setopt(curl_, CURLOPT_TIMEOUT, 30L); // 30 second timeout
             curl_easy_setopt(curl_, CURLOPT_CONNECTTIMEOUT, 10L);
 
             // Reuse connections
@@ -197,20 +201,19 @@ public:
         curl_global_cleanup();
     }
 
-    bool is_valid() const {
-        return !api_key_.empty() && curl_ != nullptr;
-    }
+    bool is_valid() const { return !api_key_.empty() && curl_ != nullptr; }
 
     const char* model() const { return model_.c_str(); }
 
     void set_model(const std::string& model) {
-        if (model.empty()) return;
+        if (model.empty())
+            return;
 
         if (is_valid_model(model.c_str())) {
             model_ = model;
         } else {
-            std::cerr << "[WARN] set_model: Invalid model ID '" << model
-                      << "' - keeping current model " << model_ << "\n";
+            std::cerr << "[WARN] set_model: Invalid model ID '" << model << "' - keeping current model " << model_
+                      << "\n";
         }
     }
 
@@ -218,7 +221,8 @@ public:
      * Check if a model ID is valid
      */
     static bool is_valid_model(const char* model) {
-        if (!model) return false;
+        if (!model)
+            return false;
         for (size_t i = 0; i < VALID_MODEL_COUNT; ++i) {
             if (std::strcmp(model, VALID_CLAUDE_MODELS[i]) == 0) {
                 return true;
@@ -233,7 +237,8 @@ public:
     static std::string get_valid_models_list() {
         std::string result;
         for (size_t i = 0; i < VALID_MODEL_COUNT; ++i) {
-            if (i > 0) result += ", ";
+            if (i > 0)
+                result += ", ";
             result += VALID_CLAUDE_MODELS[i];
         }
         return result;
@@ -243,14 +248,9 @@ public:
      * Request tuning recommendation from Claude
      * @param news_context Optional news summary to include in prompt
      */
-    ClaudeResponse request_tuning(
-        const std::vector<SymbolTuningData>& symbols,
-        double portfolio_pnl,
-        double portfolio_cash,
-        ipc::TriggerReason trigger,
-        const std::string& news_context = "",
-        const CostMetrics* costs = nullptr)
-    {
+    ClaudeResponse request_tuning(const std::vector<SymbolTuningData>& symbols, double portfolio_pnl,
+                                  double portfolio_cash, ipc::TriggerReason trigger,
+                                  const std::string& news_context = "", const CostMetrics* costs = nullptr) {
         ClaudeResponse response;
 
         if (!is_valid()) {
@@ -325,20 +325,20 @@ private:
     static std::string load_api_key_from_env_file() {
         // Search paths for .env.local
         std::vector<std::string> paths = {
-            ".env.local",
-            "../.env.local",
-            "../../.env.local",
-            "/mnt/c/Users/orhan/projects/orhan/hft/.env.local"  // Absolute fallback
+            ".env.local", "../.env.local", "../../.env.local",
+            "/mnt/c/Users/orhan/projects/orhan/hft/.env.local" // Absolute fallback
         };
 
         for (const auto& path : paths) {
             std::ifstream file(path);
-            if (!file.is_open()) continue;
+            if (!file.is_open())
+                continue;
 
             std::string line;
             while (std::getline(file, line)) {
                 // Skip comments and empty lines
-                if (line.empty() || line[0] == '#') continue;
+                if (line.empty() || line[0] == '#')
+                    continue;
 
                 // Look for CLAUDE_API_KEY or ANTHROPIC_API_KEY
                 std::string key;
@@ -370,14 +370,9 @@ private:
         return size * nmemb;
     }
 
-    std::string build_prompt(
-        const std::vector<SymbolTuningData>& symbols,
-        double portfolio_pnl,
-        double portfolio_cash,
-        ipc::TriggerReason trigger,
-        const std::string& news_context,
-        const CostMetrics* costs = nullptr)
-    {
+    std::string build_prompt(const std::vector<SymbolTuningData>& symbols, double portfolio_pnl, double portfolio_cash,
+                             ipc::TriggerReason trigger, const std::string& news_context,
+                             const CostMetrics* costs = nullptr) {
         std::ostringstream ss;
 
         ss << "You are an HFT parameter tuner. Analyze the trading performance and recommend ONE action.\n\n";
@@ -421,18 +416,20 @@ private:
             ss << "| Metric | Expected | Observed | Status |\n";
             ss << "|--------|----------|----------|--------|\n";
             ss << "| Slippage/fill | " << std::setprecision(1) << costs->configured_slippage_bps << " bps | "
-               << costs->observed_slippage_bps << " bps | "
-               << (costs->slippage_exceeds_expected() ? "⚠️ HIGH" : "✅ OK") << " |\n";
+               << costs->observed_slippage_bps << " bps | " << (costs->slippage_exceeds_expected() ? "⚠️ HIGH" : "✅ OK")
+               << " |\n";
             ss << "| Commission/fill | " << costs->configured_commission_bps << " bps | "
                << costs->observed_commission_bps << " bps | "
                << (costs->observed_commission_bps > costs->configured_commission_bps * 1.1 ? "⚠️" : "✅") << " |\n";
-            ss << "| Round-trip | " << costs->expected_round_trip_pct << "% | "
-               << std::setprecision(2) << costs->actual_round_trip_pct << "% | "
-               << (costs->actual_round_trip_pct > costs->expected_round_trip_pct * 1.3 ? "🚨 TOO HIGH" : "✅") << " |\n\n";
+            ss << "| Round-trip | " << costs->expected_round_trip_pct << "% | " << std::setprecision(2)
+               << costs->actual_round_trip_pct << "% | "
+               << (costs->actual_round_trip_pct > costs->expected_round_trip_pct * 1.3 ? "🚨 TOO HIGH" : "✅")
+               << " |\n\n";
 
             if (costs->slippage_exceeds_expected()) {
                 ss << "**⚠️ SLIPPAGE WARNING:**\n";
-                ss << "- Actual slippage is " << std::setprecision(1) << costs->slippage_ratio() << "x higher than expected!\n";
+                ss << "- Actual slippage is " << std::setprecision(1) << costs->slippage_ratio()
+                   << "x higher than expected!\n";
                 ss << "- This means targets must be HIGHER to be profitable.\n";
                 ss << "- Consider: target_pct should be > " << std::setprecision(2)
                    << (costs->actual_round_trip_pct * 2) << "% to cover costs.\n";
@@ -442,12 +439,11 @@ private:
             if (costs->actual_round_trip_pct > costs->expected_round_trip_pct * 1.5) {
                 ss << "**🚨 ROUND-TRIP COST ALERT:**\n";
                 ss << "- System expects " << costs->expected_round_trip_pct << "% round-trip cost.\n";
-                ss << "- Actual cost is " << costs->actual_round_trip_pct << "% ("
-                   << std::setprecision(1) << (costs->actual_round_trip_pct / costs->expected_round_trip_pct)
-                   << "x higher).\n";
+                ss << "- Actual cost is " << costs->actual_round_trip_pct << "% (" << std::setprecision(1)
+                   << (costs->actual_round_trip_pct / costs->expected_round_trip_pct) << "x higher).\n";
                 ss << "- Current target/stop may be miscalibrated for actual costs.\n";
-                ss << "- **Required minimum target: " << std::setprecision(2)
-                   << (costs->actual_round_trip_pct * 1.5) << "%** to have positive expectancy.\n\n";
+                ss << "- **Required minimum target: " << std::setprecision(2) << (costs->actual_round_trip_pct * 1.5)
+                   << "%** to have positive expectancy.\n\n";
             }
 
             ss << "**Trading Statistics:**\n";
@@ -484,8 +480,8 @@ private:
             // CRITICAL: Stop/Target Ratio Analysis with Math
             if (costs->total_stops > 0 || costs->total_targets > 0) {
                 ss << "## 🚨 STOP/TARGET RATIO ANALYSIS (CRITICAL - READ THIS FIRST)\n";
-                double stop_target_ratio = costs->total_targets > 0 ?
-                    (double)costs->total_stops / costs->total_targets : 999.0;
+                double stop_target_ratio =
+                    costs->total_targets > 0 ? (double)costs->total_stops / costs->total_targets : 999.0;
                 ss << "- Stops hit: " << costs->total_stops << "\n";
                 ss << "- Targets hit: " << costs->total_targets << "\n";
                 ss << "- **Stop/Target Ratio: " << std::setprecision(1) << stop_target_ratio << ":1**\n\n";
@@ -530,10 +526,10 @@ private:
 
         ss << "## Symbol Performance\n";
         for (const auto& s : symbols) {
-            if (s.symbol[0] == '\0') continue;
+            if (s.symbol[0] == '\0')
+                continue;
 
-            double win_rate = s.trades_session > 0 ?
-                (100.0 * s.wins_session / s.trades_session) : 0.0;
+            double win_rate = s.trades_session > 0 ? (100.0 * s.wins_session / s.trades_session) : 0.0;
 
             ss << "### " << s.symbol << "\n";
             ss << "- Price: $" << std::setprecision(4) << s.current_price;
@@ -549,29 +545,29 @@ private:
             // Full config display for AI tuning
             const auto& cfg = s.current_config;
             const char* order_type_names[] = {"Auto", "MarketOnly", "LimitOnly", "Adaptive"};
-            const char* order_type_name = (cfg.order_type_preference < 4) ? order_type_names[cfg.order_type_preference] : "Auto";
+            const char* order_type_name =
+                (cfg.order_type_preference < 4) ? order_type_names[cfg.order_type_preference] : "Auto";
 
             ss << "- Current config (FULL):\n";
             ss << "  - EMA deviation: trending=" << (cfg.ema_dev_trending_x100 / 100.0)
                << "%, ranging=" << (cfg.ema_dev_ranging_x100 / 100.0)
                << "%, highvol=" << (cfg.ema_dev_highvol_x100 / 100.0) << "%\n";
             ss << "  - Position: base=" << (cfg.base_position_x100 / 100.0)
-               << "%, max=" << (cfg.max_position_x100 / 100.0)
-               << "%, min=" << (cfg.min_position_x100 / 100.0) << "%\n";
-            ss << "  - Trade filtering: cooldown=" << cfg.cooldown_ms << "ms, signal_strength=" << (int)cfg.signal_strength << "\n";
+               << "%, max=" << (cfg.max_position_x100 / 100.0) << "%, min=" << (cfg.min_position_x100 / 100.0) << "%\n";
+            ss << "  - Trade filtering: cooldown=" << cfg.cooldown_ms
+               << "ms, signal_strength=" << (int)cfg.signal_strength << "\n";
             ss << "  - Target/Stop: target=" << (cfg.target_pct_x100 / 100.0)
-               << "%, stop=" << (cfg.stop_pct_x100 / 100.0)
-               << "%, pullback=" << (cfg.pullback_pct_x100 / 100.0) << "%\n";
-            ss << "  - Order type: " << order_type_name
-               << ", limit_offset=" << (cfg.limit_offset_bps_x100 / 100.0) << "bps"
+               << "%, stop=" << (cfg.stop_pct_x100 / 100.0) << "%, pullback=" << (cfg.pullback_pct_x100 / 100.0)
+               << "%\n";
+            ss << "  - Order type: " << order_type_name << ", limit_offset=" << (cfg.limit_offset_bps_x100 / 100.0)
+               << "bps"
                << ", limit_timeout=" << cfg.limit_timeout_ms << "ms\n";
             ss << "  - Mode transitions: losses_to_cautious=" << (int)cfg.losses_to_cautious
                << ", losses_to_defensive=" << (int)cfg.losses_to_defensive
                << ", losses_to_exit_only=" << (int)cfg.losses_to_exit_only
                << ", wins_to_aggressive=" << (int)cfg.wins_to_aggressive << "\n";
             ss << "  - Signal thresholds: aggressive=" << (cfg.signal_aggressive_x100 / 100.0)
-               << ", normal=" << (cfg.signal_normal_x100 / 100.0)
-               << ", cautious=" << (cfg.signal_cautious_x100 / 100.0)
+               << ", normal=" << (cfg.signal_normal_x100 / 100.0) << ", cautious=" << (cfg.signal_cautious_x100 / 100.0)
                << ", min_confidence=" << (cfg.min_confidence_x100 / 100.0) << "\n";
             ss << "  - Accumulation: floor_trend=" << (cfg.accum_floor_trending_x100 / 100.0)
                << ", floor_range=" << (cfg.accum_floor_ranging_x100 / 100.0)
@@ -583,12 +579,15 @@ private:
             // Include market snapshot if available
             if (s.has_snapshot) {
                 ss << "- Last 60s market data:\n";
-                ss << "  - Price range: $" << std::setprecision(2) << s.snapshot.price_low
-                   << " - $" << s.snapshot.price_high
-                   << " (range: " << std::setprecision(2) << s.snapshot.price_range_pct << "%)\n";
+                ss << "  - Price range: $" << std::setprecision(2) << s.snapshot.price_low << " - $"
+                   << s.snapshot.price_high << " (range: " << std::setprecision(2) << s.snapshot.price_range_pct
+                   << "%)\n";
                 ss << "  - Volatility: " << std::setprecision(2) << s.snapshot.volatility_pct << "%\n";
-                ss << "  - Trend: " << (s.snapshot.trend_direction > 0 ? "UP" :
-                                        s.snapshot.trend_direction < 0 ? "DOWN" : "FLAT") << "\n";
+                ss << "  - Trend: "
+                   << (s.snapshot.trend_direction > 0   ? "UP"
+                       : s.snapshot.trend_direction < 0 ? "DOWN"
+                                                        : "FLAT")
+                   << "\n";
                 if (s.snapshot.ema_20 > 0) {
                     double ema_dev = (s.current_price - s.snapshot.ema_20) / s.snapshot.ema_20 * 100;
                     ss << "  - EMA-20: $" << std::setprecision(2) << s.snapshot.ema_20
@@ -667,16 +666,19 @@ private:
 
         ss << "## Parameter Meanings (with REALISTIC ranges)\n";
         ss << "**EMA Deviation:**\n";
-        ss << "- ema_dev_trending_pct: Max % price can deviate from EMA in uptrend. **REALISTIC: 0.5-2.0%** (NOT 3-4%!)\n";
+        ss << "- ema_dev_trending_pct: Max % price can deviate from EMA in uptrend. **REALISTIC: 0.5-2.0%** (NOT "
+              "3-4%!)\n";
         ss << "- ema_dev_ranging_pct: Max % price can deviate from EMA in ranging markets. **REALISTIC: 0.3-1.0%**\n";
         ss << "- ema_dev_highvol_pct: Max % deviation in high volatility. **REALISTIC: 0.2-0.5%**\n";
         ss << "\n**Position Sizing:**\n";
-        ss << "- base_position_pct: Position size as % of portfolio. **ADJUST BASED ON PERFORMANCE** (see Position Sizing Guidance)\n";
+        ss << "- base_position_pct: Position size as % of portfolio. **ADJUST BASED ON PERFORMANCE** (see Position "
+              "Sizing Guidance)\n";
         ss << "- max_position_pct: Max position size. **SCALE UP when profitable** (see Position Sizing Guidance)\n";
         ss << "- min_position_pct: Minimum position size (0.5-2%)\n";
         ss << "\n**Trade Filtering:**\n";
         ss << "- cooldown_ms: Minimum time between trades in milliseconds\n";
-        ss << "- signal_strength: Required signal strength (1=Medium, 2=Strong, 3=VeryStrong) - **USE 1 for more trades**\n";
+        ss << "- signal_strength: Required signal strength (1=Medium, 2=Strong, 3=VeryStrong) - **USE 1 for more "
+              "trades**\n";
         ss << "\n**Target/Stop:**\n";
         ss << "- target_pct: Take profit threshold as % of entry price (REALISTIC: 2-4%)\n";
         ss << "- stop_pct: Stop loss threshold as % of entry price (REALISTIC: 3-5%, NEVER below 3%)\n";
@@ -771,12 +773,23 @@ private:
         std::string escaped_prompt;
         for (char c : prompt) {
             switch (c) {
-                case '"': escaped_prompt += "\\\""; break;
-                case '\\': escaped_prompt += "\\\\"; break;
-                case '\n': escaped_prompt += "\\n"; break;
-                case '\r': escaped_prompt += "\\r"; break;
-                case '\t': escaped_prompt += "\\t"; break;
-                default: escaped_prompt += c;
+            case '"':
+                escaped_prompt += "\\\"";
+                break;
+            case '\\':
+                escaped_prompt += "\\\\";
+                break;
+            case '\n':
+                escaped_prompt += "\\n";
+                break;
+            case '\r':
+                escaped_prompt += "\\r";
+                break;
+            case '\t':
+                escaped_prompt += "\\t";
+                break;
+            default:
+                escaped_prompt += c;
             }
         }
 
@@ -796,17 +809,20 @@ private:
 
         // Find "content" array
         size_t content_pos = body.find("\"content\"");
-        if (content_pos == std::string::npos) return false;
+        if (content_pos == std::string::npos)
+            return false;
 
         // Find "text": field (with colon to avoid matching "type":"text")
         size_t text_pos = body.find("\"text\":", content_pos);
-        if (text_pos == std::string::npos) return false;
+        if (text_pos == std::string::npos)
+            return false;
 
         // Extract text value (skip "text": which is 7 chars)
         size_t text_start = body.find("\"", text_pos + 7) + 1;
         size_t text_end = text_start;
         while (text_end < body.size()) {
-            if (body[text_end] == '"' && body[text_end - 1] != '\\') break;
+            if (body[text_end] == '"' && body[text_end - 1] != '\\')
+                break;
             text_end++;
         }
 
@@ -817,12 +833,28 @@ private:
         for (size_t i = 0; i < text.size(); i++) {
             if (text[i] == '\\' && i + 1 < text.size()) {
                 switch (text[i + 1]) {
-                    case 'n': unescaped += '\n'; i++; break;
-                    case 'r': unescaped += '\r'; i++; break;
-                    case 't': unescaped += '\t'; i++; break;
-                    case '"': unescaped += '"'; i++; break;
-                    case '\\': unescaped += '\\'; i++; break;
-                    default: unescaped += text[i];
+                case 'n':
+                    unescaped += '\n';
+                    i++;
+                    break;
+                case 'r':
+                    unescaped += '\r';
+                    i++;
+                    break;
+                case 't':
+                    unescaped += '\t';
+                    i++;
+                    break;
+                case '"':
+                    unescaped += '"';
+                    i++;
+                    break;
+                case '\\':
+                    unescaped += '\\';
+                    i++;
+                    break;
+                default:
+                    unescaped += text[i];
                 }
             } else {
                 unescaped += text[i];
@@ -858,11 +890,11 @@ protected:
         std::string clean_text = text;
         size_t md_start = clean_text.find("```json");
         if (md_start != std::string::npos) {
-            clean_text = clean_text.substr(md_start + 7);  // Skip "```json"
+            clean_text = clean_text.substr(md_start + 7); // Skip "```json"
         } else {
             md_start = clean_text.find("```");
             if (md_start != std::string::npos) {
-                clean_text = clean_text.substr(md_start + 3);  // Skip "```"
+                clean_text = clean_text.substr(md_start + 3); // Skip "```"
             }
         }
         size_t md_end = clean_text.find("```");
@@ -956,7 +988,7 @@ protected:
                     // Trade filtering
                     bool filtering_changed = false;
                     if ((val = extract_number(config_json, "cooldown_ms")) > 0) {
-                        cmd.config.set_cooldown_ms(val);  // Use setter with bounds checking
+                        cmd.config.set_cooldown_ms(val); // Use setter with bounds checking
                         filtering_changed = true;
                     }
                     if ((val = extract_number(config_json, "signal_strength")) > 0) {
@@ -995,7 +1027,7 @@ protected:
                         } else if (order_type == "Adaptive") {
                             cmd.config.order_type_preference = 3;
                         } else {
-                            cmd.config.order_type_preference = 0;  // Auto
+                            cmd.config.order_type_preference = 0; // Auto
                         }
                     }
                     if ((val = extract_number(config_json, "limit_offset_bps")) > 0) {
@@ -1068,17 +1100,21 @@ protected:
     std::string extract_string(const std::string& json, const char* key) {
         std::string search = "\"" + std::string(key) + "\"";
         size_t pos = json.find(search);
-        if (pos == std::string::npos) return "";
+        if (pos == std::string::npos)
+            return "";
 
         size_t colon = json.find(":", pos);
-        if (colon == std::string::npos) return "";
+        if (colon == std::string::npos)
+            return "";
 
         size_t quote_start = json.find("\"", colon);
-        if (quote_start == std::string::npos) return "";
+        if (quote_start == std::string::npos)
+            return "";
 
         size_t quote_end = quote_start + 1;
         while (quote_end < json.size()) {
-            if (json[quote_end] == '"' && json[quote_end - 1] != '\\') break;
+            if (json[quote_end] == '"' && json[quote_end - 1] != '\\')
+                break;
             quote_end++;
         }
 
@@ -1088,10 +1124,12 @@ protected:
     double extract_number(const std::string& json, const char* key) {
         std::string search = "\"" + std::string(key) + "\"";
         size_t pos = json.find(search);
-        if (pos == std::string::npos) return 0;
+        if (pos == std::string::npos)
+            return 0;
 
         size_t colon = json.find(":", pos);
-        if (colon == std::string::npos) return 0;
+        if (colon == std::string::npos)
+            return 0;
 
         // Skip whitespace
         size_t num_start = colon + 1;
@@ -1106,32 +1144,50 @@ private:
     // Internal helper methods
     const char* trigger_name(ipc::TriggerReason trigger) {
         switch (trigger) {
-            case ipc::TriggerReason::Scheduled: return "Scheduled (periodic)";
-            case ipc::TriggerReason::LossThreshold: return "Loss threshold exceeded";
-            case ipc::TriggerReason::ConsecutiveLosses: return "Consecutive losses";
-            case ipc::TriggerReason::WinStreak: return "Win streak";
-            case ipc::TriggerReason::VolatilitySpike: return "Volatility spike";
-            case ipc::TriggerReason::NewsTriggered: return "News event";
-            case ipc::TriggerReason::ManualRequest: return "Manual request";
-            case ipc::TriggerReason::StartupInit: return "Startup initialization";
-            case ipc::TriggerReason::RegimeChange: return "Regime change";
-            case ipc::TriggerReason::DrawdownAlert: return "Drawdown alert";
-            default: return "Unknown";
+        case ipc::TriggerReason::Scheduled:
+            return "Scheduled (periodic)";
+        case ipc::TriggerReason::LossThreshold:
+            return "Loss threshold exceeded";
+        case ipc::TriggerReason::ConsecutiveLosses:
+            return "Consecutive losses";
+        case ipc::TriggerReason::WinStreak:
+            return "Win streak";
+        case ipc::TriggerReason::VolatilitySpike:
+            return "Volatility spike";
+        case ipc::TriggerReason::NewsTriggered:
+            return "News event";
+        case ipc::TriggerReason::ManualRequest:
+            return "Manual request";
+        case ipc::TriggerReason::StartupInit:
+            return "Startup initialization";
+        case ipc::TriggerReason::RegimeChange:
+            return "Regime change";
+        case ipc::TriggerReason::DrawdownAlert:
+            return "Drawdown alert";
+        default:
+            return "Unknown";
         }
     }
 
     const char* regime_name(uint8_t regime) {
         switch (regime) {
-            case 0: return "Unknown";
-            case 1: return "TrendingUp";
-            case 2: return "TrendingDown";
-            case 3: return "Ranging";
-            case 4: return "HighVolatility";
-            case 5: return "LowVolatility";
-            default: return "Unknown";
+        case 0:
+            return "Unknown";
+        case 1:
+            return "TrendingUp";
+        case 2:
+            return "TrendingDown";
+        case 3:
+            return "Ranging";
+        case 4:
+            return "HighVolatility";
+        case 5:
+            return "LowVolatility";
+        default:
+            return "Unknown";
         }
     }
 };
 
-}  // namespace tuner
-}  // namespace hft
+} // namespace tuner
+} // namespace hft

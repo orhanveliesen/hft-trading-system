@@ -1,19 +1,20 @@
-#include <cassert>
-#include <iostream>
-#include <cmath>
-
 #include "../include/strategy/arbitrage/symbol_pair.hpp"
 #include "../include/strategy/arbitrage/triangular_arb.hpp"
+
+#include <cassert>
+#include <cmath>
+#include <iostream>
 
 using namespace hft;
 using namespace hft::strategy::arbitrage;
 
 #define TEST(name) void name()
-#define RUN_TEST(name) do { \
-    std::cout << "  " << #name << "... "; \
-    name(); \
-    std::cout << "PASSED\n"; \
-} while(0)
+#define RUN_TEST(name)                                                                                                 \
+    do {                                                                                                               \
+        std::cout << "  " << #name << "... ";                                                                          \
+        name();                                                                                                        \
+        std::cout << "PASSED\n";                                                                                       \
+    } while (0)
 
 #define ASSERT_EQ(a, b) assert((a) == (b))
 #define ASSERT_TRUE(x) assert(x)
@@ -96,11 +97,7 @@ TEST(test_detect_triangular_relationship) {
     config.auto_detect = true;
     TriangularArbDetector detector(config);
 
-    std::vector<std::string> symbols = {
-        "BTC/USDT",
-        "ETH/BTC",
-        "ETH/USDT"
-    };
+    std::vector<std::string> symbols = {"BTC/USDT", "ETH/BTC", "ETH/USDT"};
 
     size_t count = detector.detect_relationships(symbols);
     ASSERT_EQ(count, 1);
@@ -118,13 +115,7 @@ TEST(test_detect_multiple_relationships) {
     ArbitrageConfig config;
     TriangularArbDetector detector(config);
 
-    std::vector<std::string> symbols = {
-        "BTC/USDT",
-        "ETH/BTC",
-        "ETH/USDT",
-        "SOL/BTC",
-        "SOL/USDT"
-    };
+    std::vector<std::string> symbols = {"BTC/USDT", "ETH/BTC", "ETH/USDT", "SOL/BTC", "SOL/USDT"};
 
     size_t count = detector.detect_relationships(symbols);
     // Should find: BTC/USDT-ETH/BTC-ETH/USDT and BTC/USDT-SOL/BTC-SOL/USDT
@@ -135,11 +126,7 @@ TEST(test_detect_no_separator_symbols) {
     ArbitrageConfig config;
     TriangularArbDetector detector(config);
 
-    std::vector<std::string> symbols = {
-        "BTCUSDT",
-        "ETHBTC",
-        "ETHUSDT"
-    };
+    std::vector<std::string> symbols = {"BTCUSDT", "ETHBTC", "ETHUSDT"};
 
     size_t count = detector.detect_relationships(symbols);
     ASSERT_EQ(count, 1);
@@ -147,16 +134,16 @@ TEST(test_detect_no_separator_symbols) {
 
 TEST(test_price_update_and_spread_calculation) {
     ArbitrageConfig config;
-    config.default_min_spread_pct = 0.001;  // 0.1%
+    config.default_min_spread_pct = 0.001; // 0.1%
     TriangularArbDetector detector(config);
 
     std::vector<std::string> symbols = {"BTC/USDT", "ETH/BTC", "ETH/USDT"};
     detector.detect_relationships(symbols);
 
     // Update prices - no arbitrage opportunity (prices balanced)
-    detector.on_price_update("BTC/USDT", 50000, 50010);  // BTC = $50000
-    detector.on_price_update("ETH/BTC", 0.06, 0.0601);   // ETH = 0.06 BTC
-    detector.on_price_update("ETH/USDT", 3000, 3005);    // ETH = $3000
+    detector.on_price_update("BTC/USDT", 50000, 50010); // BTC = $50000
+    detector.on_price_update("ETH/BTC", 0.06, 0.0601);  // ETH = 0.06 BTC
+    detector.on_price_update("ETH/USDT", 3000, 3005);   // ETH = $3000
 
     // Implied ETH/USDT = 50010 * 0.0601 = 3005.6 (ask)
     // Actual ETH/USDT bid = 3000
@@ -169,7 +156,7 @@ TEST(test_price_update_and_spread_calculation) {
 
 TEST(test_arbitrage_opportunity_detection) {
     ArbitrageConfig config;
-    config.default_min_spread_pct = 0.001;  // 0.1%
+    config.default_min_spread_pct = 0.001; // 0.1%
     TriangularArbDetector detector(config);
 
     std::vector<std::string> symbols = {"BTC/USDT", "ETH/BTC", "ETH/USDT"};
@@ -186,7 +173,7 @@ TEST(test_arbitrage_opportunity_detection) {
     auto opportunities = detector.on_price_update("ETH/USDT", 3010, 3015);
 
     ASSERT_EQ(opportunities.size(), 1);
-    ASSERT_EQ(opportunities[0].direction, 1);  // Forward
+    ASSERT_EQ(opportunities[0].direction, 1); // Forward
     ASSERT_TRUE(opportunities[0].spread > 0.001);
 }
 
@@ -207,9 +194,9 @@ TEST(test_order_generation) {
     ASSERT_EQ(opportunities[0].orders.size(), 3);
 
     // Forward: Buy A/B, Buy C/A, Sell C/B
-    ASSERT_EQ(opportunities[0].orders[0].side, Side::Buy);   // Buy BTC/USDT
-    ASSERT_EQ(opportunities[0].orders[1].side, Side::Buy);   // Buy ETH/BTC
-    ASSERT_EQ(opportunities[0].orders[2].side, Side::Sell);  // Sell ETH/USDT
+    ASSERT_EQ(opportunities[0].orders[0].side, Side::Buy);  // Buy BTC/USDT
+    ASSERT_EQ(opportunities[0].orders[1].side, Side::Buy);  // Buy ETH/BTC
+    ASSERT_EQ(opportunities[0].orders[2].side, Side::Sell); // Sell ETH/USDT
 }
 
 TEST(test_excluded_symbols) {
@@ -218,12 +205,11 @@ TEST(test_excluded_symbols) {
     TriangularArbDetector detector(config);
 
     std::vector<std::string> symbols = {
-        "BTC/USDT", "ETH/BTC", "ETH/USDT",
-        "SOL/BTC", "SOL/USDT"  // These should be excluded
+        "BTC/USDT", "ETH/BTC", "ETH/USDT", "SOL/BTC", "SOL/USDT" // These should be excluded
     };
 
     size_t count = detector.detect_relationships(symbols);
-    ASSERT_EQ(count, 1);  // Only BTC-ETH-USDT triangle
+    ASSERT_EQ(count, 1); // Only BTC-ETH-USDT triangle
 }
 
 TEST(test_max_relationships_limit) {
@@ -231,14 +217,11 @@ TEST(test_max_relationships_limit) {
     config.max_auto_relationships = 2;
     TriangularArbDetector detector(config);
 
-    std::vector<std::string> symbols = {
-        "BTC/USDT", "ETH/BTC", "ETH/USDT",
-        "SOL/BTC", "SOL/USDT",
-        "ADA/BTC", "ADA/USDT"
-    };
+    std::vector<std::string> symbols = {"BTC/USDT", "ETH/BTC", "ETH/USDT", "SOL/BTC",
+                                        "SOL/USDT", "ADA/BTC", "ADA/USDT"};
 
     size_t count = detector.detect_relationships(symbols);
-    ASSERT_EQ(count, 2);  // Limited to 2
+    ASSERT_EQ(count, 2); // Limited to 2
 }
 
 TEST(test_get_monitored_symbols) {

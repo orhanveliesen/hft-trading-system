@@ -7,8 +7,8 @@
  * Uses steady_clock for monotonic timestamps suitable for latency measurement.
  */
 
-#include <cstdint>
 #include <chrono>
+#include <cstdint>
 
 namespace hft {
 namespace util {
@@ -22,9 +22,7 @@ namespace util {
  */
 inline uint64_t now_ns() {
     auto now = std::chrono::steady_clock::now();
-    return std::chrono::duration_cast<std::chrono::nanoseconds>(
-        now.time_since_epoch()
-    ).count();
+    return std::chrono::duration_cast<std::chrono::nanoseconds>(now.time_since_epoch()).count();
 }
 
 /**
@@ -33,10 +31,8 @@ inline uint64_t now_ns() {
  */
 inline uint64_t wall_clock_ns() {
     auto now = std::chrono::system_clock::now();
-    return std::chrono::duration_cast<std::chrono::nanoseconds>(
-        now.time_since_epoch()
-    ).count();
+    return std::chrono::duration_cast<std::chrono::nanoseconds>(now.time_since_epoch()).count();
 }
 
-}  // namespace util
-}  // namespace hft
+} // namespace util
+} // namespace hft

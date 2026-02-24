@@ -1,9 +1,10 @@
 #pragma once
 
-#include "types.hpp"
+#include "risk/enhanced_risk_manager.hpp"
 #include "strategy/market_maker.hpp"
 #include "strategy/position.hpp"
-#include "risk/enhanced_risk_manager.hpp"
+#include "types.hpp"
+
 #include <cstdint>
 #include <string>
 
@@ -11,18 +12,18 @@ namespace hft {
 
 struct SimulatorConfig {
     // Market maker settings
-    uint32_t spread_bps = 10;        // Spread in basis points
-    Quantity quote_size = 100;       // Default quote size
-    double skew_factor = 0.5;        // Quote skew factor
+    uint32_t spread_bps = 10;  // Spread in basis points
+    Quantity quote_size = 100; // Default quote size
+    double skew_factor = 0.5;  // Quote skew factor
 
     // Risk settings (maps to EnhancedRiskConfig)
     // All monetary limits as percentages of initial_capital
-    Capital initial_capital = 100000;      // Starting capital
-    Position max_position = 1000;          // Position limit per symbol
-    double daily_loss_limit_pct = 0.02;    // 2% daily loss limit
-    Quantity max_order_size = 100;         // Max single order size
-    double max_drawdown_pct = 0.10;        // 10% max drawdown
-    double max_notional_pct = 1.0;         // 100% of capital max notional
+    Capital initial_capital = 100000;   // Starting capital
+    Position max_position = 1000;       // Position limit per symbol
+    double daily_loss_limit_pct = 0.02; // 2% daily loss limit
+    Quantity max_order_size = 100;      // Max single order size
+    double max_drawdown_pct = 0.10;     // 10% max drawdown
+    double max_notional_pct = 1.0;      // 100% of capital max notional
 
     // Symbol to trade
     std::string symbol = "SIM";
@@ -31,28 +32,17 @@ struct SimulatorConfig {
 class TradingSimulator {
 public:
     explicit TradingSimulator(const SimulatorConfig& config)
-        : config_(config)
-        , market_maker_(create_mm_config(config))
-        , risk_manager_(create_risk_config(config))
-        , symbol_index_(risk::INVALID_SYMBOL_INDEX)
-        , quotes_generated_(0)
-        , last_mid_(0)
-    {
+        : config_(config), market_maker_(create_mm_config(config)), risk_manager_(create_risk_config(config)),
+          symbol_index_(risk::INVALID_SYMBOL_INDEX), quotes_generated_(0), last_mid_(0) {
         // Register symbol and cache index for hot path
         // Calculate max notional from percentage
-        Notional max_notional = static_cast<Notional>(
-            config.initial_capital * config.max_notional_pct);
-        symbol_index_ = risk_manager_.register_symbol(
-            config.symbol,
-            config.max_position,
-            max_notional
-        );
+        Notional max_notional = static_cast<Notional>(config.initial_capital * config.max_notional_pct);
+        symbol_index_ = risk_manager_.register_symbol(config.symbol, config.max_position, max_notional);
     }
 
     // Process market data tick - returns quotes to place
-    strategy::Quote on_market_data(Price bid, Price ask,
-                                    Quantity bid_size, Quantity ask_size) {
-        (void)bid_size;  // Could use for liquidity-based sizing
+    strategy::Quote on_market_data(Price bid, Price ask, Quantity bid_size, Quantity ask_size) {
+        (void)bid_size; // Could use for liquidity-based sizing
         (void)ask_size;
 
         // Calculate mid price
@@ -60,7 +50,7 @@ public:
 
         // Check if trading is halted
         if (risk_manager_.is_halted()) {
-            return strategy::Quote{};  // No quotes
+            return strategy::Quote{}; // No quotes
         }
 
         // Generate quotes from market maker
@@ -119,12 +109,8 @@ public:
 
 private:
     static strategy::MarketMakerConfig create_mm_config(const SimulatorConfig& cfg) {
-        return strategy::MarketMakerConfig{
-            cfg.spread_bps,
-            cfg.quote_size,
-            static_cast<int64_t>(cfg.max_position),
-            cfg.skew_factor
-        };
+        return strategy::MarketMakerConfig{cfg.spread_bps, cfg.quote_size, static_cast<int64_t>(cfg.max_position),
+                                           cfg.skew_factor};
     }
 
     static risk::EnhancedRiskConfig create_risk_config(const SimulatorConfig& cfg) {
@@ -147,4 +133,4 @@ private:
     Price last_mid_;
 };
 
-}  // namespace hft
+} // namespace hft

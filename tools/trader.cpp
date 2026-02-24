@@ -18,65 +18,66 @@
  */
 
 #include "../include/exchange/binance_ws.hpp"
-#include "../include/trading_engine.hpp"
+#include "../include/exchange/paper_exchange.hpp"
+#include "../include/ipc/event_publisher.hpp"
+#include "../include/ipc/execution_report.hpp"
+#include "../include/ipc/shared_config.hpp"
+#include "../include/ipc/shared_event_log.hpp"
+#include "../include/ipc/shared_ledger.hpp"
+#include "../include/ipc/shared_paper_config.hpp"
+#include "../include/ipc/shared_portfolio_state.hpp"
+#include "../include/ipc/shared_ring_buffer.hpp"
+#include "../include/ipc/symbol_config.hpp"
+#include "../include/ipc/trade_event.hpp"
+#include "../include/ipc/tuner_event.hpp"
+#include "../include/ipc/udp_telemetry.hpp"
+#include "../include/paper/paper_order_sender.hpp"
+#include "../include/paper/queue_fill_detector.hpp"
+#include "../include/risk/enhanced_risk_manager.hpp"
+#include "../include/strategy/market_health_monitor.hpp"
 #include "../include/strategy/regime_detector.hpp"
+#include "../include/strategy/rolling_sharpe.hpp"
 #include "../include/strategy/technical_indicators.hpp"
 #include "../include/symbol_config.hpp"
-#include "../include/risk/enhanced_risk_manager.hpp"
-#include "../include/ipc/trade_event.hpp"
-#include "../include/ipc/shared_ring_buffer.hpp"
-#include "../include/ipc/event_publisher.hpp"
-#include "../include/ipc/shared_portfolio_state.hpp"
-#include "../include/ipc/shared_config.hpp"
-#include "../include/ipc/symbol_config.hpp"
-#include "../include/ipc/shared_paper_config.hpp"
-#include "../include/ipc/udp_telemetry.hpp"
-#include "../include/ipc/execution_report.hpp"
-#include "../include/ipc/shared_event_log.hpp"
-#include "../include/ipc/tuner_event.hpp"
-#include "../include/exchange/paper_exchange.hpp"
-#include "../include/strategy/rolling_sharpe.hpp"
-#include "../include/strategy/market_health_monitor.hpp"
 #include "../include/trading/trade_recorder.hpp"
-#include "../include/ipc/shared_ledger.hpp"
-#include "../include/paper/queue_fill_detector.hpp"
-#include "../include/paper/paper_order_sender.hpp"
+#include "../include/trading_engine.hpp"
 // Position persistence removed - paper trading restarts fresh
 
 // New unified architecture includes
-#include "../include/strategy/istrategy.hpp"
-#include "../include/strategy/technical_indicators_strategy.hpp"
-#include "../include/strategy/market_maker_strategy.hpp"
-#include "../include/strategy/momentum_strategy.hpp"
-#include "../include/strategy/fair_value_strategy.hpp"
-#include "../include/strategy/strategy_selector.hpp"
-#include "../include/strategy/config_strategy.hpp"
-#include "../include/execution/execution_engine.hpp"
+#include "../include/config/defaults.hpp"
+#include "../include/exchange/binance_rest.hpp"
 #include "../include/exchange/iexchange.hpp"
 #include "../include/exchange/paper_exchange_adapter.hpp"
-#include "../include/exchange/binance_rest.hpp"
 #include "../include/exchange/production_order_sender.hpp"
-#include "../include/trading/portfolio.hpp"
+#include "../include/execution/execution_engine.hpp"
+#include "../include/strategy/config_strategy.hpp"
+#include "../include/strategy/fair_value_strategy.hpp"
+#include "../include/strategy/istrategy.hpp"
+#include "../include/strategy/market_maker_strategy.hpp"
+#include "../include/strategy/momentum_strategy.hpp"
 #include "../include/strategy/strategy_constants.hpp"
+#include "../include/strategy/strategy_selector.hpp"
 #include "../include/strategy/symbol_strategy.hpp"
-#include "../include/config/defaults.hpp"
-#include "../include/util/system.hpp"
+#include "../include/strategy/technical_indicators_strategy.hpp"
+#include "../include/trading/portfolio.hpp"
 #include "../include/util/cli.hpp"
-#include <iostream>
-#include <iomanip>
-#include <chrono>
-#include <thread>
-#include <atomic>
-#include <csignal>
+#include "../include/util/system.hpp"
+
+#include <algorithm>
 #include <array>
+#include <atomic>
+#include <chrono>
+#include <csignal>
+#include <cstring> // For strncpy
+#include <iomanip>
+#include <iostream>
 #include <map>
-#include <vector>
 #include <mutex>
 #include <random>
+#include <sched.h> // For CPU affinity
 #include <sstream>
-#include <algorithm>
-#include <sched.h>   // For CPU affinity
-#include <cstring>   // For strncpy
+#include <thread>
+#include <vector>
 
 using namespace hft;
 using namespace hft::exchange;
@@ -84,10 +85,10 @@ using namespace hft::strategy;
 using namespace hft::execution;
 
 // Use Portfolio constants from trading namespace
-using hft::trading::MAX_SYMBOLS;
 using hft::trading::MAX_POSITIONS_PER_SYMBOL;
-using hft::trading::Portfolio;
+using hft::trading::MAX_SYMBOLS;
 using hft::trading::OpenPosition;
+using hft::trading::Portfolio;
 using hft::trading::SymbolPositions;
 
 // ============================================================================
@@ -104,7 +105,7 @@ using AutoTuneMultipliers = hft::strategy::AutoTuneMultipliers;
 // ============================================================================
 
 std::atomic<bool> g_running{true};
-ipc::SharedConfig* g_shared_config = nullptr;  // For graceful shutdown signaling
+ipc::SharedConfig* g_shared_config = nullptr; // For graceful shutdown signaling
 
 /**
  * Pre-shutdown callback for signal handler.
@@ -112,7 +113,7 @@ ipc::SharedConfig* g_shared_config = nullptr;  // For graceful shutdown signalin
  */
 void trader_pre_shutdown() {
     if (g_shared_config) {
-        g_shared_config->set_trader_status(3);  // shutting_down
+        g_shared_config->set_trader_status(3); // shutting_down
         g_shared_config->update_heartbeat();
     }
 }
@@ -128,8 +129,8 @@ using hft::ipc::EventPublisher;
 // CLI Arguments (from util/cli.hpp)
 // ============================================================================
 using CLIArgs = hft::util::CLIArgs;
-using hft::util::print_help;
 using hft::util::parse_args;
+using hft::util::print_help;
 
 /**
  * Get default trading symbols from Binance API
@@ -157,15 +158,12 @@ static_assert(LocalOrderSender<ProductionOrderSender>, "ProductionOrderSender mu
 // Trading Application
 // ============================================================================
 
-template<typename OrderSender>
+template <typename OrderSender>
 class TradingApp {
 public:
     explicit TradingApp(const CLIArgs& args)
-        : args_(args)
-        , sender_()
-        , engine_(sender_)
-        , total_ticks_(0)
-        , publisher_(true)  // Always publish events for monitoring (dashboard, observer)
+        : args_(args), sender_(), engine_(sender_), total_ticks_(0),
+          publisher_(true) // Always publish events for monitoring (dashboard, observer)
     {
         portfolio_.init(args.capital);
 
@@ -176,10 +174,10 @@ public:
         {
             risk::EnhancedRiskConfig risk_cfg;
             risk_cfg.initial_capital = static_cast<int64_t>(args.capital * risk::PRICE_SCALE);
-            risk_cfg.daily_loss_limit_pct = 0.03;   // 3% daily loss limit
-            risk_cfg.max_drawdown_pct = 0.05;       // 5% max drawdown
-            risk_cfg.max_notional_pct = 2.0;        // 200% max exposure
-            risk_cfg.max_order_size = 1000000;      // Large enough for crypto
+            risk_cfg.daily_loss_limit_pct = 0.03; // 3% daily loss limit
+            risk_cfg.max_drawdown_pct = 0.05;     // 5% max drawdown
+            risk_cfg.max_notional_pct = 2.0;      // 200% max exposure
+            risk_cfg.max_order_size = 1000000;    // Large enough for crypto
             risk_manager_ = risk::EnhancedRiskManager(risk_cfg);
         }
 
@@ -190,8 +188,8 @@ public:
             portfolio_state_ = SharedPortfolioState::create("/trader_portfolio", args.capital);
             if (portfolio_state_) {
                 std::cout << "[IPC] Portfolio state initialized "
-                          << "(session=" << std::hex << std::uppercase << portfolio_state_->session_id
-                          << std::dec << ", cash=$" << args.capital << ")\n";
+                          << "(session=" << std::hex << std::uppercase << portfolio_state_->session_id << std::dec
+                          << ", cash=$" << args.capital << ")\n";
             }
 
             // Initialize SharedLedger for IPC visibility
@@ -199,8 +197,7 @@ public:
             shared_ledger_ = ipc::SharedLedger::create("/trader_ledger");
             if (shared_ledger_) {
                 trade_recorder_.connect_shared_ledger(shared_ledger_);
-                std::cout << "[IPC] Ledger initialized (max entries: "
-                          << ipc::MAX_SHARED_LEDGER_ENTRIES << ")\n";
+                std::cout << "[IPC] Ledger initialized (max entries: " << ipc::MAX_SHARED_LEDGER_ENTRIES << ")\n";
             }
 
             // Open shared config (dashboard can modify this)
@@ -213,14 +210,13 @@ public:
             }
             if (shared_config_) {
                 last_config_seq_ = shared_config_->sequence.load();
-                std::cout << "[IPC] Config loaded (spread_mult="
-                          << shared_config_->spread_multiplier() << "x)\n";
+                std::cout << "[IPC] Config loaded (spread_mult=" << shared_config_->spread_multiplier() << "x)\n";
 
                 // Register HFT lifecycle in shared config
                 shared_config_->set_trader_pid(getpid());
-                shared_config_->set_trader_status(1);  // starting
+                shared_config_->set_trader_status(1); // starting
                 shared_config_->update_heartbeat();
-                g_shared_config = shared_config_;  // For signal handler
+                g_shared_config = shared_config_; // For signal handler
 
                 // Set config for Portfolio (reads target%, stop%, commission from config)
                 portfolio_.set_config(shared_config_);
@@ -249,15 +245,14 @@ public:
                 shared_paper_config_ = SharedPaperConfig::create("/trader_paper_config");
             }
             if (shared_paper_config_) {
-                std::cout << "[IPC] Paper config loaded (slippage="
-                          << shared_paper_config_->slippage_bps() << " bps)\n";
+                std::cout << "[IPC] Paper config loaded (slippage=" << shared_paper_config_->slippage_bps()
+                          << " bps)\n";
             }
 
             // Initialize event log for tuner and web interface
             event_log_ = SharedEventLog::create();
             if (event_log_) {
-                std::cout << "[IPC] Event log initialized (ring size: "
-                          << EVENT_LOG_RING_SIZE << " events)\n";
+                std::cout << "[IPC] Event log initialized (ring size: " << EVENT_LOG_RING_SIZE << " events)\n";
                 // Log startup event
                 TunerEvent startup;
                 startup.init(TunerEventType::ProcessStart, "*");
@@ -269,9 +264,8 @@ public:
         if constexpr (std::is_same_v<OrderSender, PaperOrderSender>) {
             // Configure PaperOrderSender with slippage settings
             sender_.set_config(shared_config_);
-            sender_.set_fill_callback([this](Symbol s, OrderId id, Side side, double q, Price p) {
-                on_fill(s, id, side, q, p);
-            });
+            sender_.set_fill_callback(
+                [this](Symbol s, OrderId id, Side side, double q, Price p) { on_fill(s, id, side, q, p); });
             sender_.set_slippage_callback([this](double slippage_cost) {
                 if (portfolio_state_) {
                     portfolio_state_->add_slippage(slippage_cost);
@@ -280,10 +274,9 @@ public:
 
             // Initialize new PaperExchange with config and callbacks
             paper_exchange_.set_config(shared_config_);
-            paper_exchange_.set_paper_config(shared_paper_config_);  // Paper-specific settings
-            paper_exchange_.set_execution_callback([this](const ipc::ExecutionReport& report) {
-                on_execution_report(report);
-            });
+            paper_exchange_.set_paper_config(shared_paper_config_); // Paper-specific settings
+            paper_exchange_.set_execution_callback(
+                [this](const ipc::ExecutionReport& report) { on_execution_report(report); });
             paper_exchange_.set_slippage_callback([this](double slippage_cost) {
                 if (portfolio_state_) {
                     portfolio_state_->add_slippage(slippage_cost);
@@ -304,24 +297,22 @@ public:
             // Create PaperExchangeAdapter with same price scale
             paper_adapter_ = std::make_unique<PaperExchangeAdapter>(risk::PRICE_SCALE);
             paper_adapter_->set_config(shared_config_);
-            paper_adapter_->set_paper_config(shared_paper_config_);  // Paper-specific settings
+            paper_adapter_->set_paper_config(shared_paper_config_); // Paper-specific settings
 
             // Set up fill callback to route through on_execution_report
             // NOTE: qty is double (not Quantity/uint32_t) for fractional crypto quantities
-            paper_adapter_->set_fill_callback([this](
-                uint64_t order_id, const char* symbol_name, Side side,
-                double qty, Price fill_price, double commission
-            ) {
+            paper_adapter_->set_fill_callback([this](uint64_t order_id, const char* symbol_name, Side side, double qty,
+                                                     Price fill_price, double commission) {
                 // Convert back to ExecutionReport format
                 ipc::ExecutionReport report;
-                report.clear();  // CRITICAL: Initialize all fields to zero
+                report.clear(); // CRITICAL: Initialize all fields to zero
                 report.order_id = order_id;
                 report.side = side;
-                report.filled_qty = qty;  // Already double, no conversion needed
+                report.filled_qty = qty; // Already double, no conversion needed
                 report.filled_price = static_cast<double>(fill_price) / risk::PRICE_SCALE;
                 report.commission = commission;
                 report.status = ipc::OrderStatus::Filled;
-                report.exec_type = ipc::ExecType::Trade;  // CRITICAL: Set for is_fill() check
+                report.exec_type = ipc::ExecType::Trade; // CRITICAL: Set for is_fill() check
 
                 // Use symbol name directly from callback (no ID conversion needed)
                 std::strncpy(report.symbol, symbol_name, sizeof(report.symbol) - 1);
@@ -342,9 +333,8 @@ public:
 
             // Set position callback to prevent overselling
             // This ensures we never sell more than we own
-            execution_engine_.set_position_callback([this](Symbol symbol) -> double {
-                return portfolio_.positions[symbol].total_quantity();
-            });
+            execution_engine_.set_position_callback(
+                [this](Symbol symbol) -> double { return portfolio_.positions[symbol].total_quantity(); });
 
             std::cout << "[EXEC] ExecutionEngine initialized with PaperExchangeAdapter\n";
         }
@@ -393,7 +383,7 @@ public:
 
         // Cleanup shared config (mark as stopped before unmapping)
         if (shared_config_) {
-            shared_config_->set_trader_status(0);  // stopped
+            shared_config_->set_trader_status(0); // stopped
             shared_config_->update_heartbeat();
             g_shared_config = nullptr;
             munmap(shared_config_, sizeof(SharedConfig));
@@ -409,7 +399,8 @@ public:
 
     void add_symbol(const std::string& ticker) {
         // Called during init only, before trading starts
-        if (engine_.lookup_symbol(ticker).has_value()) return;
+        if (engine_.lookup_symbol(ticker).has_value())
+            return;
 
         SymbolConfig cfg;
         cfg.symbol = ticker;
@@ -421,9 +412,7 @@ public:
             strategies_[id].init(ticker);
 
             // Initialize ConfigStrategy for this symbol (used when TunerState is ON/PAUSED)
-            config_strategies_[id] = std::make_unique<ConfigStrategy>(
-                shared_config_, symbol_configs_, ticker.c_str()
-            );
+            config_strategies_[id] = std::make_unique<ConfigStrategy>(shared_config_, symbol_configs_, ticker.c_str());
 
             // Initialize portfolio state slot with matching index
             // This ensures update_last_price_relaxed(id, price) writes to correct slot
@@ -438,17 +427,19 @@ public:
         }
     }
 
-    void on_quote(const std::string& ticker, Price bid, Price ask,
-                  Quantity bid_size, Quantity ask_size) {
+    void on_quote(const std::string& ticker, Price bid, Price ask, Quantity bid_size, Quantity ask_size) {
         // Hot path - no locks, O(1) array access
         auto opt = engine_.lookup_symbol(ticker);
-        if (!opt) return;
+        if (!opt)
+            return;
 
         Symbol id = *opt;
-        if (id >= MAX_SYMBOLS) return;
+        if (id >= MAX_SYMBOLS)
+            return;
 
         auto* world = engine_.get_symbol_world(id);
-        if (!world) return;
+        if (!world)
+            return;
 
         total_ticks_.fetch_add(1, std::memory_order_relaxed);
 
@@ -479,7 +470,8 @@ public:
 
         // Update regime and spread - O(1) array access
         auto& strat = strategies_[id];
-        if (!strat.active) return;
+        if (!strat.active)
+            return;
 
         // Track spread for dynamic thresholds
         strat.update_spread(bid, ask);
@@ -489,11 +481,10 @@ public:
         // Update last price in shared state for dashboard charts
         // Ultra-low latency: relaxed memory ordering (~1 cycle vs ~15)
         if (portfolio_state_) {
-            portfolio_state_->update_last_price_relaxed(
-                static_cast<size_t>(id), static_cast<int64_t>(mid * 1e8));
+            portfolio_state_->update_last_price_relaxed(static_cast<size_t>(id), static_cast<int64_t>(mid * 1e8));
         }
         strat.regime.update(mid);
-        strat.indicators.update(mid);  // Update technical indicators
+        strat.indicators.update(mid); // Update technical indicators
 
         // Update market snapshot for AI tuner (every tick)
         if (portfolio_state_ && id < ipc::MAX_PORTFOLIO_SYMBOLS) {
@@ -531,13 +522,15 @@ public:
             }
 
             // Update volatility from regime detector
-            double vol = strat.regime.volatility() * 100.0;  // Convert to %
+            double vol = strat.regime.volatility() * 100.0; // Convert to %
             snap.volatility_x100.store(static_cast<int32_t>(vol * 100), std::memory_order_relaxed);
 
             // Update trend direction based on regime
             int8_t trend = 0;
-            if (strat.current_regime == MarketRegime::TrendingUp) trend = 1;
-            else if (strat.current_regime == MarketRegime::TrendingDown) trend = -1;
+            if (strat.current_regime == MarketRegime::TrendingUp)
+                trend = 1;
+            else if (strat.current_regime == MarketRegime::TrendingDown)
+                trend = -1;
             snap.trend_direction.store(trend, std::memory_order_relaxed);
 
             // Increment tick count
@@ -548,7 +541,7 @@ public:
         MarketSnapshot market_snap;
         market_snap.bid = bid;
         market_snap.ask = ask;
-        market_snap.bid_size = bid_size;  // Real order book data from exchange
+        market_snap.bid_size = bid_size; // Real order book data from exchange
         market_snap.ask_size = ask_size;
         market_snap.last_trade = (bid + ask) / 2;
         market_snap.timestamp_ns = std::chrono::steady_clock::now().time_since_epoch().count();
@@ -567,11 +560,9 @@ public:
 
                 // Event log for tuner/web tracking
                 if (event_log_) {
-                    TunerEvent e = TunerEvent::make_regime_change(
-                        strat.ticker,
-                        static_cast<uint8_t>(strat.current_regime),
-                        static_cast<uint8_t>(new_regime),
-                        strat.regime.confidence());
+                    TunerEvent e =
+                        TunerEvent::make_regime_change(strat.ticker, static_cast<uint8_t>(strat.current_regime),
+                                                       static_cast<uint8_t>(new_regime), strat.regime.confidence());
                     event_log_->log(e);
                 }
             }
@@ -585,7 +576,7 @@ public:
 
         // Update market health monitor with spike state
         market_health_.update_symbol(static_cast<size_t>(id), strat.regime.is_spike());
-        market_health_.tick();  // Decrement cooldown if active
+        market_health_.tick(); // Decrement cooldown if active
 
         // Check for market-wide crash - emergency liquidate all positions
         if (market_health_.should_liquidate()) {
@@ -595,20 +586,22 @@ public:
         // Generate buy signals
         // Skip trading if market is dangerous (spike or high volatility) or in cooldown after crash
         // Note: Strategies run autonomously - they don't depend on tuner connection
-        if (engine_.can_trade() && !world->is_halted() &&
-            !strat.regime.is_dangerous() && !market_health_.in_cooldown()) {
+        if (engine_.can_trade() && !world->is_halted() && !strat.regime.is_dangerous() &&
+            !market_health_.in_cooldown()) {
             check_signal(id, world, &strat, bid, ask);
         }
 
         // Check target/stop-loss for this symbol - O(n), no allocation
         // IMPORTANT: Skip when tuner_mode is ON - unified system handles exits via exchange
         // This prevents double-counting cash updates
-        bool use_legacy_exits = !shared_config_ || !(shared_config_->is_tuner_on() || shared_config_->is_tuner_paused());
+        bool use_legacy_exits =
+            !shared_config_ || !(shared_config_->is_tuner_on() || shared_config_->is_tuner_paused());
         if (use_legacy_exits && portfolio_.symbol_active[id]) {
             double bid_usd = static_cast<double>(bid) / risk::PRICE_SCALE;
             const char* ticker = strat.ticker;
 
-            portfolio_.check_and_close(id, bid_usd,
+            portfolio_.check_and_close(
+                id, bid_usd,
                 // On target hit (profit)
                 [&](double qty, double entry, double exit) {
                     double profit = (exit - entry) * qty;
@@ -645,24 +638,22 @@ public:
 
                     // UDP telemetry: P&L update
                     if (portfolio_state_) {
-                        telemetry_.publish_pnl(
-                            static_cast<int64_t>(portfolio_state_->total_realized_pnl() * 1e8),
-                            static_cast<int64_t>(portfolio_state_->total_unrealized_pnl() * 1e8),
-                            static_cast<int64_t>(portfolio_state_->total_equity() * 1e8),
-                            portfolio_state_->winning_trades.load(),
-                            portfolio_state_->losing_trades.load());
+                        telemetry_.publish_pnl(static_cast<int64_t>(portfolio_state_->total_realized_pnl() * 1e8),
+                                               static_cast<int64_t>(portfolio_state_->total_unrealized_pnl() * 1e8),
+                                               static_cast<int64_t>(portfolio_state_->total_equity() * 1e8),
+                                               portfolio_state_->winning_trades.load(),
+                                               portfolio_state_->losing_trades.load());
                     }
 
                     if (args_.verbose) {
-                        std::cout << "[TARGET] " << ticker << " SELL " << qty
-                                  << " @ $" << std::fixed << std::setprecision(2) << exit
-                                  << " (entry=$" << entry
-                                  << ", profit=$" << std::setprecision(2) << profit << ")\n";
+                        std::cout << "[TARGET] " << ticker << " SELL " << qty << " @ $" << std::fixed
+                                  << std::setprecision(2) << exit << " (entry=$" << entry << ", profit=$"
+                                  << std::setprecision(2) << profit << ")\n";
                     }
                 },
                 // On stop-loss hit (cut loss)
                 [&](double qty, double entry, double exit) {
-                    double loss = (exit - entry) * qty;  // Will be negative
+                    double loss = (exit - entry) * qty; // Will be negative
                     double trade_value = exit * qty;
                     double commission = trade_value * portfolio_.commission_rate();
 
@@ -696,19 +687,17 @@ public:
 
                     // UDP telemetry: P&L update
                     if (portfolio_state_) {
-                        telemetry_.publish_pnl(
-                            static_cast<int64_t>(portfolio_state_->total_realized_pnl() * 1e8),
-                            static_cast<int64_t>(portfolio_state_->total_unrealized_pnl() * 1e8),
-                            static_cast<int64_t>(portfolio_state_->total_equity() * 1e8),
-                            portfolio_state_->winning_trades.load(),
-                            portfolio_state_->losing_trades.load());
+                        telemetry_.publish_pnl(static_cast<int64_t>(portfolio_state_->total_realized_pnl() * 1e8),
+                                               static_cast<int64_t>(portfolio_state_->total_unrealized_pnl() * 1e8),
+                                               static_cast<int64_t>(portfolio_state_->total_equity() * 1e8),
+                                               portfolio_state_->winning_trades.load(),
+                                               portfolio_state_->losing_trades.load());
                     }
 
                     if (args_.verbose) {
-                        std::cout << "[STOP] " << ticker << " SELL " << qty
-                                  << " @ $" << std::fixed << std::setprecision(2) << exit
-                                  << " (entry=$" << entry
-                                  << ", loss=$" << std::setprecision(2) << -loss << ")\n";
+                        std::cout << "[STOP] " << ticker << " SELL " << qty << " @ $" << std::fixed
+                                  << std::setprecision(2) << exit << " (entry=$" << entry << ", loss=$"
+                                  << std::setprecision(2) << -loss << ")\n";
                     }
                 },
                 // On trend exit (profit taking on pullback from peak)
@@ -732,7 +721,7 @@ public:
                         portfolio_state_->add_realized_pnl(profit);
                         portfolio_state_->add_commission(commission);
                         portfolio_state_->add_volume(trade_value);
-                        portfolio_state_->record_target();  // Count as target hit
+                        portfolio_state_->record_target(); // Count as target hit
                         portfolio_state_->record_event();
                         auto& pos = portfolio_.positions[id];
                         portfolio_state_->update_position(ticker, pos.total_quantity(), pos.avg_entry(), exit);
@@ -746,23 +735,20 @@ public:
 
                     // UDP telemetry
                     if (portfolio_state_) {
-                        telemetry_.publish_pnl(
-                            static_cast<int64_t>(portfolio_state_->total_realized_pnl() * 1e8),
-                            static_cast<int64_t>(portfolio_state_->total_unrealized_pnl() * 1e8),
-                            static_cast<int64_t>(portfolio_state_->total_equity() * 1e8),
-                            portfolio_state_->winning_trades.load(),
-                            portfolio_state_->losing_trades.load());
+                        telemetry_.publish_pnl(static_cast<int64_t>(portfolio_state_->total_realized_pnl() * 1e8),
+                                               static_cast<int64_t>(portfolio_state_->total_unrealized_pnl() * 1e8),
+                                               static_cast<int64_t>(portfolio_state_->total_equity() * 1e8),
+                                               portfolio_state_->winning_trades.load(),
+                                               portfolio_state_->losing_trades.load());
                     }
 
                     if (args_.verbose) {
-                        std::cout << "[TREND] " << ticker << " SELL " << qty
-                                  << " @ $" << std::fixed << std::setprecision(2) << exit
-                                  << " (entry=$" << entry
-                                  << ", peak=$" << peak
+                        std::cout << "[TREND] " << ticker << " SELL " << qty << " @ $" << std::fixed
+                                  << std::setprecision(2) << exit << " (entry=$" << entry << ", peak=$" << peak
                                   << ", profit=$" << std::setprecision(2) << profit << ")\n";
                     }
                 },
-                shared_config_ ? shared_config_->pullback_pct() : 0.005  // From config or default 0.5%
+                shared_config_ ? shared_config_->pullback_pct() : 0.005 // From config or default 0.5%
             );
         }
     }
@@ -806,7 +792,8 @@ public:
         s.holdings_value = 0;
         s.positions = 0;
         for (size_t sym = 0; sym < MAX_SYMBOLS; sym++) {
-            if (!portfolio_.symbol_active[sym] || prices[sym] <= 0) continue;
+            if (!portfolio_.symbol_active[sym] || prices[sym] <= 0)
+                continue;
 
             double sym_qty = portfolio_.positions[sym].total_quantity();
             if (sym_qty > 0) {
@@ -823,33 +810,29 @@ public:
     bool is_halted() const { return !engine_.can_trade(); }
 
     // Called periodically from main loop for UDP telemetry heartbeat
-    void publish_telemetry_heartbeat() {
-        telemetry_.publish_heartbeat();
-    }
+    void publish_telemetry_heartbeat() { telemetry_.publish_heartbeat(); }
 
     // Called periodically from main loop for IPC heartbeat
-    void publish_heartbeat() {
-        publisher_.heartbeat();
-    }
+    void publish_heartbeat() { publisher_.heartbeat(); }
 
 private:
     CLIArgs args_;
     OrderSender sender_;
     TradingEngine<OrderSender> engine_;
-    std::array<SymbolStrategy, MAX_SYMBOLS> strategies_;  // Fixed array, O(1) access
+    std::array<SymbolStrategy, MAX_SYMBOLS> strategies_; // Fixed array, O(1) access
     std::atomic<uint64_t> total_ticks_;
     // No mutex - single-threaded hot path, lock-free design
     Portfolio portfolio_;
-    EventPublisher publisher_;  // Lock-free event publishing to observer
-    ipc::TelemetryPublisher telemetry_;  // UDP multicast for remote monitoring
-    SharedPortfolioState* portfolio_state_ = nullptr;  // Shared state for dashboard
-    SharedConfig* shared_config_ = nullptr;           // Shared config from dashboard
+    EventPublisher publisher_;                           // Lock-free event publishing to observer
+    ipc::TelemetryPublisher telemetry_;                  // UDP multicast for remote monitoring
+    SharedPortfolioState* portfolio_state_ = nullptr;    // Shared state for dashboard
+    SharedConfig* shared_config_ = nullptr;              // Shared config from dashboard
     ipc::SharedSymbolConfigs* symbol_configs_ = nullptr; // Symbol-specific tuning from tuner
-    trading::TradeRecorder trade_recorder_;           // Single source of truth for P&L
-    ipc::SharedLedger* shared_ledger_ = nullptr;      // IPC ledger for dashboard
-    SharedPaperConfig* shared_paper_config_ = nullptr; // Paper trading settings
-    SharedEventLog* event_log_ = nullptr;             // Event log for tuner/web
-    uint32_t last_config_seq_ = 0;                    // Track config changes
+    trading::TradeRecorder trade_recorder_;              // Single source of truth for P&L
+    ipc::SharedLedger* shared_ledger_ = nullptr;         // IPC ledger for dashboard
+    SharedPaperConfig* shared_paper_config_ = nullptr;   // Paper trading settings
+    SharedEventLog* event_log_ = nullptr;                // Event log for tuner/web
+    uint32_t last_config_seq_ = 0;                       // Track config changes
 
     // Paper exchange (only used in paper mode)
     hft::exchange::PaperExchange paper_exchange_;
@@ -857,24 +840,25 @@ private:
     // Unified strategy architecture
     StrategySelector strategy_selector_;
     execution::ExecutionEngine execution_engine_;
-    std::unique_ptr<PaperExchangeAdapter> paper_adapter_;  // Owned adapter for IExchange
+    std::unique_ptr<PaperExchangeAdapter> paper_adapter_; // Owned adapter for IExchange
 
     // Per-symbol ConfigStrategy instances (used when TunerState is ON or PAUSED)
     std::array<std::unique_ptr<ConfigStrategy>, MAX_SYMBOLS> config_strategies_;
 
     // Market health monitor for crash detection
-    MarketHealthMonitor market_health_{MAX_SYMBOLS, 0.5, 60};  // 50% threshold, 60 tick cooldown
+    MarketHealthMonitor market_health_{MAX_SYMBOLS, 0.5, 60}; // 50% threshold, 60 tick cooldown
 
     // Strategy mode tracking
     int32_t consecutive_wins_ = 0;
     int32_t consecutive_losses_ = 0;
-    uint8_t active_mode_ = 2;  // NORMAL by default
+    uint8_t active_mode_ = 2; // NORMAL by default
 
     // Enhanced risk manager for position/notional limits and P&L tracking
     risk::EnhancedRiskManager risk_manager_;
 
     void update_active_mode() {
-        if (!shared_config_) return;
+        if (!shared_config_)
+            return;
 
         // Determine mode based on performance and config
         uint8_t force = shared_config_->get_force_mode();
@@ -885,13 +869,13 @@ private:
             // Auto mode - adjust based on performance
             int32_t loss_limit = shared_config_->loss_streak();
             if (consecutive_losses_ >= loss_limit) {
-                active_mode_ = 3;  // CAUTIOUS
+                active_mode_ = 3; // CAUTIOUS
             } else if (consecutive_losses_ >= loss_limit + 2) {
-                active_mode_ = 4;  // DEFENSIVE
+                active_mode_ = 4; // DEFENSIVE
             } else if (consecutive_wins_ >= 3) {
-                active_mode_ = 1;  // AGGRESSIVE
+                active_mode_ = 1; // AGGRESSIVE
             } else {
-                active_mode_ = 2;  // NORMAL
+                active_mode_ = 2; // NORMAL
             }
         }
 
@@ -920,8 +904,10 @@ private:
      *   3 wins    -> gradually relax parameters back to base
      */
     void auto_tune_params() {
-        if (!shared_config_) return;
-        if (!shared_config_->is_tuner_off()) return;
+        if (!shared_config_)
+            return;
+        if (!shared_config_->is_tuner_off())
+            return;
 
         // Save base values on first call (so we can relax back to them)
         if (!auto_tune_base_saved_) {
@@ -941,15 +927,12 @@ private:
             // 5+ losses: PAUSE TRADING
             if (shared_config_->trading_enabled.load()) {
                 shared_config_->set_trading_enabled(false);
-                publisher_.status(0, "ALL", StatusCode::AutoTunePaused, 0,
-                                  static_cast<uint8_t>(consecutive_losses_));
+                publisher_.status(0, "ALL", StatusCode::AutoTunePaused, 0, static_cast<uint8_t>(consecutive_losses_));
                 if (args_.verbose) {
-                    std::cout << "[AUTO-TUNE] " << losses_to_pause
-                              << "+ consecutive losses - TRADING PAUSED\n";
+                    std::cout << "[AUTO-TUNE] " << losses_to_pause << "+ consecutive losses - TRADING PAUSED\n";
                 }
             }
-        }
-        else if (consecutive_losses_ >= losses_to_defensive) {
+        } else if (consecutive_losses_ >= losses_to_defensive) {
             // 4 losses: min_trade_value +50%
             double new_min = base_min_trade_value_ * AutoTuneMultipliers::TIGHTEN_FACTOR;
             if (shared_config_->min_trade_value() < new_min) {
@@ -957,24 +940,20 @@ private:
                 publisher_.status(0, "ALL", StatusCode::AutoTuneMinTrade, new_min,
                                   static_cast<uint8_t>(consecutive_losses_));
                 if (args_.verbose) {
-                    std::cout << "[AUTO-TUNE] " << losses_to_defensive
-                              << " losses - min_trade_value -> $" << new_min << "\n";
+                    std::cout << "[AUTO-TUNE] " << losses_to_defensive << " losses - min_trade_value -> $" << new_min
+                              << "\n";
                 }
             }
-        }
-        else if (consecutive_losses_ >= losses_to_tighten) {
+        } else if (consecutive_losses_ >= losses_to_tighten) {
             // 3 losses: signal_strength = Strong
             if (shared_config_->get_signal_strength() < 2) {
                 shared_config_->set_signal_strength(2);
-                publisher_.status(0, "ALL", StatusCode::AutoTuneSignal, 2,
-                                  static_cast<uint8_t>(consecutive_losses_));
+                publisher_.status(0, "ALL", StatusCode::AutoTuneSignal, 2, static_cast<uint8_t>(consecutive_losses_));
                 if (args_.verbose) {
-                    std::cout << "[AUTO-TUNE] " << losses_to_tighten
-                              << " losses - signal_strength -> Strong\n";
+                    std::cout << "[AUTO-TUNE] " << losses_to_tighten << " losses - signal_strength -> Strong\n";
                 }
             }
-        }
-        else if (consecutive_losses_ >= losses_to_cautious) {
+        } else if (consecutive_losses_ >= losses_to_cautious) {
             // 2 losses: cooldown +50%
             int32_t new_cooldown = static_cast<int32_t>(base_cooldown_ms_ * AutoTuneMultipliers::TIGHTEN_FACTOR);
             if (shared_config_->get_cooldown_ms() < new_cooldown) {
@@ -982,8 +961,8 @@ private:
                 publisher_.status(0, "ALL", StatusCode::AutoTuneCooldown, new_cooldown,
                                   static_cast<uint8_t>(consecutive_losses_));
                 if (args_.verbose) {
-                    std::cout << "[AUTO-TUNE] " << losses_to_cautious
-                              << " losses - cooldown_ms -> " << new_cooldown << "\n";
+                    std::cout << "[AUTO-TUNE] " << losses_to_cautious << " losses - cooldown_ms -> " << new_cooldown
+                              << "\n";
                 }
             }
         }
@@ -999,8 +978,7 @@ private:
                 shared_config_->set_trading_enabled(true);
                 relaxed = true;
                 if (args_.verbose) {
-                    std::cout << "[AUTO-TUNE] " << wins_to_aggressive
-                              << " wins - TRADING RE-ENABLED\n";
+                    std::cout << "[AUTO-TUNE] " << wins_to_aggressive << " wins - TRADING RE-ENABLED\n";
                 }
             }
 
@@ -1011,27 +989,27 @@ private:
                 shared_config_->set_min_trade_value(new_min);
                 relaxed = true;
                 if (args_.verbose) {
-                    std::cout << "[AUTO-TUNE] " << wins_to_aggressive
-                              << " wins - min_trade_value -> $" << new_min << "\n";
+                    std::cout << "[AUTO-TUNE] " << wins_to_aggressive << " wins - min_trade_value -> $" << new_min
+                              << "\n";
                 }
             }
 
             // Relax cooldown back toward base
             int32_t current_cooldown = shared_config_->get_cooldown_ms();
             if (current_cooldown > base_cooldown_ms_) {
-                int32_t new_cooldown = std::max(base_cooldown_ms_, static_cast<int32_t>(current_cooldown * AutoTuneMultipliers::RELAX_FACTOR));
+                int32_t new_cooldown = std::max(
+                    base_cooldown_ms_, static_cast<int32_t>(current_cooldown * AutoTuneMultipliers::RELAX_FACTOR));
                 shared_config_->set_cooldown_ms(new_cooldown);
                 relaxed = true;
                 if (args_.verbose) {
-                    std::cout << "[AUTO-TUNE] " << wins_to_aggressive
-                              << " wins - cooldown_ms -> " << new_cooldown << "\n";
+                    std::cout << "[AUTO-TUNE] " << wins_to_aggressive << " wins - cooldown_ms -> " << new_cooldown
+                              << "\n";
                 }
             }
 
             // Publish relaxed event once if anything changed
             if (relaxed) {
-                publisher_.status(0, "ALL", StatusCode::AutoTuneRelaxed, 0,
-                                  static_cast<uint8_t>(consecutive_wins_));
+                publisher_.status(0, "ALL", StatusCode::AutoTuneRelaxed, 0, static_cast<uint8_t>(consecutive_wins_));
             }
 
             // Note: signal_strength stays at Strong (conservative)
@@ -1045,17 +1023,18 @@ private:
      * @return true for market order, false for limit order
      */
     bool should_use_market_order() const {
-        if (!shared_config_) return true;  // Default to market
+        if (!shared_config_)
+            return true; // Default to market
 
         uint8_t pref = shared_config_->get_order_type_default();
         switch (pref) {
-            case 1:  // MarketOnly
-                return true;
-            case 2:  // LimitOnly
-            case 3:  // Adaptive (start with limit)
-                return false;
-            default: // Auto (0) - default to market for now
-                return true;
+        case 1: // MarketOnly
+            return true;
+        case 2: // LimitOnly
+        case 3: // Adaptive (start with limit)
+            return false;
+        default: // Auto (0) - default to market for now
+            return true;
         }
     }
 
@@ -1125,8 +1104,8 @@ private:
         // MarketMakerStrategy config
         MarketMakerStrategy::Config mm_config;
         mm_config.price_scale = risk::PRICE_SCALE;
-        mm_config.min_spread_bps = 5.0;  // Don't quote if spread < 5 bps
-        mm_config.mm_config.spread_bps = 10;  // 10 bps spread
+        mm_config.min_spread_bps = 5.0;      // Don't quote if spread < 5 bps
+        mm_config.mm_config.spread_bps = 10; // 10 bps spread
         mm_config.mm_config.max_position = args_.max_position;
 
         auto mm_strategy = std::make_unique<MarketMakerStrategy>(mm_config);
@@ -1135,7 +1114,7 @@ private:
         // MomentumStrategy config
         MomentumStrategy::Config mom_config;
         mom_config.price_scale = risk::PRICE_SCALE;
-        mom_config.base_position_pct = 0.15;  // More aggressive for momentum
+        mom_config.base_position_pct = 0.15; // More aggressive for momentum
         mom_config.max_position_pct = 0.4;
         mom_config.roc_period = 10;
         mom_config.momentum_ema_period = 5;
@@ -1146,7 +1125,7 @@ private:
         // FairValueStrategy config
         FairValueStrategy::Config fv_config;
         fv_config.price_scale = risk::PRICE_SCALE;
-        fv_config.base_position_pct = 0.1;  // Conservative for mean reversion
+        fv_config.base_position_pct = 0.1; // Conservative for mean reversion
         fv_config.max_position_pct = 0.25;
         fv_config.fair_value_period = 20;
         fv_config.std_dev_period = 20;
@@ -1154,8 +1133,7 @@ private:
         auto fv_strategy = std::make_unique<FairValueStrategy>(fv_config);
         strategy_selector_.register_strategy(std::move(fv_strategy));
 
-        std::cout << "[STRATEGY] Registered " << strategy_selector_.count()
-                  << " strategies: ";
+        std::cout << "[STRATEGY] Registered " << strategy_selector_.count() << " strategies: ";
         for (auto name : strategy_selector_.strategy_names()) {
             std::cout << name << " ";
         }
@@ -1188,18 +1166,20 @@ private:
         double total_pnl = 0;
 
         for (size_t s = 0; s < MAX_SYMBOLS; s++) {
-            if (!portfolio_.symbol_active[s]) continue;
+            if (!portfolio_.symbol_active[s])
+                continue;
 
             double qty = portfolio_.positions[s].total_quantity();
-            if (qty <= 0) continue;
+            if (qty <= 0)
+                continue;
 
             auto* world = engine_.get_symbol_world(static_cast<Symbol>(s));
-            if (!world) continue;
+            if (!world)
+                continue;
 
             // Get current bid for this symbol
-            double bid_usd = world->best_bid() > 0
-                ? static_cast<double>(world->best_bid()) / risk::PRICE_SCALE
-                : static_cast<double>(current_bid) / risk::PRICE_SCALE;
+            double bid_usd = world->best_bid() > 0 ? static_cast<double>(world->best_bid()) / risk::PRICE_SCALE
+                                                   : static_cast<double>(current_bid) / risk::PRICE_SCALE;
 
             double entry = portfolio_.avg_entry_price(static_cast<Symbol>(s));
             double pnl = (bid_usd - entry) * qty;
@@ -1225,28 +1205,26 @@ private:
             if (portfolio_state_) {
                 portfolio_state_->set_cash(portfolio_.cash);
                 portfolio_state_->add_realized_pnl(pnl);
-                portfolio_state_->add_commission(actual_commission);  // Use actual commission
+                portfolio_state_->add_commission(actual_commission); // Use actual commission
                 portfolio_state_->add_volume(trade_value);
-                portfolio_state_->record_stop();  // Count as emergency stop
+                portfolio_state_->record_stop(); // Count as emergency stop
                 portfolio_state_->record_event();
-                portfolio_state_->update_position(
-                    strategies_[s].ticker,
-                    0,  // Fully liquidated
-                    0,
-                    bid_usd
-                );
+                portfolio_state_->update_position(strategies_[s].ticker,
+                                                  0, // Fully liquidated
+                                                  0, bid_usd);
             }
 
             // Track
-            if (pnl > 0) record_win(); else record_loss();
+            if (pnl > 0)
+                record_win();
+            else
+                record_loss();
 
             // Publish event
             publisher_.stop_loss(static_cast<Symbol>(s), strategies_[s].ticker, entry, bid_usd, qty);
 
-            std::cout << "[EMERGENCY] SOLD " << strategies_[s].ticker
-                      << " qty=" << std::setprecision(4) << qty
-                      << " @ $" << std::setprecision(2) << bid_usd
-                      << " P&L=$" << pnl << "\n";
+            std::cout << "[EMERGENCY] SOLD " << strategies_[s].ticker << " qty=" << std::setprecision(4) << qty
+                      << " @ $" << std::setprecision(2) << bid_usd << " P&L=$" << pnl << "\n";
 
             liquidated++;
             total_value += value;
@@ -1261,10 +1239,11 @@ private:
 
     void on_fill(Symbol symbol, OrderId id, Side side, double qty, Price price) {
         auto* world = engine_.get_symbol_world(symbol);
-        if (!world) return;
+        if (!world)
+            return;
 
         double price_usd = static_cast<double>(price) / risk::PRICE_SCALE;
-        double qty_d = qty;  // Already double, no cast needed
+        double qty_d = qty; // Already double, no cast needed
         double trade_value = price_usd * qty_d;
 
         // Calculate spread cost (half spread paid per trade)
@@ -1272,7 +1251,7 @@ private:
         double bid_usd = world->best_bid() > 0 ? static_cast<double>(world->best_bid()) / risk::PRICE_SCALE : price_usd;
         double ask_usd = world->best_ask() > 0 ? static_cast<double>(world->best_ask()) / risk::PRICE_SCALE : price_usd;
         double spread = ask_usd - bid_usd;
-        double spread_cost = (spread / 2.0) * qty_d;  // Half spread per trade
+        double spread_cost = (spread / 2.0) * qty_d; // Half spread per trade
 
         // For SELL fills, capture avg entry BEFORE the sell to calculate P&L
         double avg_entry_before_sell = 0.0;
@@ -1297,8 +1276,7 @@ private:
         }
 
         // Update risk manager position tracking
-        risk_manager_.on_fill(world->ticker(), side,
-            static_cast<int64_t>(qty_d * 1e8), price);
+        risk_manager_.on_fill(world->ticker(), side, static_cast<int64_t>(qty_d * 1e8), price);
 
         // Record in TradeRecorder (ledger + IPC)
         // IMPORTANT: Use actual_commission for accurate accounting
@@ -1327,12 +1305,8 @@ private:
             portfolio_state_->add_volume(trade_value);
 
             auto& pos = portfolio_.positions[symbol];
-            portfolio_state_->update_position(
-                world->ticker().c_str(),
-                pos.total_quantity(),
-                pos.avg_entry(),
-                price_usd
-            );
+            portfolio_state_->update_position(world->ticker().c_str(), pos.total_quantity(), pos.avg_entry(),
+                                              price_usd);
 
             if (side == Side::Buy) {
                 portfolio_state_->record_buy(world->ticker().c_str());
@@ -1345,8 +1319,8 @@ private:
                     portfolio_state_->add_realized_pnl(realized_pnl);
 
                     // Update risk manager P&L for daily loss limit / drawdown tracking
-                    int64_t total_pnl_scaled = static_cast<int64_t>(
-                        portfolio_state_->total_realized_pnl() * risk::PRICE_SCALE);
+                    int64_t total_pnl_scaled =
+                        static_cast<int64_t>(portfolio_state_->total_realized_pnl() * risk::PRICE_SCALE);
                     risk_manager_.update_pnl(total_pnl_scaled);
 
                     // Update ConfigStrategy with trade result (for mode transitions)
@@ -1360,35 +1334,29 @@ private:
         }
 
         // Publish fill event to observer (~5ns, lock-free)
-        publisher_.fill(symbol, world->ticker().c_str(),
-                       side == Side::Buy ? 0 : 1, price_usd, qty_d, id);
+        publisher_.fill(symbol, world->ticker().c_str(), side == Side::Buy ? 0 : 1, price_usd, qty_d, id);
 
         // UDP telemetry for remote monitoring (~10µs, fire-and-forget)
-        telemetry_.publish_fill(symbol, side == Side::Buy,
-                                static_cast<uint32_t>(qty),
+        telemetry_.publish_fill(symbol, side == Side::Buy, static_cast<uint32_t>(qty),
                                 static_cast<int64_t>(price_usd * 1e8));
 
         // Event log for tuner/web tracking
         if (event_log_) {
-            TunerEvent e = TunerEvent::make_fill(
-                world->ticker().c_str(),
-                side == Side::Buy ? TradeSide::Buy : TradeSide::Sell,
-                price_usd, qty_d, 0);  // P&L calculated on position close
+            TunerEvent e =
+                TunerEvent::make_fill(world->ticker().c_str(), side == Side::Buy ? TradeSide::Buy : TradeSide::Sell,
+                                      price_usd, qty_d, 0); // P&L calculated on position close
             event_log_->log(e);
         }
 
         // Debug: log fill details
         if (args_.verbose) {
-            std::cout << "[FILL] " << world->ticker()
-                      << " " << (side == Side::Buy ? "BUY" : "SELL")
-                      << " " << std::fixed << std::setprecision(6) << qty
-                      << " @ $" << std::setprecision(2) << price_usd
+            std::cout << "[FILL] " << world->ticker() << " " << (side == Side::Buy ? "BUY" : "SELL") << " "
+                      << std::fixed << std::setprecision(6) << qty << " @ $" << std::setprecision(2) << price_usd
                       << " (cash=$" << portfolio_.cash << ")\n";
         }
 
         world->on_fill(side, qty, price);
         world->on_our_fill(id, qty);
-
     }
 
     /**
@@ -1402,21 +1370,25 @@ private:
      */
     void on_execution_report(const ipc::ExecutionReport& report) {
         // Only process fills
-        if (!report.is_fill()) return;
+        if (!report.is_fill())
+            return;
 
         // Lookup symbol
         auto opt = engine_.lookup_symbol(report.symbol);
-        if (!opt) return;
+        if (!opt)
+            return;
 
         Symbol symbol = *opt;
-        if (symbol >= MAX_SYMBOLS) return;
+        if (symbol >= MAX_SYMBOLS)
+            return;
 
         auto* world = engine_.get_symbol_world(symbol);
-        if (!world) return;
+        if (!world)
+            return;
 
         double price_usd = report.filled_price;
         double qty = report.filled_qty;
-        double commission = report.commission;  // From exchange, not calculated!
+        double commission = report.commission; // From exchange, not calculated!
         double trade_value = price_usd * qty;
 
         // Calculate spread cost (half spread paid per trade)
@@ -1473,12 +1445,7 @@ private:
             portfolio_state_->add_volume(trade_value);
 
             auto& pos = portfolio_.positions[symbol];
-            portfolio_state_->update_position(
-                report.symbol,
-                pos.total_quantity(),
-                pos.avg_entry(),
-                price_usd
-            );
+            portfolio_state_->update_position(report.symbol, pos.total_quantity(), pos.avg_entry(), price_usd);
 
             if (is_buy) {
                 portfolio_state_->record_buy(report.symbol);
@@ -1513,21 +1480,16 @@ private:
         }
 
         // Publish fill event to observer
-        publisher_.fill(symbol, report.symbol,
-                       is_buy ? 0 : 1, price_usd, qty, report.order_id);
+        publisher_.fill(symbol, report.symbol, is_buy ? 0 : 1, price_usd, qty, report.order_id);
 
         // UDP telemetry
-        telemetry_.publish_fill(symbol, is_buy,
-                                static_cast<uint32_t>(qty),
-                                static_cast<int64_t>(price_usd * 1e8));
+        telemetry_.publish_fill(symbol, is_buy, static_cast<uint32_t>(qty), static_cast<int64_t>(price_usd * 1e8));
 
         // Debug output
         if (args_.verbose) {
-            std::cout << "[EXEC] " << report.symbol
-                      << " " << (is_buy ? "BUY" : "SELL")
-                      << " " << qty << " @ $" << std::fixed << std::setprecision(2) << price_usd
-                      << " (comm=$" << std::setprecision(4) << commission
-                      << ", cash=$" << std::setprecision(2) << portfolio_.cash << ")\n";
+            std::cout << "[EXEC] " << report.symbol << " " << (is_buy ? "BUY" : "SELL") << " " << qty << " @ $"
+                      << std::fixed << std::setprecision(2) << price_usd << " (comm=$" << std::setprecision(4)
+                      << commission << ", cash=$" << std::setprecision(2) << portfolio_.cash << ")\n";
         }
 
         // Update SymbolWorld state
@@ -1536,7 +1498,6 @@ private:
         Quantity qty_scaled = static_cast<Quantity>(qty);
         world->on_fill(side, qty_scaled, price_scaled);
         world->on_our_fill(report.order_id, qty_scaled);
-
     }
 
     // Note: check_targets_and_stops removed - now handled inline in on_quote
@@ -1555,7 +1516,8 @@ private:
      */
     bool execute_unified_signal(Symbol id, SymbolWorld* world, SymbolStrategy* strat, Price bid, Price ask) {
         // Skip if execution engine not configured
-        if (!paper_adapter_) return false;
+        if (!paper_adapter_)
+            return false;
 
         // 1. Build MarketSnapshot with real order book sizes
         MarketSnapshot market;
@@ -1566,7 +1528,8 @@ private:
         market.last_trade = (bid + ask) / 2;
         market.timestamp_ns = std::chrono::steady_clock::now().time_since_epoch().count();
 
-        if (!market.valid()) return false;
+        if (!market.valid())
+            return false;
 
         // 2. Build StrategyPosition from portfolio
         double holding = portfolio_.get_holding(id);
@@ -1576,7 +1539,7 @@ private:
         position.quantity = holding;
         position.avg_entry_price = portfolio_.avg_entry_price(id);
         position.unrealized_pnl = (mid_usd - position.avg_entry_price) * holding;
-        position.realized_pnl = 0;  // Would need to track per-symbol
+        position.realized_pnl = 0; // Would need to track per-symbol
         position.cash_available = portfolio_.cash - portfolio_.pending_cash;
         // max_position: Use config to determine sizing mode
         // Mode 0 (percentage-based): Use portfolio cash value for percentage calculations
@@ -1584,7 +1547,7 @@ private:
         if (shared_config_ && shared_config_->is_unit_based_sizing()) {
             position.max_position = shared_config_->get_max_position_units();
         } else {
-            position.max_position = portfolio_.cash;  // Percentage-based (default)
+            position.max_position = portfolio_.cash; // Percentage-based (default)
         }
 
         // 3. Get current regime
@@ -1593,29 +1556,31 @@ private:
         // 4. Select strategy and generate signal based on TunerState
         Signal signal;
         const char* strategy_name = "Unknown";
-        bool use_config_strategy = shared_config_ && (shared_config_->is_tuner_on() || shared_config_->is_tuner_paused());
+        bool use_config_strategy =
+            shared_config_ && (shared_config_->is_tuner_on() || shared_config_->is_tuner_paused());
         if (use_config_strategy) {
             // TunerState ON/PAUSED: Use ConfigStrategy (config-driven)
             auto& cfg_strat = config_strategies_[id];
-            if (!cfg_strat || !cfg_strat->ready()) return false;
+            if (!cfg_strat || !cfg_strat->ready())
+                return false;
             signal = cfg_strat->generate(id, market, position, regime);
             strategy_name = "Config";
         } else {
             // TunerState OFF: Use traditional regime-based strategy selection
             IStrategy* strategy = strategy_selector_.select_for_regime(regime);
-            if (!strategy || !strategy->ready()) return false;
+            if (!strategy || !strategy->ready())
+                return false;
             signal = strategy->generate(id, market, position, regime);
             strategy_name = strategy->name().data();
         }
-        if (!signal.is_actionable()) return false;
+        if (!signal.is_actionable())
+            return false;
 
         // 4b. Check minimum trade value
         // IMPORTANT: Return true even on skip to trigger cooldown and prevent signal spam
         {
-            double min_trade = shared_config_->min_trade_value();  // Default: $100
-            double price_usd = signal.is_buy()
-                ? market.ask_usd(risk::PRICE_SCALE)
-                : market.bid_usd(risk::PRICE_SCALE);
+            double min_trade = shared_config_->min_trade_value(); // Default: $100
+            double price_usd = signal.is_buy() ? market.ask_usd(risk::PRICE_SCALE) : market.bid_usd(risk::PRICE_SCALE);
             double order_value = signal.suggested_qty * price_usd;
 
             if (order_value < min_trade) {
@@ -1629,33 +1594,33 @@ private:
         if (shared_config_) {
             uint8_t pref = shared_config_->get_order_type_default();
             switch (pref) {
-                case 1:  // MarketOnly
-                    signal.order_pref = OrderPreference::Market;
-                    break;
-                case 2:  // LimitOnly
-                    signal.order_pref = OrderPreference::Limit;
-                    // Calculate limit price if not set
-                    if (signal.limit_price == 0) {
-                        if (signal.is_buy()) {
-                            signal.limit_price = calculate_buy_limit_price(bid, ask);
-                        } else {
-                            signal.limit_price = calculate_sell_limit_price(bid, ask);
-                        }
+            case 1: // MarketOnly
+                signal.order_pref = OrderPreference::Market;
+                break;
+            case 2: // LimitOnly
+                signal.order_pref = OrderPreference::Limit;
+                // Calculate limit price if not set
+                if (signal.limit_price == 0) {
+                    if (signal.is_buy()) {
+                        signal.limit_price = calculate_buy_limit_price(bid, ask);
+                    } else {
+                        signal.limit_price = calculate_sell_limit_price(bid, ask);
                     }
-                    break;
-                case 3:  // Adaptive (start with limit)
-                    signal.order_pref = OrderPreference::Limit;
-                    if (signal.limit_price == 0) {
-                        if (signal.is_buy()) {
-                            signal.limit_price = calculate_buy_limit_price(bid, ask);
-                        } else {
-                            signal.limit_price = calculate_sell_limit_price(bid, ask);
-                        }
+                }
+                break;
+            case 3: // Adaptive (start with limit)
+                signal.order_pref = OrderPreference::Limit;
+                if (signal.limit_price == 0) {
+                    if (signal.is_buy()) {
+                        signal.limit_price = calculate_buy_limit_price(bid, ask);
+                    } else {
+                        signal.limit_price = calculate_sell_limit_price(bid, ask);
                     }
-                    break;
-                // case 0 (Auto): let ExecutionEngine decide based on signal/regime/spread
-                default:
-                    break;
+                }
+                break;
+            // case 0 (Auto): let ExecutionEngine decide based on signal/regime/spread
+            default:
+                break;
             }
         }
 
@@ -1667,8 +1632,7 @@ private:
 
             if (!risk_manager_.check_order(strat->ticker, side, qty, price)) {
                 if (args_.verbose) {
-                    std::cout << "[RISK] " << strat->ticker
-                              << " " << (signal.is_buy() ? "BUY" : "SELL")
+                    std::cout << "[RISK] " << strat->ticker << " " << (signal.is_buy() ? "BUY" : "SELL")
                               << " BLOCKED - ";
                     if (risk_manager_.is_halted()) {
                         if (risk_manager_.is_daily_limit_breached()) {
@@ -1698,26 +1662,21 @@ private:
             }
 
             if (args_.verbose) {
-                std::cout << "[UNIFIED] " << strat->ticker
-                          << " " << signal_type_str(signal.type)
-                          << " qty=" << signal.suggested_qty
-                          << " (strategy=" << strategy_name
-                          << ", strength=" << signal_strength_str(signal.strength)
-                          << ", reason=" << signal.reason << ")\n";
+                std::cout << "[UNIFIED] " << strat->ticker << " " << signal_type_str(signal.type)
+                          << " qty=" << signal.suggested_qty << " (strategy=" << strategy_name
+                          << ", strength=" << signal_strength_str(signal.strength) << ", reason=" << signal.reason
+                          << ")\n";
             }
 
             // Publish signal event
-            publisher_.signal(id, strat->ticker,
-                             signal.is_buy() ? 0 : 1,
-                             static_cast<uint8_t>(signal.strength),
-                             mid_usd);
+            publisher_.signal(id, strat->ticker, signal.is_buy() ? 0 : 1, static_cast<uint8_t>(signal.strength),
+                              mid_usd);
 
             // Event log for tuner/web tracking
             if (event_log_) {
-                TunerEvent e = TunerEvent::make_signal(
-                    strat->ticker,
-                    signal.is_buy() ? TradeSide::Buy : TradeSide::Sell,
-                    mid_usd, signal.suggested_qty, signal.reason);
+                TunerEvent e =
+                    TunerEvent::make_signal(strat->ticker, signal.is_buy() ? TradeSide::Buy : TradeSide::Sell, mid_usd,
+                                            signal.suggested_qty, signal.reason);
                 event_log_->log(e);
             }
 
@@ -1734,11 +1693,14 @@ private:
         // Cooldown from config (default 2000ms = 2 billion ns)
         int64_t cooldown_ns = (shared_config_ ? shared_config_->get_cooldown_ms() : 2000) * 1'000'000LL;
         if (now - strat->last_signal_time < static_cast<uint64_t>(cooldown_ns)) {
-            return;  // Silent cooldown - no status spam
+            return; // Silent cooldown - no status spam
         }
 
         Price mid = (bid + ask) / 2;
-        if (strat->last_mid == 0) { strat->last_mid = mid; return; }
+        if (strat->last_mid == 0) {
+            strat->last_mid = mid;
+            return;
+        }
 
         strat->last_mid = mid;
 
@@ -1761,7 +1723,8 @@ private:
         // =====================================================================
         // IMPORTANT: Skip when tuner_mode is ON - unified system handles ALL exits via exchange
         // to prevent double-counting (this code directly updates portfolio, unified uses callbacks)
-        bool use_legacy_exits = !shared_config_ || !(shared_config_->is_tuner_on() || shared_config_->is_tuner_paused());
+        bool use_legacy_exits =
+            !shared_config_ || !(shared_config_->is_tuner_on() || shared_config_->is_tuner_paused());
         if (use_legacy_exits && holding > 0) {
             bool should_exit = false;
             const char* exit_reason = "";
@@ -1810,12 +1773,12 @@ private:
                 if (portfolio_state_) {
                     portfolio_state_->set_cash(portfolio_.cash);
                     portfolio_state_->add_realized_pnl(pnl);
-                    portfolio_state_->add_commission(actual_commission);  // Use actual commission
-                    portfolio_state_->add_volume(trade_value);     // BUG FIX: was missing!
+                    portfolio_state_->add_commission(actual_commission); // Use actual commission
+                    portfolio_state_->add_volume(trade_value);           // BUG FIX: was missing!
                     if (pnl > 0) {
-                        portfolio_state_->record_target();  // Count as win
+                        portfolio_state_->record_target(); // Count as win
                     } else {
-                        portfolio_state_->record_stop();    // Count as loss
+                        portfolio_state_->record_stop(); // Count as loss
                     }
                     portfolio_state_->record_event();
                     // Read actual position state (may not be fully closed)
@@ -1824,7 +1787,10 @@ private:
                 }
 
                 // Track win/loss
-                if (pnl > 0) record_win(); else record_loss();
+                if (pnl > 0)
+                    record_win();
+                else
+                    record_loss();
 
                 // Publish to observer (use target/stop event, NOT fill - to avoid double counting)
                 if (pnl > 0) {
@@ -1834,15 +1800,13 @@ private:
                 }
 
                 if (args_.verbose) {
-                    std::cout << "[EXIT:" << exit_reason << "] " << strat->ticker
-                              << " SELL " << std::fixed << std::setprecision(4) << qty
-                              << " @ $" << std::setprecision(2) << bid_usd
-                              << " (entry=$" << entry
-                              << ", P&L=$" << std::setprecision(2) << pnl << ")\n";
+                    std::cout << "[EXIT:" << exit_reason << "] " << strat->ticker << " SELL " << std::fixed
+                              << std::setprecision(4) << qty << " @ $" << std::setprecision(2) << bid_usd << " (entry=$"
+                              << entry << ", P&L=$" << std::setprecision(2) << pnl << ")\n";
                 }
 
                 strat->last_signal_time = now;
-                return;  // Don't check buy after selling
+                return; // Don't check buy after selling
             }
         }
 
@@ -1853,13 +1817,13 @@ private:
         // Option 1: Use unified strategy architecture (--unified flag OR tuner_mode ON)
         // When tuner_mode is ON, we use the unified architecture with AI-tuned parameters
         bool use_unified = args_.unified_strategy ||
-                          (shared_config_ && (shared_config_->is_tuner_on() || shared_config_->is_tuner_paused()));
+                           (shared_config_ && (shared_config_->is_tuner_on() || shared_config_->is_tuner_paused()));
 
         if (use_unified) {
             if (execute_unified_signal(id, world, strat, bid, ask)) {
                 strat->last_signal_time = now;
             }
-            return;  // Skip legacy logic when unified mode is enabled
+            return; // Skip legacy logic when unified mode is enabled
         }
 
         // Option 2: Legacy direct indicator logic (default)
@@ -1873,35 +1837,35 @@ private:
         SS required_strength = (min_strength >= 2) ? SS::Strong : SS::Medium;
 
         switch (strat->current_regime) {
-            case MarketRegime::TrendingUp:
-                // Uptrend: Buy based on configured signal strength
-                if (buy_strength >= required_strength && holding < args_.max_position) {
-                    should_buy = true;
-                }
-                break;
+        case MarketRegime::TrendingUp:
+            // Uptrend: Buy based on configured signal strength
+            if (buy_strength >= required_strength && holding < args_.max_position) {
+                should_buy = true;
+            }
+            break;
 
-            case MarketRegime::TrendingDown:
-                // Downtrend: DON'T BUY! Stop-loss will handle exits
-                // Just wait for trend reversal
-                break;
+        case MarketRegime::TrendingDown:
+            // Downtrend: DON'T BUY! Stop-loss will handle exits
+            // Just wait for trend reversal
+            break;
 
-            case MarketRegime::Ranging:
-            case MarketRegime::LowVolatility:
-                // Mean reversion: Buy on dips based on configured strength
-                if (buy_strength >= required_strength && holding < args_.max_position) {
-                    should_buy = true;
-                }
-                break;
+        case MarketRegime::Ranging:
+        case MarketRegime::LowVolatility:
+            // Mean reversion: Buy on dips based on configured strength
+            if (buy_strength >= required_strength && holding < args_.max_position) {
+                should_buy = true;
+            }
+            break;
 
-            case MarketRegime::HighVolatility:
-                // High vol: Always require Strong signals (regardless of config)
-                if (buy_strength >= SS::Strong && holding < args_.max_position) {
-                    should_buy = true;
-                }
-                break;
+        case MarketRegime::HighVolatility:
+            // High vol: Always require Strong signals (regardless of config)
+            if (buy_strength >= SS::Strong && holding < args_.max_position) {
+                should_buy = true;
+            }
+            break;
 
-            default:
-                break;
+        default:
+            break;
         }
 
         // Price check: Only buy if price is reasonably close to EMA
@@ -1917,21 +1881,21 @@ private:
 
             double max_deviation;
             switch (strat->current_regime) {
-                case MarketRegime::TrendingUp:
-                    max_deviation = dev_trending;
-                    break;
-                case MarketRegime::Ranging:
-                case MarketRegime::LowVolatility:
-                    max_deviation = dev_ranging;
-                    break;
-                case MarketRegime::HighVolatility:
-                    max_deviation = dev_highvol;
-                    break;
-                default:
-                    max_deviation = dev_ranging;  // Default to ranging threshold
+            case MarketRegime::TrendingUp:
+                max_deviation = dev_trending;
+                break;
+            case MarketRegime::Ranging:
+            case MarketRegime::LowVolatility:
+                max_deviation = dev_ranging;
+                break;
+            case MarketRegime::HighVolatility:
+                max_deviation = dev_highvol;
+                break;
+            default:
+                max_deviation = dev_ranging; // Default to ranging threshold
             }
             if (deviation > max_deviation) {
-                should_buy = false;  // Price too high relative to EMA
+                should_buy = false; // Price too high relative to EMA
             }
         }
 
@@ -1946,18 +1910,21 @@ private:
             // Rate limited: ~once per minute at 100 ticks/sec
             static uint32_t cash_low_counter = 0;
             if (++cash_low_counter % 5000 == 0) {
-                publisher_.status(id, strat->ticker, StatusCode::CashLow, ask_usd,
-                                  static_cast<uint8_t>(buy_strength),
+                publisher_.status(id, strat->ticker, StatusCode::CashLow, ask_usd, static_cast<uint8_t>(buy_strength),
                                   static_cast<uint8_t>(strat->current_regime));
             }
         }
 
         auto signal_str = [](TechnicalIndicators::SignalStrength s) {
             switch (s) {
-                case SS::Strong: return "STRONG";
-                case SS::Medium: return "MEDIUM";
-                case SS::Weak: return "WEAK";
-                default: return "NONE";
+            case SS::Strong:
+                return "STRONG";
+            case SS::Medium:
+                return "MEDIUM";
+            case SS::Weak:
+                return "WEAK";
+            default:
+                return "NONE";
             }
         };
 
@@ -1969,14 +1936,14 @@ private:
         // Check minimum trade value to avoid overtrading with tiny positions
         if (should_buy && order_value < min_trade) {
             should_buy = false;
-            strat->last_signal_time = now;  // Trigger cooldown to prevent signal spam
+            strat->last_signal_time = now; // Trigger cooldown to prevent signal spam
         }
 
         // Check position capacity - avoid sending orders that will be rejected
         // BUG FIX: Previously orders were sent even when position limit was reached,
         // causing cash to get stuck (reserved but never deducted when buy() failed)
         if (should_buy && !portfolio_.can_add_position(id)) {
-            should_buy = false;  // Position limit reached for this symbol
+            should_buy = false; // Position limit reached for this symbol
         }
 
         if (should_buy && qty > 1e-8 && world->can_trade(Side::Buy, qty)) {
@@ -1988,23 +1955,21 @@ private:
             const char* order_type_str;
 
             if (is_market) {
-                order_price = ask;  // Market buy at ask
+                order_price = ask; // Market buy at ask
                 order_type_str = "MKT";
             } else {
-                order_price = calculate_buy_limit_price(bid, ask);  // Limit inside spread
+                order_price = calculate_buy_limit_price(bid, ask); // Limit inside spread
                 order_type_str = "LMT";
             }
 
             if (args_.verbose) {
                 double order_price_usd = static_cast<double>(order_price) / risk::PRICE_SCALE;
-                std::cout << "[BUY:" << order_type_str << "] " << strat->ticker
-                          << " " << std::fixed << std::setprecision(6) << qty
-                          << " @ $" << std::setprecision(2) << order_price_usd
-                          << " (=$" << std::setprecision(2) << order_value
-                          << ", signal=" << signal_str(buy_strength)
-                          << ", RSI=" << std::setprecision(0) << strat->indicators.rsi()
-                          << ", target=$" << std::setprecision(2) << ask_usd * (1.0 + portfolio_.target_pct())
-                          << ", stop=$" << ask_usd * (1.0 - portfolio_.stop_pct()) << ")\n";
+                std::cout << "[BUY:" << order_type_str << "] " << strat->ticker << " " << std::fixed
+                          << std::setprecision(6) << qty << " @ $" << std::setprecision(2) << order_price_usd << " (=$"
+                          << std::setprecision(2) << order_value << ", signal=" << signal_str(buy_strength)
+                          << ", RSI=" << std::setprecision(0) << strat->indicators.rsi() << ", target=$"
+                          << std::setprecision(2) << ask_usd * (1.0 + portfolio_.target_pct()) << ", stop=$"
+                          << ask_usd * (1.0 - portfolio_.stop_pct()) << ")\n";
             }
             sender_.send_order(id, Side::Buy, qty, order_price, is_market);
             strat->last_signal_time = now;
@@ -2020,7 +1985,7 @@ private:
 // Main
 // ============================================================================
 
-template<typename OrderSender>
+template <typename OrderSender>
 int run(const CLIArgs& args) {
     // Pin to CPU core if requested (reduces latency variance)
     hft::util::set_cpu_affinity(args.cpu_affinity);
@@ -2035,14 +2000,16 @@ int run(const CLIArgs& args) {
             std::cout << "  " << i << "...\n";
             std::this_thread::sleep_for(std::chrono::seconds(1));
         }
-        if (!g_running) return 0;
+        if (!g_running)
+            return 0;
     }
 
     TradingApp<OrderSender> app(args);
 
     auto symbols = args.symbols.empty() ? fetch_default_symbols() : args.symbols;
     std::cout << "Registering " << symbols.size() << " symbols...\n";
-    for (auto& s : symbols) app.add_symbol(s);
+    for (auto& s : symbols)
+        app.add_symbol(s);
 
     BinanceWs ws(false);
 
@@ -2050,20 +2017,18 @@ int run(const CLIArgs& args) {
         if (c) {
             std::cout << "[OK] Connected to Binance\n\n";
             if (g_shared_config) {
-                g_shared_config->set_ws_market_status(2);  // healthy
+                g_shared_config->set_ws_market_status(2); // healthy
                 g_shared_config->update_ws_last_message();
             }
         } else {
             std::cout << "[DISCONNECTED] from Binance\n";
             if (g_shared_config) {
-                g_shared_config->set_ws_market_status(0);  // disconnected
+                g_shared_config->set_ws_market_status(0); // disconnected
             }
         }
     });
 
-    ws.set_error_callback([](const std::string& err) {
-        std::cerr << "[WS ERROR] " << err << "\n";
-    });
+    ws.set_error_callback([](const std::string& err) { std::cerr << "[WS ERROR] " << err << "\n"; });
 
     // Enable auto-reconnect with status updates
     ws.enable_auto_reconnect(true);
@@ -2072,12 +2037,12 @@ int run(const CLIArgs& args) {
             std::cout << "[RECONNECTED] After " << retry_count << " attempt(s)\n";
             if (g_shared_config) {
                 g_shared_config->increment_ws_reconnect_count();
-                g_shared_config->set_ws_market_status(2);  // healthy
+                g_shared_config->set_ws_market_status(2); // healthy
             }
         } else {
             std::cout << "[RECONNECTING] Attempt " << retry_count << "...\n";
             if (g_shared_config) {
-                g_shared_config->set_ws_market_status(0);  // disconnected during retry
+                g_shared_config->set_ws_market_status(0); // disconnected during retry
             }
         }
     });
@@ -2089,7 +2054,8 @@ int run(const CLIArgs& args) {
         app.on_quote(bt.symbol, bt.bid_price, bt.ask_price, bid_size, ask_size);
     });
 
-    for (auto& s : symbols) ws.subscribe_book_ticker(s);
+    for (auto& s : symbols)
+        ws.subscribe_book_ticker(s);
 
     std::cout << "Connecting...\n";
     if (!ws.connect()) {
@@ -2108,9 +2074,9 @@ int run(const CLIArgs& args) {
 
     // Mark as running now that we're connected
     if (g_shared_config) {
-        g_shared_config->set_trader_status(2);  // running
-        g_shared_config->set_trader_start_time();  // Record start time for restart detection
-        g_shared_config->set_ws_market_status(2);  // healthy - we just connected
+        g_shared_config->set_trader_status(2);    // running
+        g_shared_config->set_trader_start_time(); // Record start time for restart detection
+        g_shared_config->set_ws_market_status(2); // healthy - we just connected
         g_shared_config->update_ws_last_message();
         g_shared_config->update_heartbeat();
     }
@@ -2119,10 +2085,11 @@ int run(const CLIArgs& args) {
     auto last_heartbeat = start;
 
     while (g_running) {
-        auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
-            std::chrono::steady_clock::now() - start).count();
+        auto elapsed =
+            std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - start).count();
 
-        if (args.duration > 0 && elapsed >= args.duration) break;
+        if (args.duration > 0 && elapsed >= args.duration)
+            break;
 
         if (app.is_halted()) {
             std::cout << "\n  TRADING HALTED - Risk limit breached\n";
@@ -2137,13 +2104,13 @@ int run(const CLIArgs& args) {
 
                 // Connection health monitoring with auto-recovery
                 static int unhealthy_count = 0;
-                constexpr int FORCE_RECONNECT_THRESHOLD = 30;  // Force reconnect after 30s unhealthy
+                constexpr int FORCE_RECONNECT_THRESHOLD = 30; // Force reconnect after 30s unhealthy
 
                 if (!ws.is_connected()) {
-                    g_shared_config->set_ws_market_status(0);  // disconnected
-                    unhealthy_count = 0;  // Reset - already handling reconnection
+                    g_shared_config->set_ws_market_status(0); // disconnected
+                    unhealthy_count = 0;                      // Reset - already handling reconnection
                 } else if (!ws.is_healthy(10)) {
-                    g_shared_config->set_ws_market_status(1);  // degraded - connected but no data
+                    g_shared_config->set_ws_market_status(1); // degraded - connected but no data
                     ++unhealthy_count;
 
                     // Force reconnect after prolonged unhealthy state
@@ -2154,13 +2121,13 @@ int run(const CLIArgs& args) {
                         unhealthy_count = 0;
                     }
                 } else {
-                    g_shared_config->set_ws_market_status(2);  // healthy
+                    g_shared_config->set_ws_market_status(2); // healthy
                     g_shared_config->update_ws_last_message();
-                    unhealthy_count = 0;  // Reset on healthy
+                    unhealthy_count = 0; // Reset on healthy
                 }
             }
-            app.publish_telemetry_heartbeat();  // UDP multicast heartbeat
-            app.publish_heartbeat();            // IPC heartbeat for observer/dashboard
+            app.publish_telemetry_heartbeat(); // UDP multicast heartbeat
+            app.publish_heartbeat();           // IPC heartbeat for observer/dashboard
             last_heartbeat = now;
         }
 
@@ -2172,14 +2139,10 @@ int run(const CLIArgs& args) {
 
     // Final summary
     auto stats = app.get_stats();
-    auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
-        std::chrono::steady_clock::now() - start).count();
+    auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - start).count();
 
-    std::cout << "\n[DONE] " << elapsed << "s | "
-              << stats.ticks << " ticks | "
-              << stats.fills << " fills | P&L: $"
-              << std::fixed << std::setprecision(2)
-              << (stats.pnl >= 0 ? "+" : "") << stats.pnl << "\n";
+    std::cout << "\n[DONE] " << elapsed << "s | " << stats.ticks << " ticks | " << stats.fills << " fills | P&L: $"
+              << std::fixed << std::setprecision(2) << (stats.pnl >= 0 ? "+" : "") << stats.pnl << "\n";
 
     return 0;
 }
@@ -2188,7 +2151,8 @@ int main(int argc, char* argv[]) {
     hft::util::install_shutdown_handler(g_running, trader_pre_shutdown);
 
     CLIArgs args;
-    if (!parse_args(argc, argv, args)) return 1;
+    if (!parse_args(argc, argv, args))
+        return 1;
 
     if (args.help) {
         print_help();

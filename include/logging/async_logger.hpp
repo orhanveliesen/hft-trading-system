@@ -1,12 +1,12 @@
 #pragma once
 
-#include <atomic>
-#include <thread>
-#include <cstring>
-#include <cstdio>
-#include <chrono>
-#include <functional>
 #include <array>
+#include <atomic>
+#include <chrono>
+#include <cstdio>
+#include <cstring>
+#include <functional>
+#include <thread>
 
 namespace hft {
 namespace logging {
@@ -14,24 +14,24 @@ namespace logging {
 /**
  * Log Level
  */
-enum class LogLevel : uint8_t {
-    Trace = 0,
-    Debug = 1,
-    Info = 2,
-    Warn = 3,
-    Error = 4,
-    Fatal = 5
-};
+enum class LogLevel : uint8_t { Trace = 0, Debug = 1, Info = 2, Warn = 3, Error = 4, Fatal = 5 };
 
 inline const char* level_to_string(LogLevel level) {
     switch (level) {
-        case LogLevel::Trace: return "TRACE";
-        case LogLevel::Debug: return "DEBUG";
-        case LogLevel::Info:  return "INFO ";
-        case LogLevel::Warn:  return "WARN ";
-        case LogLevel::Error: return "ERROR";
-        case LogLevel::Fatal: return "FATAL";
-        default: return "?????";
+    case LogLevel::Trace:
+        return "TRACE";
+    case LogLevel::Debug:
+        return "DEBUG";
+    case LogLevel::Info:
+        return "INFO ";
+    case LogLevel::Warn:
+        return "WARN ";
+    case LogLevel::Error:
+        return "ERROR";
+    case LogLevel::Fatal:
+        return "FATAL";
+    default:
+        return "?????";
     }
 }
 
@@ -39,17 +39,18 @@ inline const char* level_to_string(LogLevel level) {
  * Log Entry - Fixed size for predictable latency
  */
 struct alignas(64) LogEntry {
-    uint64_t timestamp_ns;      // 8 bytes
-    LogLevel level;             // 1 byte
-    uint8_t category;           // 1 byte (user-defined)
-    uint16_t reserved;          // 2 bytes padding
-    uint32_t thread_id;         // 4 bytes
-    char message[48];           // 48 bytes (null-terminated)
+    uint64_t timestamp_ns; // 8 bytes
+    LogLevel level;        // 1 byte
+    uint8_t category;      // 1 byte (user-defined)
+    uint16_t reserved;     // 2 bytes padding
+    uint32_t thread_id;    // 4 bytes
+    char message[48];      // 48 bytes (null-terminated)
     // Total: 64 bytes (one cache line)
 
     void set_message(const char* msg) {
         size_t len = std::strlen(msg);
-        if (len >= sizeof(message)) len = sizeof(message) - 1;
+        if (len >= sizeof(message))
+            len = sizeof(message) - 1;
         std::memcpy(message, msg, len);
         message[len] = '\0';
     }
@@ -62,14 +63,12 @@ static_assert(sizeof(LogEntry) == 64, "LogEntry must be 64 bytes");
  * Single Producer, Single Consumer - no locks needed.
  * Cache-line aligned to prevent false sharing.
  */
-template<size_t Capacity = 16384>  // 16K entries = 1MB buffer
+template <size_t Capacity = 16384> // 16K entries = 1MB buffer
 class alignas(64) LogRingBuffer {
 public:
     static_assert((Capacity & (Capacity - 1)) == 0, "Capacity must be power of 2");
 
-    LogRingBuffer() : head_(0), tail_(0) {
-        std::memset(buffer_.data(), 0, sizeof(buffer_));
-    }
+    LogRingBuffer() : head_(0), tail_(0) { std::memset(buffer_.data(), 0, sizeof(buffer_)); }
 
     /**
      * Try to push a log entry (producer side)
@@ -82,7 +81,7 @@ public:
 
         // Check if buffer is full
         if (next_head == tail_.load(std::memory_order_acquire)) {
-            return false;  // Buffer full
+            return false; // Buffer full
         }
 
         // Write entry
@@ -102,7 +101,7 @@ public:
 
         // Check if buffer is empty
         if (tail == head_.load(std::memory_order_acquire)) {
-            return false;  // Buffer empty
+            return false; // Buffer empty
         }
 
         // Read entry
@@ -119,14 +118,9 @@ public:
         return (head - tail + Capacity) & (Capacity - 1);
     }
 
-    bool empty() const {
-        return head_.load(std::memory_order_acquire) ==
-               tail_.load(std::memory_order_acquire);
-    }
+    bool empty() const { return head_.load(std::memory_order_acquire) == tail_.load(std::memory_order_acquire); }
 
-    bool full() const {
-        return size() == Capacity - 1;
-    }
+    bool full() const { return size() == Capacity - 1; }
 
 private:
     alignas(64) std::atomic<size_t> head_;
@@ -150,16 +144,9 @@ class AsyncLogger {
 public:
     using OutputCallback = std::function<void(const LogEntry&)>;
 
-    AsyncLogger()
-        : running_(false)
-        , min_level_(LogLevel::Info)
-        , dropped_count_(0)
-        , total_logged_(0)
-    {}
+    AsyncLogger() : running_(false), min_level_(LogLevel::Info), dropped_count_(0), total_logged_(0) {}
 
-    ~AsyncLogger() {
-        stop();
-    }
+    ~AsyncLogger() { stop(); }
 
     // Non-copyable
     AsyncLogger(const AsyncLogger&) = delete;
@@ -169,18 +156,18 @@ public:
      * Start the background consumer thread
      */
     void start() {
-        if (running_.exchange(true)) return;  // Already running
+        if (running_.exchange(true))
+            return; // Already running
 
-        consumer_thread_ = std::thread([this]() {
-            consume_loop();
-        });
+        consumer_thread_ = std::thread([this]() { consume_loop(); });
     }
 
     /**
      * Stop the logger and flush remaining entries
      */
     void stop() {
-        if (!running_.exchange(false)) return;  // Already stopped
+        if (!running_.exchange(false))
+            return; // Already stopped
 
         if (consumer_thread_.joinable()) {
             consumer_thread_.join();
@@ -197,7 +184,8 @@ public:
      * Log a message (hot path - ~50ns)
      */
     void log(LogLevel level, uint8_t category, const char* message) {
-        if (level < min_level_) return;
+        if (level < min_level_)
+            return;
 
         LogEntry entry;
         entry.timestamp_ns = get_timestamp_ns();
@@ -217,9 +205,10 @@ public:
      * Log with printf-style formatting
      * Note: Formatting happens on hot path, use sparingly
      */
-    template<typename... Args>
+    template <typename... Args>
     void logf(LogLevel level, uint8_t category, const char* fmt, Args... args) {
-        if (level < min_level_) return;
+        if (level < min_level_)
+            return;
 
         char buffer[48];
         std::snprintf(buffer, sizeof(buffer), fmt, args...);
@@ -261,18 +250,14 @@ private:
         } else {
             // Default: print to stderr
             auto ts_ms = entry.timestamp_ns / 1000000;
-            std::fprintf(stderr, "[%lu.%03lu] [%s] [cat:%d] %s\n",
-                        ts_ms / 1000, ts_ms % 1000,
-                        level_to_string(entry.level),
-                        entry.category,
-                        entry.message);
+            std::fprintf(stderr, "[%lu.%03lu] [%s] [cat:%d] %s\n", ts_ms / 1000, ts_ms % 1000,
+                         level_to_string(entry.level), entry.category, entry.message);
         }
     }
 
     static uint64_t get_timestamp_ns() {
         auto now = std::chrono::high_resolution_clock::now();
-        return std::chrono::duration_cast<std::chrono::nanoseconds>(
-            now.time_since_epoch()).count();
+        return std::chrono::duration_cast<std::chrono::nanoseconds>(now.time_since_epoch()).count();
     }
 
     static uint32_t get_thread_id() {
@@ -287,30 +272,27 @@ private:
 
 // Category constants for trading system
 namespace LogCategory {
-    constexpr uint8_t System   = 0;
-    constexpr uint8_t Market   = 1;
-    constexpr uint8_t Order    = 2;
-    constexpr uint8_t Strategy = 3;
-    constexpr uint8_t Risk     = 4;
-    constexpr uint8_t Position = 5;
-    constexpr uint8_t Latency  = 6;
-}
+constexpr uint8_t System = 0;
+constexpr uint8_t Market = 1;
+constexpr uint8_t Order = 2;
+constexpr uint8_t Strategy = 3;
+constexpr uint8_t Risk = 4;
+constexpr uint8_t Position = 5;
+constexpr uint8_t Latency = 6;
+} // namespace LogCategory
 
 // Convenience macros
 #define LOG_TRACE(logger, msg) logger.log(hft::logging::LogLevel::Trace, 0, msg)
 #define LOG_DEBUG(logger, msg) logger.log(hft::logging::LogLevel::Debug, 0, msg)
-#define LOG_INFO(logger, msg)  logger.log(hft::logging::LogLevel::Info, 0, msg)
-#define LOG_WARN(logger, msg)  logger.log(hft::logging::LogLevel::Warn, 0, msg)
+#define LOG_INFO(logger, msg) logger.log(hft::logging::LogLevel::Info, 0, msg)
+#define LOG_WARN(logger, msg) logger.log(hft::logging::LogLevel::Warn, 0, msg)
 #define LOG_ERROR(logger, msg) logger.log(hft::logging::LogLevel::Error, 0, msg)
 
-#define LOG_CATEGORY(logger, level, cat, msg) \
-    logger.log(level, hft::logging::LogCategory::cat, msg)
+#define LOG_CATEGORY(logger, level, cat, msg) logger.log(level, hft::logging::LogCategory::cat, msg)
 
 // Printf-style variants
-#define LOGF_INFO(logger, fmt, ...) \
-    logger.logf(hft::logging::LogLevel::Info, 0, fmt, ##__VA_ARGS__)
-#define LOGF_WARN(logger, fmt, ...) \
-    logger.logf(hft::logging::LogLevel::Warn, 0, fmt, ##__VA_ARGS__)
+#define LOGF_INFO(logger, fmt, ...) logger.logf(hft::logging::LogLevel::Info, 0, fmt, ##__VA_ARGS__)
+#define LOGF_WARN(logger, fmt, ...) logger.logf(hft::logging::LogLevel::Warn, 0, fmt, ##__VA_ARGS__)
 
-}  // namespace logging
-}  // namespace hft
+} // namespace logging
+} // namespace hft

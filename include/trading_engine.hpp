@@ -1,16 +1,17 @@
 #pragma once
 
-#include "types.hpp"
+#include "account/account.hpp"
 #include "concepts.hpp"
 #include "order_sender.hpp"
+#include "strategy/halt_manager.hpp"
 #include "symbol_config.hpp"
 #include "symbol_world.hpp"
-#include "strategy/halt_manager.hpp"
-#include "account/account.hpp"
-#include <unordered_map>
+#include "types.hpp"
+
 #include <memory>
-#include <string>
 #include <optional>
+#include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace hft {
@@ -30,14 +31,10 @@ namespace hft {
  *   world.book().add_order(...);
  *   world.config().base_price;
  */
-template<concepts::OrderSender Sender>
+template <concepts::OrderSender Sender>
 class TradingEngine {
-
 public:
-    explicit TradingEngine(Sender& sender)
-        : sender_(sender), next_symbol_id_(1) {
-        setup_halt_manager();
-    }
+    explicit TradingEngine(Sender& sender) : sender_(sender), next_symbol_id_(1) { setup_halt_manager(); }
 
     // ========================================
     // Symbol Management
@@ -55,17 +52,11 @@ public:
     }
 
     // Check if symbol exists
-    bool has_symbol(Symbol id) const {
-        return worlds_.find(id) != worlds_.end();
-    }
+    bool has_symbol(Symbol id) const { return worlds_.find(id) != worlds_.end(); }
 
-    bool has_symbol(const std::string& ticker) const {
-        return ticker_to_id_.find(ticker) != ticker_to_id_.end();
-    }
+    bool has_symbol(const std::string& ticker) const { return ticker_to_id_.find(ticker) != ticker_to_id_.end(); }
 
-    size_t symbol_count() const {
-        return worlds_.size();
-    }
+    size_t symbol_count() const { return worlds_.size(); }
 
     // ========================================
     // SymbolWorld Access - The Clean API
@@ -85,20 +76,23 @@ public:
     // Get SymbolWorld by ticker (convenience - O(1) amortized)
     SymbolWorld* get_symbol_world(const std::string& ticker) {
         auto it = ticker_to_id_.find(ticker);
-        if (it == ticker_to_id_.end()) return nullptr;
+        if (it == ticker_to_id_.end())
+            return nullptr;
         return get_symbol_world(it->second);
     }
 
     const SymbolWorld* get_symbol_world(const std::string& ticker) const {
         auto it = ticker_to_id_.find(ticker);
-        if (it == ticker_to_id_.end()) return nullptr;
+        if (it == ticker_to_id_.end())
+            return nullptr;
         return get_symbol_world(it->second);
     }
 
     // Lookup symbol ID from ticker
     std::optional<Symbol> lookup_symbol(const std::string& ticker) const {
         auto it = ticker_to_id_.find(ticker);
-        if (it == ticker_to_id_.end()) return std::nullopt;
+        if (it == ticker_to_id_.end())
+            return std::nullopt;
         return it->second;
     }
 
@@ -121,14 +115,14 @@ public:
     // ========================================
 
     // Iterate over all symbols
-    template<typename Func>
+    template <typename Func>
     void for_each_symbol(Func&& func) {
         for (auto& [id, world] : worlds_) {
             func(*world);
         }
     }
 
-    template<typename Func>
+    template <typename Func>
     void for_each_symbol(Func&& func) const {
         for (const auto& [id, world] : worlds_) {
             func(*world);
@@ -139,15 +133,15 @@ public:
     // Message Handlers (filter by symbol)
     // ========================================
 
-    void on_add_order(Symbol symbol, OrderId id, Side side,
-                      Price price, Quantity quantity, TraderId /*trader*/ = NO_TRADER) {
+    void on_add_order(Symbol symbol, OrderId id, Side side, Price price, Quantity quantity,
+                      TraderId /*trader*/ = NO_TRADER) {
         if (auto* world = get_symbol_world(symbol)) {
             world->book().add_order(id, side, price, quantity);
         }
     }
 
-    void on_add_order(const std::string& ticker, OrderId id, Side side,
-                      Price price, Quantity quantity, TraderId /*trader*/ = NO_TRADER) {
+    void on_add_order(const std::string& ticker, OrderId id, Side side, Price price, Quantity quantity,
+                      TraderId /*trader*/ = NO_TRADER) {
         if (auto* world = get_symbol_world(ticker)) {
             world->book().add_order(id, side, price, quantity);
         }
@@ -182,10 +176,7 @@ public:
     // ========================================
 
     // Check if trading is allowed (hot path)
-    __attribute__((always_inline))
-    bool can_trade() const {
-        return halt_manager_.can_trade();
-    }
+    __attribute__((always_inline)) bool can_trade() const { return halt_manager_.can_trade(); }
 
     // Get halt manager for configuration or direct control
     strategy::HaltManager& halt_manager() { return halt_manager_; }
@@ -220,14 +211,12 @@ public:
     // ========================================
 
     // Send order via OrderSender (hot path)
-    __attribute__((always_inline))
-    bool send_order(Symbol symbol, Side side, Quantity qty, bool is_market) {
+    __attribute__((always_inline)) bool send_order(Symbol symbol, Side side, Quantity qty, bool is_market) {
         return sender_.send_order(symbol, side, qty, is_market);
     }
 
     // Cancel order via OrderSender (hot path)
-    __attribute__((always_inline))
-    bool cancel_order(Symbol symbol, OrderId order_id) {
+    __attribute__((always_inline)) bool cancel_order(Symbol symbol, OrderId order_id) {
         return sender_.cancel_order(symbol, order_id);
     }
 
@@ -264,21 +253,15 @@ private:
         // Wire up HaltManager callbacks to TradingEngine
 
         // 1. Get positions callback
-        halt_manager_.set_get_positions_callback([this]() {
-            return get_all_positions();
-        });
+        halt_manager_.set_get_positions_callback([this]() { return get_all_positions(); });
 
         // 2. Cancel all orders callback
-        halt_manager_.set_cancel_all_callback([this]() {
-            cancel_all_orders();
-        });
+        halt_manager_.set_cancel_all_callback([this]() { cancel_all_orders(); });
 
         // 3. Send order callback - uses template sender (no std::function on hot path)
-        halt_manager_.set_send_order_callback(
-            [this](Symbol symbol, Side side, Quantity qty, bool is_market) {
-                return sender_.send_order(symbol, side, qty, is_market);
-            }
-        );
+        halt_manager_.set_send_order_callback([this](Symbol symbol, Side side, Quantity qty, bool is_market) {
+            return sender_.send_order(symbol, side, qty, is_market);
+        });
     }
 
     // Cancel all open orders across all symbols
@@ -312,4 +295,4 @@ private:
 // Type alias for convenience
 using DefaultTradingEngine = TradingEngine<NullOrderSender>;
 
-}  // namespace hft
+} // namespace hft
