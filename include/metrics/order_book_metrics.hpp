@@ -79,24 +79,24 @@ private:
         metrics_.best_bid_qty = snapshot.best_bid_qty;
         metrics_.best_ask_qty = snapshot.best_ask_qty;
 
-        // Spread (branchless using conditional masks)
-        // Mask: 1.0 if both prices valid, 0.0 otherwise
-        double valid =
-            static_cast<double>((snapshot.best_bid != INVALID_PRICE) && (snapshot.best_ask != INVALID_PRICE));
-
-        // Compute spread and mid_price unconditionally
+        // Spread (branchless, optimized for instruction pipelining)
+        // Start independent computations that can execute in parallel
         // Cast to signed before subtraction to handle crossed book (negative spread)
         double spread =
             static_cast<double>(static_cast<int64_t>(snapshot.best_ask) - static_cast<int64_t>(snapshot.best_bid));
         double mid_price = (static_cast<double>(snapshot.best_bid) + static_cast<double>(snapshot.best_ask)) / 2.0;
 
-        // Compute spread_bps unconditionally (use max to avoid division by zero)
+        // While spread/mid_price compute, start comparison (independent of above)
+        double valid =
+            static_cast<double>((snapshot.best_bid != INVALID_PRICE) && (snapshot.best_ask != INVALID_PRICE));
+
+        // Compute spread_bps (depends on mid_price, which should be ready)
         double spread_bps = (spread / std::max(mid_price, 1.0)) * 10000.0;
 
-        // Mask for spread_bps: only valid if prices are valid AND mid_price > 0
+        // Compute bps_valid (uses valid and mid_price, both should be ready)
         double bps_valid = valid * static_cast<double>(mid_price > 0.0);
 
-        // Apply masks to zero out invalid results
+        // Apply masks (uses all computed values)
         metrics_.spread = spread * valid;
         metrics_.mid_price = mid_price * valid;
         metrics_.spread_bps = spread_bps * bps_valid;
