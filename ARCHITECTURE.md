@@ -21,8 +21,12 @@ flowchart TD
     %% Market Data
     MDHandler --> OrderBook[OrderBook<br/>Pre-allocated pools<br/>160MB per symbol]
 
+    %% Metrics Layer
+    MDHandler --> Metrics[TradeStreamMetrics<br/>30 metrics × 5 windows]
+
     %% Strategy Layer
     OrderBook --> Strategy[Strategy Layer<br/>MarketMaker / SmartStrategy]
+    Metrics --> Strategy
     Strategy --> RiskMgr[RiskManager<br/>Position / drawdown limits]
 
     %% IPC Layer
@@ -291,6 +295,185 @@ classDiagram
 - Position tracking is FIFO (First-In-First-Out)
 - All P&L calculations in fixed-point (4 decimal places)
 - No allocations on fill processing
+
+---
+
+## Module: Metrics
+
+Header-only SIMD-accelerated trade stream metrics library with rolling time windows.
+
+```mermaid
+classDiagram
+    class TradeStreamMetrics {
+        -array~Trade,65536~ trades_
+        -size_t head_
+        -size_t tail_
+        -size_t count_
+        -array~Metrics,5~ cached_metrics_
+        -array~size_t,5~ cache_tail_position_
+        +on_trade(price, qty, is_buy, timestamp_us) void
+        +get_metrics(window) Metrics
+        +reset() void
+        -calculate_metrics(start_idx, end_idx) Metrics
+        -find_window_start(timestamp) size_t
+    }
+
+    class Metrics {
+        +double buy_volume
+        +double sell_volume
+        +double total_volume
+        +double delta
+        +double cumulative_delta
+        +double buy_ratio
+        +int total_trades
+        +int buy_trades
+        +int sell_trades
+        +int large_trades
+        +double vwap
+        +Price high
+        +Price low
+        +double price_velocity
+        +double realized_volatility
+        +int buy_streak
+        +int sell_streak
+        +int max_buy_streak
+        +int max_sell_streak
+        +double avg_inter_trade_time_us
+        +uint64_t min_inter_trade_time_us
+        +int burst_count
+        +int upticks
+        +int downticks
+        +int zeroticks
+        +double tick_ratio
+    }
+
+    class Trade {
+        +Price price
+        +Quantity quantity
+        +bool is_buy
+        +uint64_t timestamp_us
+    }
+
+    class TradeWindow {
+        <<enumeration>>
+        W1s
+        W5s
+        W10s
+        W30s
+        W1min
+    }
+
+    class SimdOps {
+        <<utility>>
+        +accumulate_volumes(prices, qtys, is_buy, count, buy_vol, sell_vol, vwap_sum)
+        +horizontal_sum_4d(vec) double
+        +blend(mask, a, b) double
+    }
+
+    TradeStreamMetrics ..> Metrics : returns
+    TradeStreamMetrics *-- Trade : stores in ring buffer
+    TradeStreamMetrics --> TradeWindow : uses
+    TradeStreamMetrics ..> SimdOps : uses for calculations
+```
+
+**Metrics (30 metrics × 5 windows = 150 total):**
+- **Volume (6):** buy_volume, sell_volume, total_volume, delta, cumulative_delta, buy_ratio
+- **Trade count (4):** total_trades, buy_trades, sell_trades, large_trades
+- **Price (5):** vwap, high, low, price_velocity, realized_volatility
+- **Streaks (4):** buy_streak, sell_streak, max_buy_streak, max_sell_streak
+- **Timing (3):** avg_inter_trade_time_us, min_inter_trade_time_us, burst_count
+- **Ticks (4):** upticks, downticks, zeroticks, tick_ratio
+
+**Time Windows:**
+- 1s, 5s, 10s, 30s, 1min (rolling windows)
+
+**Performance (AVX2):**
+- on_trade(): 8.06 ns (branchless ring buffer insertion)
+- get_metrics() cache hit: 16.5 ns (cache lookup)
+- get_metrics() cache miss: ~8 μs for 1000 trades (SIMD calculation)
+- Realistic usage (100 trades + 1 query): 96.6 ns average per trade
+- Memory: 1.7 MB (65536 × 26 bytes per trade)
+
+**Optimizations:**
+- **Ring buffer:** Power-of-2 size (65536) for fast modulo via bitwise AND
+- **SIMD acceleration:** AVX2 processes 4 doubles in parallel (~4x speedup)
+- **Lazy caching:** Cache metrics per window, invalidate on new trade
+- **Binary search:** O(log n) lookup for window boundaries
+- **Branchless code:** Predictable latency (no branch mispredictions)
+- **Welford's algorithm:** Online variance calculation (O(1) memory)
+
+**Key Constraints:**
+- Header-only (depends on simd library + types.hpp)
+- No virtual functions (zero overhead)
+- Trades older than 1 minute automatically pruned
+- All metrics calculated on-demand with lazy caching
+- SIMD backend auto-selected at compile time (AVX-512/AVX2/SSE2/Scalar)
+
+---
+
+### SIMD Utility Library
+
+Automatic vectorization backend for performance-critical numeric operations.
+
+```mermaid
+classDiagram
+    class SimdConfig {
+        <<header>>
+        +constexpr size_t simd_width
+        +constexpr size_t simd_align
+        +constexpr const char* simd_backend
+        +constexpr bool has_avx512()
+        +constexpr bool has_avx2()
+        +constexpr bool has_sse2()
+    }
+
+    class SimdOps {
+        <<interface>>
+        +accumulate_volumes(prices, qtys, is_buy, count, buy_vol, sell_vol, vwap_sum) void
+        +horizontal_sum_4d(vec) double
+        +blend(mask, a, b) double
+    }
+
+    class AVX512Backend {
+        +accumulate_volumes() void
+        +horizontal_sum_4d() double
+        +blend() double
+    }
+
+    class AVX2Backend {
+        +accumulate_volumes() void
+        +horizontal_sum_4d() double
+        +blend() double
+    }
+
+    class SSE2Backend {
+        +accumulate_volumes() void
+        +horizontal_sum_4d() double
+        +blend() double
+    }
+
+    class ScalarBackend {
+        +accumulate_volumes() void
+        +horizontal_sum_4d() double
+        +blend() double
+    }
+
+    SimdOps ..> AVX512Backend : dispatches (8 doubles/cycle)
+    SimdOps ..> AVX2Backend : dispatches (4 doubles/cycle)
+    SimdOps ..> SSE2Backend : dispatches (2 doubles/cycle)
+    SimdOps ..> ScalarBackend : dispatches (1 double/cycle)
+```
+
+**Backend Selection (Compile-time):**
+1. AVX-512 (if `-mavx512f -mavx512dq`): 8 doubles/cycle, ~8x speedup
+2. AVX2 (if `-mavx2`): 4 doubles/cycle, ~4x speedup (default with `-march=native`)
+3. SSE2 (if `-msse2`): 2 doubles/cycle, ~2x speedup
+4. Scalar (fallback): 1 double/cycle
+
+**Performance (1000 elements, AVX2):**
+- accumulate_volumes(): 304 ns (~3.3M iterations/sec)
+- 4x faster than scalar implementation
+- Zero overhead abstraction (inlined)
 
 ---
 
@@ -670,6 +853,8 @@ include/
 ├── market_data_handler.hpp      # Callback adapter
 ├── orderbook.hpp                # Pre-allocated pool-based book
 ├── book_side.hpp                # Bid/Ask side (template)
+├── metrics/
+│   └── trade_stream_metrics.hpp # Trade stream metrics (30 metrics × 5 windows)
 ├── strategy/
 │   ├── position.hpp             # Position tracker (FIFO)
 │   ├── market_maker.hpp         # Market making strategy
@@ -691,8 +876,11 @@ tools/
 ├── run_backtest.cpp             # Backtesting engine
 └── optimize_strategies.cpp      # Parameter optimizer
 
-tests/                           # 33 test suites
+tests/                           # 57 test suites (including 34 metrics tests)
 benchmarks/                      # Performance benchmarks
+├── bench_orderbook.cpp          # OrderBook performance
+├── bench_lockfree.cpp           # Lock-free buffer performance
+└── bench_trade_stream_metrics.cpp # Metrics performance
 ```
 
 ---

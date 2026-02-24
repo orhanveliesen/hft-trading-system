@@ -79,6 +79,10 @@ add_executable(test_strategy tests/test_strategy.cpp)
 target_link_libraries(test_strategy trader_core)
 add_test(NAME StrategyTests COMMAND test_strategy)
 
+add_executable(test_simd tests/test_simd.cpp)
+target_link_libraries(test_simd trader_core)
+add_test(NAME SimdTests COMMAND test_simd)
+
 add_executable(test_symbol_config tests/test_symbol_config.cpp)
 target_link_libraries(test_symbol_config trader_core)
 add_test(NAME SymbolConfigTests COMMAND test_symbol_config)
@@ -245,6 +249,10 @@ add_executable(test_portfolio_equity tests/test_portfolio_equity.cpp)
 target_link_libraries(test_portfolio_equity pthread rt)
 add_test(NAME PortfolioEquityTests COMMAND test_portfolio_equity)
 
+add_executable(test_trade_stream_metrics tests/test_trade_stream_metrics.cpp)
+target_link_libraries(test_trade_stream_metrics trader_core)
+add_test(NAME TradeStreamMetricsTests COMMAND test_trade_stream_metrics)
+
 # === Tools ===
 add_executable(trader tools/trader.cpp)
 target_link_libraries(trader trader_core websockets pthread rt curl)
@@ -286,6 +294,16 @@ target_link_libraries(bench_orderbook trader_core)
 
 add_executable(bench_lockfree benchmarks/bench_lockfree.cpp)
 target_link_libraries(bench_lockfree pthread)
+
+add_executable(bench_simd benchmarks/bench_simd.cpp)
+target_link_libraries(bench_simd trader_core)
+
+add_executable(bench_trade_stream_metrics benchmarks/bench_trade_stream_metrics.cpp)
+add_executable(bench_trade_stream_full benchmarks/bench_trade_stream_full.cpp)
+
+target_link_libraries(bench_trade_stream_full trader_core)
+
+target_link_libraries(bench_trade_stream_metrics trader_core)
 
 # === ImGui Dashboard ===
 # Fetch Dear ImGui from GitHub
