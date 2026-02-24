@@ -253,6 +253,10 @@ add_executable(test_trade_stream_metrics tests/test_trade_stream_metrics.cpp)
 target_link_libraries(test_trade_stream_metrics trader_core)
 add_test(NAME TradeStreamMetricsTests COMMAND test_trade_stream_metrics)
 
+add_executable(test_order_book_metrics tests/test_order_book_metrics.cpp)
+target_link_libraries(test_order_book_metrics trader_core)
+add_test(NAME OrderBookMetricsTests COMMAND test_order_book_metrics)
+
 # === Tools ===
 add_executable(trader tools/trader.cpp)
 target_link_libraries(trader trader_core websockets pthread rt curl)
@@ -300,8 +304,10 @@ target_link_libraries(bench_simd trader_core)
 
 add_executable(bench_trade_stream_metrics benchmarks/bench_trade_stream_metrics.cpp)
 add_executable(bench_trade_stream_full benchmarks/bench_trade_stream_full.cpp)
+add_executable(bench_order_book_metrics benchmarks/bench_order_book_metrics.cpp)
 
 target_link_libraries(bench_trade_stream_full trader_core)
+target_link_libraries(bench_order_book_metrics trader_core)
 
 target_link_libraries(bench_trade_stream_metrics trader_core)
 
