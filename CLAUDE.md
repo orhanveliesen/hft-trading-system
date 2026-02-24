@@ -167,6 +167,30 @@ Dependencies are pre-installed in the image, reducing workflow runtime from ~60s
 
 ## Project-Specific Constraints
 
+### Header-Only Metrics Libraries
+All metrics classes (`TradeStreamMetrics`, `OrderBookMetrics`, `OrderFlowMetrics`, etc.) are implemented as header-only libraries with inline implementations directly in the `.hpp` files. This enables:
+- Zero overhead abstraction (full inlining at compile-time)
+- No vtable overhead (no virtual functions)
+- Maximum optimization by compiler (link-time optimization across translation units)
+- Single-header convenience for users
+
+**Pattern**: Define class interface and implement methods inline in the same `.hpp` file. No separate `.cpp` file.
+
+```cpp
+// ✅ CORRECT - Header-only with inline implementation
+// include/metrics/order_flow_metrics.hpp
+class OrderFlowMetrics {
+public:
+    void on_trade(const TradeEvent& trade);
+    // ... more methods
+};
+
+// Implementation in same file
+inline void OrderFlowMetrics::on_trade(const TradeEvent& trade) {
+    // ... implementation
+}
+```
+
 ### Hot Path Parameter Exception
 Global rule: 3+ parameters = use Input struct
 **Exception**: Protocol callbacks allowed 3+ params (no struct overhead at nanosecond scale)
