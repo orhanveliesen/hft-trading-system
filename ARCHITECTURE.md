@@ -24,11 +24,14 @@ flowchart TD
     %% Metrics Layer
     MDHandler --> TradeMetrics[TradeStreamMetrics<br/>30 metrics × 5 windows]
     OrderBook --> BookMetrics[OrderBookMetrics<br/>17 real-time metrics]
+    MDHandler --> FlowMetrics[OrderFlowMetrics<br/>21 metrics × 5 windows]
+    OrderBook --> FlowMetrics
 
     %% Strategy Layer
     OrderBook --> Strategy[Strategy Layer<br/>MarketMaker / SmartStrategy]
     TradeMetrics --> Strategy
     BookMetrics --> Strategy
+    FlowMetrics --> Strategy
     Strategy --> RiskMgr[RiskManager<br/>Position / drawdown limits]
 
     %% IPC Layer
@@ -505,6 +508,145 @@ classDiagram
 - No virtual functions (zero overhead)
 - Fixed-size snapshot (no allocation)
 - Snapshot extraction via template iteration over BookSide levels
+
+---
+
+### OrderFlowMetrics
+
+Real-time order book flow and change metrics for tracking book dynamics and cancel/fill estimation.
+
+```mermaid
+classDiagram
+    class OrderFlowMetrics {
+        -array~FlowEvent,16384~ flow_events_
+        -array~RecentTrade,256~ recent_trades_
+        -array~LevelLifetime,4096~ lifetimes_
+        -size_t flow_head_
+        -size_t flow_tail_
+        -size_t trade_head_
+        -size_t trade_tail_
+        -unordered_map~Price,Quantity~ prev_bid_levels_
+        -unordered_map~Price,Quantity~ prev_ask_levels_
+        -unordered_map~Price,uint64_t~ bid_level_birth_
+        -unordered_map~Price,uint64_t~ ask_level_birth_
+        -array~Metrics,5~ cached_metrics_
+        +on_trade(trade) void
+        +on_order_book_update(book, timestamp_us) void
+        +get_metrics(window) Metrics
+        +reset() void
+        -calculate_metrics(start_idx, end_idx) Metrics
+        -was_trade_at_price(price, timestamp_us) bool
+    }
+
+    class Metrics {
+        +double bid_volume_added
+        +double ask_volume_added
+        +double bid_volume_removed
+        +double ask_volume_removed
+        +double estimated_bid_cancel_volume
+        +double estimated_ask_cancel_volume
+        +double cancel_ratio_bid
+        +double cancel_ratio_ask
+        +double bid_depth_velocity
+        +double ask_depth_velocity
+        +double bid_additions_per_sec
+        +double ask_additions_per_sec
+        +double bid_removals_per_sec
+        +double ask_removals_per_sec
+        +double avg_bid_level_lifetime_us
+        +double avg_ask_level_lifetime_us
+        +double short_lived_bid_ratio
+        +double short_lived_ask_ratio
+        +int book_update_count
+        +int bid_level_changes
+        +int ask_level_changes
+    }
+
+    class FlowEvent {
+        +Price price
+        +double volume_delta
+        +bool is_bid
+        +bool is_cancel
+        +bool is_level_change
+        +uint64_t timestamp_us
+    }
+
+    class RecentTrade {
+        +Price price
+        +uint64_t timestamp_us
+    }
+
+    class LevelLifetime {
+        +uint64_t birth_us
+        +uint64_t death_us
+        +bool is_bid
+    }
+
+    class Window {
+        <<enumeration>>
+        SEC_1
+        SEC_5
+        SEC_10
+        SEC_30
+        MIN_1
+    }
+
+    OrderFlowMetrics ..> Metrics : returns
+    OrderFlowMetrics *-- FlowEvent : stores in ring buffer
+    OrderFlowMetrics *-- RecentTrade : stores in ring buffer
+    OrderFlowMetrics *-- LevelLifetime : stores in ring buffer
+    OrderFlowMetrics --> Window : uses
+```
+
+**Metrics (21 metrics × 5 windows = 105 total):**
+- **Added/Removed Volume (4):** bid_volume_added, ask_volume_added, bid_volume_removed, ask_volume_removed
+  - Tracks volume changes at each price level
+  - Positive delta = added, negative delta = removed
+- **Cancel Estimation (4):** estimated_bid_cancel_volume, estimated_ask_cancel_volume, cancel_ratio_bid, cancel_ratio_ask
+  - Correlates book changes with trades (100ms window)
+  - No trade at price → cancel, trade at price → fill
+- **Book Velocity (6):** bid_depth_velocity, ask_depth_velocity, bid_additions_per_sec, ask_additions_per_sec, bid_removals_per_sec, ask_removals_per_sec
+  - Rate of depth change (volume per second)
+  - Event frequency (additions/removals per second)
+- **Level Lifetime (4):** avg_bid_level_lifetime_us, avg_ask_level_lifetime_us, short_lived_bid_ratio, short_lived_ask_ratio
+  - Tracks how long levels survive in the book
+  - Short-lived = < 1 second
+- **Update Frequency (3):** book_update_count, bid_level_changes, ask_level_changes
+
+**Time Windows:**
+- 1s, 5s, 10s, 30s, 1min (rolling windows)
+
+**Performance:**
+- on_trade(): < 100 ns (append to trade ring buffer)
+- on_order_book_update(): < 5 μs (compare prev vs current state)
+- get_metrics() cache hit: < 1 μs (cache lookup)
+- get_metrics() cache miss: < 5 μs (single-pass calculation)
+- Memory: ~1.5 MB (pre-allocated ring buffers + hash maps)
+
+**Data Flow:**
+1. on_order_book_update() extracts current book state via snapshot
+2. Compare current vs previous state (stored in hash maps)
+3. Detect changes: new levels, removed levels, quantity changes
+4. For removals: check recent_trades_ (100ms correlation window)
+   - Trade at price within 100ms → fill
+   - No trade at price → cancel
+5. Generate FlowEvent for each change
+6. Track level lifetimes (birth to death)
+7. Ring buffers auto-prune events older than 1 minute
+
+**Optimizations:**
+- **Ring buffers:** Power-of-2 sizes for fast modulo via bitwise AND
+- **Branchless accumulation:** Uses sign arithmetic and comparison masks
+- **Single-pass calculation:** One traversal computes all metrics
+- **Lazy caching:** Cache metrics per window, invalidate on new event
+- **Pre-allocation:** Fixed-size buffers, no heap allocation after warmup
+
+**Key Constraints:**
+- Header-only (depends on orderbook.hpp + ipc/trade_event.hpp + types.hpp)
+- No virtual functions (zero overhead)
+- Events older than 1 minute automatically pruned
+- Cancel/fill correlation window: 100ms
+- Short-lived level threshold: 1 second
 
 ---
 

@@ -257,6 +257,10 @@ add_executable(test_order_book_metrics tests/test_order_book_metrics.cpp)
 target_link_libraries(test_order_book_metrics trader_core)
 add_test(NAME OrderBookMetricsTests COMMAND test_order_book_metrics)
 
+add_executable(test_order_flow_metrics tests/test_order_flow_metrics.cpp)
+target_link_libraries(test_order_flow_metrics trader_core)
+add_test(NAME OrderFlowMetricsTests COMMAND test_order_flow_metrics)
+
 # === Tools ===
 add_executable(trader tools/trader.cpp)
 target_link_libraries(trader trader_core websockets pthread rt curl)
