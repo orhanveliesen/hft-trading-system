@@ -87,6 +87,20 @@ find include tools tests benchmarks -type f \( -name "*.cpp" -o -name "*.hpp" \)
 - **lint.yml**: Enforce clang-format on all .cpp/.hpp files
 - **codecov.yml**: Generate coverage report with 100% threshold
 
+### Checking CI Results After Push
+After pushing to a branch, always verify GitHub Actions status:
+```bash
+# Check CI status for a PR
+gh pr checks <pr-number>
+
+# View failed workflow logs
+gh run view <run-id> --log
+
+# Or monitor in real-time
+gh run watch
+```
+**Important**: Do not merge until all checks pass (build-test, lint, coverage).
+
 ### Code Coverage Requirements
 - **Target**: 100% line coverage (strict)
 - **Tool**: lcov + gcov
