@@ -99,9 +99,10 @@ private:
     // Flow event: track added/removed volume per level
     struct FlowEvent {
         Price price;
-        double volume_delta; // positive = added, negative = removed
+        double volume_delta;  // positive = added, negative = removed
+        double cancel_volume; // for removals, how much was cancelled (vs filled)
         bool is_bid;
-        bool is_cancel;       // estimated cancel (vs fill)
+        bool is_cancel;       // true if cancel_volume > 0
         bool is_level_change; // true if level changed (for counting)
         uint64_t timestamp_us;
     };
@@ -109,6 +110,7 @@ private:
     // Recent trade for cancel/fill correlation
     struct RecentTrade {
         Price price;
+        Quantity quantity;
         uint64_t timestamp_us;
     };
 
@@ -163,6 +165,7 @@ private:
     size_t find_window_start(uint64_t window_start_time) const;
     Metrics calculate_metrics(size_t start_idx, size_t end_idx) const;
     bool was_trade_at_price(Price price, uint64_t timestamp_us) const;
+    Quantity get_traded_quantity_at_price(Price price, uint64_t timestamp_us) const;
     void add_flow_event(const FlowEvent& event);
     void add_lifetime(const LevelLifetime& lifetime);
     void cleanup_old_trades(uint64_t current_time);
@@ -197,7 +200,8 @@ void OrderFlowMetrics::on_trade(const ipc::TradeEvent& trade) {
     cleanup_old_trades(timestamp_us);
 
     // Add to recent trades buffer
-    recent_trades_[trade_tail_] = RecentTrade{price, timestamp_us};
+    Quantity quantity = static_cast<Quantity>(trade.quantity);
+    recent_trades_[trade_tail_] = RecentTrade{price, quantity, timestamp_us};
 
     size_t new_tail = (trade_tail_ + 1) & TRADE_MASK;
 
@@ -268,6 +272,7 @@ void OrderFlowMetrics::on_order_book_update(const OrderBook& book, uint64_t time
             FlowEvent event;
             event.price = price;
             event.volume_delta = static_cast<double>(current_qty);
+            event.cancel_volume = 0.0;
             event.is_bid = true;
             event.is_cancel = false; // New level is always added
             event.is_level_change = true;
@@ -278,29 +283,20 @@ void OrderFlowMetrics::on_order_book_update(const OrderBook& book, uint64_t time
             double delta =
                 static_cast<double>(static_cast<int64_t>(current_qty) - static_cast<int64_t>(prev_it->second));
 
+            // Branchless cancel vs fill estimation
+            double removed = std::max(0.0, -delta); // 0 if added, |delta| if removed
+            Quantity traded = get_traded_quantity_at_price(price, timestamp_us);
+            double fill_vol = std::min(removed, static_cast<double>(traded));
+            double cancel_vol = removed - fill_vol;
+
             FlowEvent event;
             event.price = price;
             event.volume_delta = delta;
+            event.cancel_volume = cancel_vol;
             event.is_bid = true;
+            event.is_cancel = (cancel_vol > 0.0);
             event.is_level_change = true;
             event.timestamp_us = timestamp_us;
-
-            // If removal, check for cancel vs fill
-            if (delta < 0) {
-                bool is_fill = was_trade_at_price(price, timestamp_us);
-                event.is_cancel = !is_fill;
-
-                // If it's a fill, check if removed more than traded
-                if (is_fill) {
-                    // This is a simplified heuristic - in reality we'd track exact trade volume
-                    // For now, assume any removal beyond trade is a cancel
-                    event.is_cancel = false;
-                } else {
-                    event.is_cancel = true;
-                }
-            } else {
-                event.is_cancel = false;
-            }
 
             add_flow_event(event);
         }
@@ -309,17 +305,20 @@ void OrderFlowMetrics::on_order_book_update(const OrderBook& book, uint64_t time
     // Check for removed bid levels
     for (const auto& [price, prev_qty] : prev_bid_levels_) {
         if (current_bid_levels.find(price) == current_bid_levels.end()) {
-            // Level removed
+            // Level removed - branchless cancel vs fill estimation
+            double removed = static_cast<double>(prev_qty);
+            Quantity traded = get_traded_quantity_at_price(price, timestamp_us);
+            double fill_vol = std::min(removed, static_cast<double>(traded));
+            double cancel_vol = removed - fill_vol;
+
             FlowEvent event;
             event.price = price;
-            event.volume_delta = -static_cast<double>(prev_qty);
+            event.volume_delta = -removed;
+            event.cancel_volume = cancel_vol;
             event.is_bid = true;
+            event.is_cancel = (cancel_vol > 0.0);
             event.is_level_change = true;
             event.timestamp_us = timestamp_us;
-
-            // Check for cancel vs fill
-            bool is_fill = was_trade_at_price(price, timestamp_us);
-            event.is_cancel = !is_fill;
 
             add_flow_event(event);
 
@@ -344,6 +343,7 @@ void OrderFlowMetrics::on_order_book_update(const OrderBook& book, uint64_t time
             FlowEvent event;
             event.price = price;
             event.volume_delta = static_cast<double>(current_qty);
+            event.cancel_volume = 0.0;
             event.is_bid = false;
             event.is_cancel = false;
             event.is_level_change = true;
@@ -354,20 +354,20 @@ void OrderFlowMetrics::on_order_book_update(const OrderBook& book, uint64_t time
             double delta =
                 static_cast<double>(static_cast<int64_t>(current_qty) - static_cast<int64_t>(prev_it->second));
 
+            // Branchless cancel vs fill estimation
+            double removed = std::max(0.0, -delta); // 0 if added, |delta| if removed
+            Quantity traded = get_traded_quantity_at_price(price, timestamp_us);
+            double fill_vol = std::min(removed, static_cast<double>(traded));
+            double cancel_vol = removed - fill_vol;
+
             FlowEvent event;
             event.price = price;
             event.volume_delta = delta;
+            event.cancel_volume = cancel_vol;
             event.is_bid = false;
+            event.is_cancel = (cancel_vol > 0.0);
             event.is_level_change = true;
             event.timestamp_us = timestamp_us;
-
-            // If removal, check for cancel vs fill
-            if (delta < 0) {
-                bool is_fill = was_trade_at_price(price, timestamp_us);
-                event.is_cancel = !is_fill;
-            } else {
-                event.is_cancel = false;
-            }
 
             add_flow_event(event);
         }
@@ -376,17 +376,20 @@ void OrderFlowMetrics::on_order_book_update(const OrderBook& book, uint64_t time
     // Check for removed ask levels
     for (const auto& [price, prev_qty] : prev_ask_levels_) {
         if (current_ask_levels.find(price) == current_ask_levels.end()) {
-            // Level removed
+            // Level removed - branchless cancel vs fill estimation
+            double removed = static_cast<double>(prev_qty);
+            Quantity traded = get_traded_quantity_at_price(price, timestamp_us);
+            double fill_vol = std::min(removed, static_cast<double>(traded));
+            double cancel_vol = removed - fill_vol;
+
             FlowEvent event;
             event.price = price;
-            event.volume_delta = -static_cast<double>(prev_qty);
+            event.volume_delta = -removed;
+            event.cancel_volume = cancel_vol;
             event.is_bid = false;
+            event.is_cancel = (cancel_vol > 0.0);
             event.is_level_change = true;
             event.timestamp_us = timestamp_us;
-
-            // Check for cancel vs fill
-            bool is_fill = was_trade_at_price(price, timestamp_us);
-            event.is_cancel = !is_fill;
 
             add_flow_event(event);
 
@@ -463,6 +466,24 @@ bool OrderFlowMetrics::was_trade_at_price(Price price, uint64_t timestamp_us) co
         idx = (idx + 1) & TRADE_MASK;
     }
     return false;
+}
+
+Quantity OrderFlowMetrics::get_traded_quantity_at_price(Price price, uint64_t timestamp_us) const {
+    // Sum all trades at this price within correlation window
+    Quantity total = 0;
+    size_t idx = trade_head_;
+    while (idx != trade_tail_) {
+        const auto& trade = recent_trades_[idx];
+        if (trade.price == price) {
+            uint64_t time_diff = (timestamp_us >= trade.timestamp_us) ? (timestamp_us - trade.timestamp_us)
+                                                                      : (trade.timestamp_us - timestamp_us);
+            if (time_diff <= CANCEL_CORRELATION_WINDOW_US) {
+                total += trade.quantity;
+            }
+        }
+        idx = (idx + 1) & TRADE_MASK;
+    }
+    return total;
 }
 
 size_t OrderFlowMetrics::find_window_start(uint64_t window_start_time) const {
@@ -542,8 +563,6 @@ OrderFlowMetrics::Metrics OrderFlowMetrics::calculate_metrics(size_t start_count
 
     uint64_t first_time = 0;
     uint64_t last_time = 0;
-    double first_bid_depth = prev_bid_depth_;
-    double first_ask_depth = prev_ask_depth_;
     int update_count = 0;
 
     // Track unique timestamps for update count
@@ -577,9 +596,9 @@ OrderFlowMetrics::Metrics OrderFlowMetrics::calculate_metrics(size_t start_count
         bid_removed += abs_delta * is_bid * is_negative;
         ask_removed += abs_delta * is_ask * is_negative;
 
-        // Cancel estimation (only for removals)
-        bid_cancel += abs_delta * is_bid * is_negative * (event.is_cancel ? 1 : 0);
-        ask_cancel += abs_delta * is_ask * is_negative * (event.is_cancel ? 1 : 0);
+        // Cancel estimation (use exact cancel_volume from event)
+        bid_cancel += event.cancel_volume * is_bid;
+        ask_cancel += event.cancel_volume * is_ask;
 
         // Count events
         bid_addition_events += is_bid * is_positive;
@@ -609,11 +628,11 @@ OrderFlowMetrics::Metrics OrderFlowMetrics::calculate_metrics(size_t start_count
     // Velocity calculations
     double time_span_s = (last_time > first_time) ? (static_cast<double>(last_time - first_time) / 1e6) : 0.0;
     if (time_span_s > 0.0) {
-        // Depth velocity (change per second)
-        double bid_depth_change = prev_bid_depth_ - first_bid_depth;
-        double ask_depth_change = prev_ask_depth_ - first_ask_depth;
-        m.bid_depth_velocity = bid_depth_change / time_span_s;
-        m.ask_depth_velocity = ask_depth_change / time_span_s;
+        // Depth velocity (net change per second)
+        double bid_net_change = bid_added - bid_removed;
+        double ask_net_change = ask_added - ask_removed;
+        m.bid_depth_velocity = bid_net_change / time_span_s;
+        m.ask_depth_velocity = ask_net_change / time_span_s;
 
         // Event rates
         m.bid_additions_per_sec = static_cast<double>(bid_addition_events) / time_span_s;

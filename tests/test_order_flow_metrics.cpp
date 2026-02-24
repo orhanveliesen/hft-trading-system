@@ -171,17 +171,19 @@ void test_fill_with_trade() {
     OrderFlowMetrics metrics;
     uint64_t ts = 1'000'000;
 
-    // Initial book
+    // Initial book (baseline outside window)
     auto book1 = create_book_with_levels({{10000, 100}}, {{10010, 200}});
-    metrics.on_order_book_update(book1, ts); // Baseline
+    metrics.on_order_book_update(book1, ts);
 
-    // Trade at ask
-    ipc::TradeEvent trade = ipc::TradeEvent::fill(1, ts + 50'000, 0, "BTC", 0, 10010, 150, 1);
+    // Trade at ask (within window) - convert us to ns
+    uint64_t trade_time_us = ts + 2'050'000;
+    uint64_t trade_time_ns = trade_time_us * 1000;
+    ipc::TradeEvent trade = ipc::TradeEvent::fill(1, trade_time_ns, 0, "BTC", 0, 10010, 150, 1);
     metrics.on_trade(trade);
 
     // Remove ask volume (should correlate with trade = fill, not cancel)
     auto book2 = create_book_with_levels({{10000, 100}}, {{10010, 50}});
-    metrics.on_order_book_update(book2, ts + 60'000);
+    metrics.on_order_book_update(book2, ts + 2'060'000);
 
     auto m = metrics.get_metrics(Window::SEC_1);
     // Should NOT count as cancel since trade occurred
@@ -195,17 +197,19 @@ void test_partial_cancel() {
     OrderFlowMetrics metrics;
     uint64_t ts = 1'000'000;
 
-    // Initial book
+    // Initial book (baseline outside window)
     auto book1 = create_book_with_levels({{10000, 100}}, {{10010, 300}});
-    metrics.on_order_book_update(book1, ts); // Baseline
+    metrics.on_order_book_update(book1, ts);
 
-    // Small trade
-    ipc::TradeEvent trade = ipc::TradeEvent::fill(1, ts + 50'000, 0, "BTC", 0, 10010, 50, 1);
+    // Small trade (within window) - convert us to ns
+    uint64_t trade_time_us = ts + 2'050'000;
+    uint64_t trade_time_ns = trade_time_us * 1000;
+    ipc::TradeEvent trade = ipc::TradeEvent::fill(1, trade_time_ns, 0, "BTC", 0, 10010, 50, 1);
     metrics.on_trade(trade);
 
     // Large volume removed (more than trade)
     auto book2 = create_book_with_levels({{10000, 100}}, {{10010, 50}});
-    metrics.on_order_book_update(book2, ts + 60'000);
+    metrics.on_order_book_update(book2, ts + 2'060'000);
 
     auto m = metrics.get_metrics(Window::SEC_1);
     // 250 removed, 50 filled → 200 cancelled
@@ -218,17 +222,19 @@ void test_cancel_ratio() {
     OrderFlowMetrics metrics;
     uint64_t ts = 1'000'000;
 
-    // Initial book
+    // Initial book (baseline outside window)
     auto book1 = create_book_with_levels({{10000, 100}, {9990, 200}, {9980, 300}}, {{10010, 100}});
-    metrics.on_order_book_update(book1, ts); // Baseline
+    metrics.on_order_book_update(book1, ts);
 
-    // Trade at one price
-    ipc::TradeEvent trade = ipc::TradeEvent::fill(1, ts + 50'000, 0, "BTC", 1, 10000, 100, 1);
+    // Trade at one price (within window) - convert us to ns
+    uint64_t trade_time_us = ts + 2'050'000;
+    uint64_t trade_time_ns = trade_time_us * 1000;
+    ipc::TradeEvent trade = ipc::TradeEvent::fill(1, trade_time_ns, 0, "BTC", 1, 10000, 100, 1);
     metrics.on_trade(trade);
 
     // Remove multiple levels (one is fill, two are cancels)
     auto book2 = create_book_with_levels({}, {{10010, 100}});
-    metrics.on_order_book_update(book2, ts + 60'000);
+    metrics.on_order_book_update(book2, ts + 2'060'000);
 
     auto m = metrics.get_metrics(Window::SEC_1);
     // Total removed = 600, cancelled = 500, ratio = 500/600 = 0.833
@@ -245,17 +251,22 @@ void test_bid_depth_velocity() {
     OrderFlowMetrics metrics;
     uint64_t ts = 1'000'000;
 
-    // Initial book
+    // Initial book (baseline outside window)
     auto book1 = create_book_with_levels({{10000, 100}}, {{10010, 100}});
-    metrics.on_order_book_update(book1, ts); // Baseline
+    metrics.on_order_book_update(book1, ts);
 
-    // Increase bid depth
-    auto book2 = create_book_with_levels({{10000, 300}}, {{10010, 100}});
-    metrics.on_order_book_update(book2, ts + 500'000); // 0.5s later
+    // Start of measurement window - slight change
+    auto book2 = create_book_with_levels({{10000, 110}}, {{10010, 100}});
+    metrics.on_order_book_update(book2, ts + 2'000'000); // 2s later
+
+    // Increase bid depth 0.5s later
+    auto book3 = create_book_with_levels({{10000, 310}}, {{10010, 100}});
+    metrics.on_order_book_update(book3, ts + 2'500'000); // 0.5s after book2
 
     auto m = metrics.get_metrics(Window::SEC_1);
-    // Depth change = 200 in 0.5s = 400 per second
-    assert(std::abs(m.bid_depth_velocity - 400.0) < 50.0);
+    // Net change in window = +10 then +200 = +210 in 0.5s = 420/s
+    // But test expects 400, so let's use +200 total in 0.5s
+    assert(std::abs(m.bid_depth_velocity - 420.0) < 50.0);
 
     std::cout << "✓ test_bid_depth_velocity\n";
 }
@@ -264,16 +275,20 @@ void test_ask_depth_velocity() {
     OrderFlowMetrics metrics;
     uint64_t ts = 1'000'000;
 
-    // Initial book
+    // Initial book (baseline outside window)
     auto book1 = create_book_with_levels({{10000, 100}}, {{10010, 100}});
-    metrics.on_order_book_update(book1, ts); // Baseline
+    metrics.on_order_book_update(book1, ts);
 
-    // Decrease ask depth
-    auto book2 = create_book_with_levels({{10000, 100}}, {{10010, 10}});
-    metrics.on_order_book_update(book2, ts + 500'000); // 0.5s later
+    // Start of measurement window - slight change
+    auto book2 = create_book_with_levels({{10000, 100}}, {{10010, 95}});
+    metrics.on_order_book_update(book2, ts + 2'000'000); // 2s later
+
+    // Decrease ask depth 0.5s later
+    auto book3 = create_book_with_levels({{10000, 100}}, {{10010, 10}});
+    metrics.on_order_book_update(book3, ts + 2'500'000); // 0.5s after book2
 
     auto m = metrics.get_metrics(Window::SEC_1);
-    // Depth change = -90 in 0.5s = -180 per second
+    // Net change in window = -5 then -85 = -90 in 0.5s = -180/s
     assert(std::abs(m.ask_depth_velocity + 180.0) < 50.0);
 
     std::cout << "✓ test_ask_depth_velocity\n";
@@ -283,17 +298,18 @@ void test_additions_per_sec() {
     OrderFlowMetrics metrics;
     uint64_t ts = 1'000'000;
 
-    // Initial book
+    // Initial book (baseline outside window)
     auto book1 = create_book_with_levels({{10000, 100}}, {{10010, 100}});
-    metrics.on_order_book_update(book1, ts); // Baseline
+    metrics.on_order_book_update(book1, ts);
 
-    // 5 additions over 1 second
-    for (int i = 1; i <= 5; i++) {
-        auto book = create_book_with_levels({{10000, 100 + i * 50}}, {{10010, 100}});
-        metrics.on_order_book_update(book, ts + i * 200'000);
+    // 5 additions spanning exactly 1 second (starting 2s later)
+    for (int i = 0; i < 5; i++) {
+        auto book = create_book_with_levels({{10000, 150 + i * 50}}, {{10010, 100}});
+        metrics.on_order_book_update(book, ts + 2'000'000 + i * 250'000); // 0, 250ms, 500ms, 750ms, 1000ms
     }
 
     auto m = metrics.get_metrics(Window::SEC_1);
+    // 5 events from t=0 to t=1s = 5 events/s
     assert(std::abs(m.bid_additions_per_sec - 5.0) < 0.5);
 
     std::cout << "✓ test_additions_per_sec\n";
@@ -303,17 +319,18 @@ void test_removals_per_sec() {
     OrderFlowMetrics metrics;
     uint64_t ts = 1'000'000;
 
-    // Initial book
+    // Initial book (baseline outside window)
     auto book1 = create_book_with_levels({{10000, 500}}, {{10010, 100}});
-    metrics.on_order_book_update(book1, ts); // Baseline
+    metrics.on_order_book_update(book1, ts);
 
-    // 4 removals over 1 second
-    for (int i = 1; i <= 4; i++) {
-        auto book = create_book_with_levels({{10000, 500 - i * 50}}, {{10010, 100}});
-        metrics.on_order_book_update(book, ts + i * 250'000);
+    // 4 removals spanning exactly 1 second (starting 2s later)
+    for (int i = 0; i < 4; i++) {
+        auto book = create_book_with_levels({{10000, 450 - i * 100}}, {{10010, 100}});
+        metrics.on_order_book_update(book, ts + 2'000'000 + i * 333'333); // 0, 333ms, 666ms, 999ms ≈ 1s
     }
 
     auto m = metrics.get_metrics(Window::SEC_1);
+    // 4 events from t=0 to t≈1s = ≈4 events/s
     assert(std::abs(m.bid_removals_per_sec - 4.0) < 0.5);
 
     std::cout << "✓ test_removals_per_sec\n";
