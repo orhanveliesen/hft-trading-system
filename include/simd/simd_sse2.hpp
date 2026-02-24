@@ -30,6 +30,11 @@ struct sse2_backend {
      */
     static void accumulate_volumes(const double* prices, const double* quantities, const int* is_buy, size_t count,
                                    double& buy_volume, double& sell_volume, double& vwap_sum) {
+        // Reset output variables (must match scalar backend behavior)
+        buy_volume = 0.0;
+        sell_volume = 0.0;
+        vwap_sum = 0.0;
+
         __m128d buy_vec = _mm_setzero_pd();
         __m128d sell_vec = _mm_setzero_pd();
         __m128d vwap_vec = _mm_setzero_pd();

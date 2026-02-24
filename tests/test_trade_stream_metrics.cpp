@@ -337,6 +337,7 @@ void test_5s_window() {
     metrics.on_trade(10010, 200, false, ts + 3'000'000); // 3s later
 
     auto m5s = metrics.get_metrics(TradeWindow::W5s);
+    std::cerr << "DEBUG 5s: total_volume=" << m5s.total_volume << " total_trades=" << m5s.total_trades << std::endl;
     assert(m5s.total_volume == 300.0);
     assert(m5s.total_trades == 2);
 

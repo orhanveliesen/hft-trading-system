@@ -127,8 +127,8 @@ private:
     size_t count_ = 0; // Number of trades
 
     // Cache for metrics (invalidated when tail_ changes)
-    mutable std::array<Metrics, 5> cached_metrics_;
-    mutable std::array<size_t, 5> cache_tail_position_;
+    mutable std::array<Metrics, 5> cached_metrics_{};
+    mutable std::array<size_t, 5> cache_tail_position_{SIZE_MAX, SIZE_MAX, SIZE_MAX, SIZE_MAX, SIZE_MAX};
 
     // Helper methods
     static constexpr uint64_t get_window_duration_us(TradeWindow window);
@@ -193,7 +193,7 @@ TradeStreamMetrics::Metrics TradeStreamMetrics::get_metrics(TradeWindow window) 
     // Cache miss: recalculate
     uint64_t window_us = get_window_duration_us(window);
     uint64_t current_time = trades_[(tail_ - 1) & MASK].timestamp_us;
-    uint64_t window_start = current_time - window_us;
+    uint64_t window_start = (current_time > window_us) ? (current_time - window_us) : 0;
 
     // Binary search for window start
     size_t start_idx = find_window_start(window_start);
@@ -309,6 +309,12 @@ TradeStreamMetrics::Metrics TradeStreamMetrics::calculate_metrics(size_t start_i
         Price price = t.price;
         uint64_t time = t.timestamp_us;
 
+        // Initialize burst tracking with first trade
+        if (first_trade) {
+            burst_start_time = time;
+            burst_trades = 1; // Count first trade
+        }
+
         // Count trades
         m.total_trades++;
         if (t.is_buy) {
@@ -379,6 +385,11 @@ TradeStreamMetrics::Metrics TradeStreamMetrics::calculate_metrics(size_t start_i
     m.low = min_price;
     m.buy_streak = current_buy_streak;
     m.sell_streak = current_sell_streak;
+
+    // Count ongoing burst if it qualifies
+    if (burst_trades >= 10) {
+        m.burst_count++;
+    }
 
     // Price velocity (price change per second)
     if (last_time > first_time) {

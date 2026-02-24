@@ -31,11 +31,11 @@ void test_accumulate_volumes_simple() {
     // Expected:
     // buy_vol = 100 + 150 = 250
     // sell_vol = 200 + 250 = 450
-    // vwap_sum = 10000*100 + 10010*200 + 10020*150 + 10030*250 = 7'016'000
+    // vwap_sum = 10000*100 + 10010*200 + 10020*150 + 10030*250 = 7'012'500
 
     assert(std::abs(buy_vol - 250.0) < 0.01);
     assert(std::abs(sell_vol - 450.0) < 0.01);
-    assert(std::abs(vwap_sum - 7'016'000.0) < 0.01);
+    assert(std::abs(vwap_sum - 7'012'500.0) < 0.01);
 
     std::cout << "✓ test_accumulate_volumes_simple\n";
 }
