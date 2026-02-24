@@ -81,7 +81,9 @@ private:
 
         // Spread
         if (snapshot.best_bid != INVALID_PRICE && snapshot.best_ask != INVALID_PRICE) {
-            metrics_.spread = static_cast<double>(snapshot.best_ask - snapshot.best_bid);
+            // Cast to signed before subtraction to handle crossed book (negative spread)
+            metrics_.spread =
+                static_cast<double>(static_cast<int64_t>(snapshot.best_ask) - static_cast<int64_t>(snapshot.best_bid));
             metrics_.mid_price =
                 (static_cast<double>(snapshot.best_bid) + static_cast<double>(snapshot.best_ask)) / 2.0;
 
