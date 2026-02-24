@@ -86,17 +86,15 @@ private:
             static_cast<double>(static_cast<int64_t>(snapshot.best_ask) - static_cast<int64_t>(snapshot.best_bid));
         double mid_price = (static_cast<double>(snapshot.best_bid) + static_cast<double>(snapshot.best_ask)) / 2.0;
 
-        // While spread/mid_price compute, start comparison (independent of above)
+        // While spread/mid_price compute, start comparisons (independent of above)
         double valid =
             static_cast<double>((snapshot.best_bid != INVALID_PRICE) && (snapshot.best_ask != INVALID_PRICE));
 
-        // Compute spread_bps (depends on mid_price, which should be ready)
+        // Compute spread_bps and apply masks immediately (minimize live variables)
         double spread_bps = (spread / std::max(mid_price, 1.0)) * 10000.0;
-
-        // Compute bps_valid (uses valid and mid_price, both should be ready)
         double bps_valid = valid * static_cast<double>(mid_price > 0.0);
 
-        // Apply masks (uses all computed values)
+        // Apply masks
         metrics_.spread = spread * valid;
         metrics_.mid_price = mid_price * valid;
         metrics_.spread_bps = spread_bps * bps_valid;
