@@ -481,22 +481,27 @@ void test_multiple_windows() {
     OrderFlowMetrics metrics;
     uint64_t ts = 1'000'000;
 
-    // Initial book
+    // Initial book (baseline - outside 10s window)
     auto book1 = create_book_with_levels({{10000, 100}}, {{10010, 100}});
-    metrics.on_order_book_update(book1, ts); // Baseline
+    metrics.on_order_book_update(book1, ts); // Baseline at 1s
 
-    // Add volume spread over time
+    // Add volume spread over time (within 10s window)
     auto book2 = create_book_with_levels({{10000, 200}}, {{10010, 100}});
-    metrics.on_order_book_update(book2, ts + 2'000'000); // 2s later
+    metrics.on_order_book_update(book2, ts + 11'000'000); // 11s after baseline (12s total)
 
     auto book3 = create_book_with_levels({{10000, 300}}, {{10010, 100}});
-    metrics.on_order_book_update(book3, ts + 7'000'000); // 7s later
+    metrics.on_order_book_update(book3, ts + 16'000'000); // 5s after book2 (17s total)
 
-    // 1s window: only last update
+    // 1s window: only last update (book3)
     auto m1 = metrics.get_metrics(Window::SEC_1);
     assert(std::abs(m1.bid_volume_added - 100.0) < 0.01);
 
-    // 10s window: both updates
+    // 10s window: only book2 and book3 (book1 baseline is 11s before book2, outside window)
+    // Window from (17s - 10s) = 7s to 17s
+    // book1 at 1s < 7s (outside window)
+    // book2 at 12s >= 7s (inside window, +100)
+    // book3 at 17s >= 7s (inside window, +100)
+    // Total: 200
     auto m10 = metrics.get_metrics(Window::SEC_10);
     assert(std::abs(m10.bid_volume_added - 200.0) < 0.01);
 
