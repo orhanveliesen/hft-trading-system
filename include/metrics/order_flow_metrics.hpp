@@ -125,30 +125,18 @@ public:
         // Extract ask levels (SIMD-optimized: copy + depth calculation in single pass)
         current_ask_depth = simd_extract_levels(&snapshot.ask_levels[0], &current_ask_levels[0], current_ask_count);
 
-        // Track level births (loop unrolling for better performance)
-        int i = 0;
-        // Unroll by 4 for better instruction pipelining
-        for (; i + 3 < current_bid_count; i += 4) {
-            add_birth(current_bid_levels[i].price, timestamp_us);
-            add_birth(current_bid_levels[i + 1].price, timestamp_us);
-            add_birth(current_bid_levels[i + 2].price, timestamp_us);
-            add_birth(current_bid_levels[i + 3].price, timestamp_us);
-        }
-        for (; i < current_bid_count; i++) {
-            add_birth(current_bid_levels[i].price, timestamp_us);
-        }
+        // Track level births (SIMD iterator with architecture-aware step size)
+        simd::for_each_step(0, static_cast<size_t>(current_bid_count), [&](size_t i, size_t step) {
+            for (size_t j = 0; j < step; ++j) {
+                add_birth(current_bid_levels[i + j].price, timestamp_us);
+            }
+        });
 
-        i = 0;
-        // Unroll by 4 for better instruction pipelining
-        for (; i + 3 < current_ask_count; i += 4) {
-            add_birth(current_ask_levels[i].price, timestamp_us);
-            add_birth(current_ask_levels[i + 1].price, timestamp_us);
-            add_birth(current_ask_levels[i + 2].price, timestamp_us);
-            add_birth(current_ask_levels[i + 3].price, timestamp_us);
-        }
-        for (; i < current_ask_count; i++) {
-            add_birth(current_ask_levels[i].price, timestamp_us);
-        }
+        simd::for_each_step(0, static_cast<size_t>(current_ask_count), [&](size_t i, size_t step) {
+            for (size_t j = 0; j < step; ++j) {
+                add_birth(current_ask_levels[i + j].price, timestamp_us);
+            }
+        });
 
         // Compare with previous state and generate flow events
         // Process bid levels (current vs previous)
@@ -712,43 +700,14 @@ private:
         // Use generic SIMD iterator
         double total_depth = 0.0;
 
-        simd::for_each(
-            0, static_cast<size_t>(count),
-            // SIMD chunk processor
-            [&](size_t i) {
-                // Copy struct data (unrolled for SIMD_STEP)
-                for (size_t j = 0; j < simd::SIMD_STEP; j++) {
-                    dest[i + j].price = source[i + j].price;
-                    dest[i + j].quantity = source[i + j].quantity;
-                }
-
-#if defined(__AVX2__)
-                // SIMD accumulation of quantities (AVX2: 4 doubles)
-                alignas(32) double qtys[4] = {
-                    static_cast<double>(source[i].quantity), static_cast<double>(source[i + 1].quantity),
-                    static_cast<double>(source[i + 2].quantity), static_cast<double>(source[i + 3].quantity)};
-
-                __m256d q = _mm256_load_pd(qtys);
-                __m256d current = _mm256_set1_pd(total_depth);
-                current = _mm256_add_pd(current, q);
-
-                // Horizontal sum
-                alignas(32) double sum_arr[4];
-                _mm256_store_pd(sum_arr, current);
-                total_depth = sum_arr[0] + sum_arr[1] + sum_arr[2] + sum_arr[3];
-#else
-                // Scalar accumulation for non-AVX2
-                for (size_t j = 0; j < simd::SIMD_STEP; j++) {
-                    total_depth += static_cast<double>(source[i + j].quantity);
-                }
-#endif
-            },
-            // Scalar remainder processor
-            [&](size_t i) {
-                dest[i].price = source[i].price;
-                dest[i].quantity = source[i].quantity;
-                total_depth += static_cast<double>(source[i].quantity);
-            });
+        simd::for_each_step(0, static_cast<size_t>(count), [&](size_t i, size_t step) {
+            // Copy struct data and accumulate depth (architecture-aware step size)
+            for (size_t j = 0; j < step; j++) {
+                dest[i + j].price = source[i + j].price;
+                dest[i + j].quantity = source[i + j].quantity;
+                total_depth += static_cast<double>(source[i + j].quantity);
+            }
+        });
 
         return total_depth;
     }
