@@ -11,10 +11,6 @@
 #include <cstdint>
 #include <limits>
 
-#if defined(__AVX2__)
-#include <immintrin.h>
-#endif
-
 namespace hft {
 
 /**
@@ -123,25 +119,34 @@ public:
         std::array<PriceLevel, MaxDepthLevels> current_bid_levels{};
         std::array<PriceLevel, MaxDepthLevels> current_ask_levels{};
 
-        // Extract bid levels (SIMD-optimized accumulation)
-        current_bid_depth = simd_accumulate_quantities(&snapshot.bid_levels[0], current_bid_count);
-        for (int i = 0; i < current_bid_count; i++) {
-            const auto& level = snapshot.bid_levels[i];
-            current_bid_levels[i] = PriceLevel{level.price, level.quantity};
-        }
+        // Extract bid levels (SIMD-optimized: copy + depth calculation in single pass)
+        current_bid_depth = simd_extract_levels(&snapshot.bid_levels[0], &current_bid_levels[0], current_bid_count);
 
-        // Extract ask levels (SIMD-optimized accumulation)
-        current_ask_depth = simd_accumulate_quantities(&snapshot.ask_levels[0], current_ask_count);
-        for (int i = 0; i < current_ask_count; i++) {
-            const auto& level = snapshot.ask_levels[i];
-            current_ask_levels[i] = PriceLevel{level.price, level.quantity};
-        }
+        // Extract ask levels (SIMD-optimized: copy + depth calculation in single pass)
+        current_ask_depth = simd_extract_levels(&snapshot.ask_levels[0], &current_ask_levels[0], current_ask_count);
 
-        // Track level births
-        for (int i = 0; i < current_bid_count; i++) {
+        // Track level births (loop unrolling for better performance)
+        int i = 0;
+        // Unroll by 4 for better instruction pipelining
+        for (; i + 3 < current_bid_count; i += 4) {
+            add_birth(current_bid_levels[i].price, timestamp_us);
+            add_birth(current_bid_levels[i + 1].price, timestamp_us);
+            add_birth(current_bid_levels[i + 2].price, timestamp_us);
+            add_birth(current_bid_levels[i + 3].price, timestamp_us);
+        }
+        for (; i < current_bid_count; i++) {
             add_birth(current_bid_levels[i].price, timestamp_us);
         }
-        for (int i = 0; i < current_ask_count; i++) {
+
+        i = 0;
+        // Unroll by 4 for better instruction pipelining
+        for (; i + 3 < current_ask_count; i += 4) {
+            add_birth(current_ask_levels[i].price, timestamp_us);
+            add_birth(current_ask_levels[i + 1].price, timestamp_us);
+            add_birth(current_ask_levels[i + 2].price, timestamp_us);
+            add_birth(current_ask_levels[i + 3].price, timestamp_us);
+        }
+        for (; i < current_ask_count; i++) {
             add_birth(current_ask_levels[i].price, timestamp_us);
         }
 
@@ -691,48 +696,61 @@ private:
         return event;
     }
 
-    // SIMD helper: Accumulate quantities from level array
-    static inline double simd_accumulate_quantities(const LevelInfo* levels, int count) {
-        // For small counts (< 8), scalar is faster due to overhead
+    // SIMD helper: Extract levels with depth calculation (single pass)
+    static inline double simd_extract_levels(const LevelInfo* source, PriceLevel* dest, int count) {
+        // For small counts, scalar is faster due to overhead
         if (count < 8) {
-            double sum = 0.0;
+            double total_depth = 0.0;
             for (int i = 0; i < count; i++) {
-                sum += static_cast<double>(levels[i].quantity);
+                dest[i].price = source[i].price;
+                dest[i].quantity = source[i].quantity;
+                total_depth += static_cast<double>(source[i].quantity);
             }
-            return sum;
+            return total_depth;
         }
 
-        // Extract quantities into temporary aligned array for SIMD
-        alignas(32) double quantities[MaxDepthLevels];
-        for (int i = 0; i < count; i++) {
-            quantities[i] = static_cast<double>(levels[i].quantity);
-        }
+        // Use generic SIMD iterator
+        double total_depth = 0.0;
 
-        // SIMD accumulation (AVX2: 4 doubles at a time)
-        double sum = 0.0;
-        int i = 0;
+        simd::for_each(
+            0, static_cast<size_t>(count),
+            // SIMD chunk processor
+            [&](size_t i) {
+                // Copy struct data (unrolled for SIMD_STEP)
+                for (size_t j = 0; j < simd::SIMD_STEP; j++) {
+                    dest[i + j].price = source[i + j].price;
+                    dest[i + j].quantity = source[i + j].quantity;
+                }
 
 #if defined(__AVX2__)
-        __m256d sum_vec = _mm256_setzero_pd();
+                // SIMD accumulation of quantities (AVX2: 4 doubles)
+                alignas(32) double qtys[4] = {
+                    static_cast<double>(source[i].quantity), static_cast<double>(source[i + 1].quantity),
+                    static_cast<double>(source[i + 2].quantity), static_cast<double>(source[i + 3].quantity)};
 
-        // Process 4 doubles at a time
-        for (; i + 3 < count; i += 4) {
-            __m256d q = _mm256_load_pd(&quantities[i]);
-            sum_vec = _mm256_add_pd(sum_vec, q);
-        }
+                __m256d q = _mm256_load_pd(qtys);
+                __m256d current = _mm256_set1_pd(total_depth);
+                current = _mm256_add_pd(current, q);
 
-        // Horizontal sum (reduce 4 doubles to 1)
-        alignas(32) double sum_arr[4];
-        _mm256_store_pd(sum_arr, sum_vec);
-        sum = sum_arr[0] + sum_arr[1] + sum_arr[2] + sum_arr[3];
+                // Horizontal sum
+                alignas(32) double sum_arr[4];
+                _mm256_store_pd(sum_arr, current);
+                total_depth = sum_arr[0] + sum_arr[1] + sum_arr[2] + sum_arr[3];
+#else
+                // Scalar accumulation for non-AVX2
+                for (size_t j = 0; j < simd::SIMD_STEP; j++) {
+                    total_depth += static_cast<double>(source[i + j].quantity);
+                }
 #endif
+            },
+            // Scalar remainder processor
+            [&](size_t i) {
+                dest[i].price = source[i].price;
+                dest[i].quantity = source[i].quantity;
+                total_depth += static_cast<double>(source[i].quantity);
+            });
 
-        // Handle remaining elements (scalar fallback)
-        for (; i < count; i++) {
-            sum += quantities[i];
-        }
-
-        return sum;
+        return total_depth;
     }
 
     // Flat array helpers - branchless linear search (cache-friendly for small N)
