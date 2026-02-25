@@ -70,29 +70,45 @@ inline void for_each(size_t start, size_t count, SimdFunc&& simd_func, ScalarFun
 }
 
 /**
- * Simpler version: Same lambda for both SIMD and scalar
+ * SIMD loop iterator with early exit support
+ *
+ * Lambda returns bool:
+ * - true: continue iteration
+ * - false: break immediately
  *
  * @param start Starting index
  * @param count Total number of elements
- * @param func Lambda: (int index, int step_size) -> void
+ * @param func Lambda: (size_t index, size_t step_size) -> bool
  *
- * Example:
- *   simd::for_each_step(0, n, [&](int i, int step) {
- *     // step will be SIMD_STEP for vectorized, 1 for remainder
+ * Example (no early exit):
+ *   simd::for_each_step(0, n, [&](size_t i, size_t step) {
+ *     for (size_t j = 0; j < step; ++j) {
+ *       process(data[i + j]);
+ *     }
+ *     return true;
+ *   });
+ *
+ * Example (with early exit):
+ *   simd::for_each_step(0, n, [&](size_t i, size_t step) {
+ *     for (size_t j = 0; j < step; ++j) {
+ *       if (should_stop(data[i + j])) return false;
+ *       process(data[i + j]);
+ *     }
+ *     return true;
  *   });
  */
 template <typename Func>
 inline void for_each_step(size_t start, size_t count, Func&& func) {
     size_t i = start;
 
-    // SIMD iterations with step size
+    // SIMD iterations with step size and early exit
     for (; i + SIMD_STEP <= count; i += SIMD_STEP) {
-        func(i, SIMD_STEP);
+        if (!func(i, SIMD_STEP)) return;
     }
 
-    // Scalar remainder with step=1
+    // Scalar remainder with early exit
     for (; i < count; i++) {
-        func(i, 1);
+        if (!func(i, 1)) return;
     }
 }
 

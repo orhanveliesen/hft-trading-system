@@ -130,12 +130,14 @@ public:
             for (size_t j = 0; j < step; ++j) {
                 add_birth(current_bid_levels[i + j].price, timestamp_us);
             }
+            return true;  // Continue
         });
 
         simd::for_each_step(0, static_cast<size_t>(current_ask_count), [&](size_t i, size_t step) {
             for (size_t j = 0; j < step; ++j) {
                 add_birth(current_ask_levels[i + j].price, timestamp_us);
             }
+            return true;  // Continue
         });
 
         // Compare with previous state and generate flow events
@@ -707,6 +709,7 @@ private:
                 dest[i + j].quantity = source[i + j].quantity;
                 total_depth += static_cast<double>(source[i + j].quantity);
             }
+            return true;  // Continue
         });
 
         return total_depth;
