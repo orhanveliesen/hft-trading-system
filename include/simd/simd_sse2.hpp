@@ -1,6 +1,12 @@
 #pragma once
 
 #include <cstddef>
+
+// Prevent direct inclusion of this header outside SIMD library
+#ifndef HFT_SIMD_INTERNAL_INCLUDE_ALLOWED
+#error "Do not include simd_sse2.hpp directly. Use simd_ops.hpp instead."
+#endif
+
 #include <emmintrin.h> // SSE2 intrinsics
 
 namespace hft {
