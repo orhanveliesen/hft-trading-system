@@ -125,20 +125,9 @@ public:
         // Extract ask levels (SIMD-optimized: copy + depth calculation in single pass)
         current_ask_depth = simd_extract_levels(&snapshot.ask_levels[0], &current_ask_levels[0], current_ask_count);
 
-        // Track level births (SIMD iterator with architecture-aware step size)
-        simd::for_each_step(0, static_cast<size_t>(current_bid_count), [&](size_t i, size_t step) {
-            for (size_t j = 0; j < step; ++j) {
-                add_birth(current_bid_levels[i + j].price, timestamp_us);
-            }
-            return true;  // Continue
-        });
-
-        simd::for_each_step(0, static_cast<size_t>(current_ask_count), [&](size_t i, size_t step) {
-            for (size_t j = 0; j < step; ++j) {
-                add_birth(current_ask_levels[i + j].price, timestamp_us);
-            }
-            return true;  // Continue
-        });
+        // Track level births (DRY: generic helper)
+        track_level_births(current_bid_levels, current_bid_count, timestamp_us);
+        track_level_births(current_ask_levels, current_ask_count, timestamp_us);
 
         // Compare with previous state and generate flow events
         // Process bid levels (current vs previous)
@@ -686,7 +675,19 @@ private:
         return event;
     }
 
-    // SIMD helper: Extract levels with depth calculation (single pass)
+    // Track level births (DRY helper with zero-overhead SIMD)
+    __attribute__((always_inline))
+    inline void track_level_births(const std::array<PriceLevel, MaxDepthLevels>& levels, int count, uint64_t timestamp_us) {
+        simd::for_each_step(0, static_cast<size_t>(count), [&](size_t i, size_t step) {
+            for (size_t j = 0; j < step; ++j) {
+                add_birth(levels[i + j].price, timestamp_us);
+            }
+            return true;  // Continue
+        });
+    }
+
+    // SIMD helper: Extract levels with depth calculation (single pass, zero-overhead)
+    __attribute__((always_inline))
     static inline double simd_extract_levels(const LevelInfo* source, PriceLevel* dest, int count) {
         // For small counts, scalar is faster due to overhead
         if (count < 8) {
@@ -699,7 +700,7 @@ private:
             return total_depth;
         }
 
-        // Use generic SIMD iterator
+        // Use generic SIMD iterator (zero-overhead with always_inline)
         double total_depth = 0.0;
 
         simd::for_each_step(0, static_cast<size_t>(count), [&](size_t i, size_t step) {
