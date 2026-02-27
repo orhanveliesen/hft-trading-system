@@ -119,11 +119,21 @@ public:
         std::array<PriceLevel, MaxDepthLevels> current_bid_levels{};
         std::array<PriceLevel, MaxDepthLevels> current_ask_levels{};
 
-        // Extract bid levels (SIMD-optimized: copy + depth calculation in single pass)
-        current_bid_depth = simd_extract_levels(&snapshot.bid_levels[0], &current_bid_levels[0], current_bid_count);
+        // Lambda for extracting levels with depth calculation (SIMD-optimized: single pass)
+        auto extract_levels = [&](const LevelInfo* source, PriceLevel* dest, int count, double& total_depth) {
+            simd::for_each_step(0, static_cast<size_t>(count), [&](size_t i, size_t step) {
+                for (size_t j = 0; j < step; j++) {
+                    dest[i + j].price = source[i + j].price;
+                    dest[i + j].quantity = source[i + j].quantity;
+                    total_depth += static_cast<double>(source[i + j].quantity);
+                }
+                return true;
+            });
+        };
 
-        // Extract ask levels (SIMD-optimized: copy + depth calculation in single pass)
-        current_ask_depth = simd_extract_levels(&snapshot.ask_levels[0], &current_ask_levels[0], current_ask_count);
+        // Extract bid and ask levels
+        extract_levels(&snapshot.bid_levels[0], &current_bid_levels[0], current_bid_count, current_bid_depth);
+        extract_levels(&snapshot.ask_levels[0], &current_ask_levels[0], current_ask_count, current_ask_depth);
 
         // Track level births (DRY: generic helper)
         track_level_births(current_bid_levels, current_bid_count, timestamp_us);
@@ -684,36 +694,6 @@ private:
             }
             return true;  // Continue
         });
-    }
-
-    // SIMD helper: Extract levels with depth calculation (single pass, zero-overhead)
-    __attribute__((always_inline))
-    static inline double simd_extract_levels(const LevelInfo* source, PriceLevel* dest, int count) {
-        // For small counts, scalar is faster due to overhead
-        if (count < 8) {
-            double total_depth = 0.0;
-            for (int i = 0; i < count; i++) {
-                dest[i].price = source[i].price;
-                dest[i].quantity = source[i].quantity;
-                total_depth += static_cast<double>(source[i].quantity);
-            }
-            return total_depth;
-        }
-
-        // Use generic SIMD iterator (zero-overhead with always_inline)
-        double total_depth = 0.0;
-
-        simd::for_each_step(0, static_cast<size_t>(count), [&](size_t i, size_t step) {
-            // Copy struct data and accumulate depth (architecture-aware step size)
-            for (size_t j = 0; j < step; j++) {
-                dest[i + j].price = source[i + j].price;
-                dest[i + j].quantity = source[i + j].quantity;
-                total_depth += static_cast<double>(source[i + j].quantity);
-            }
-            return true;  // Continue
-        });
-
-        return total_depth;
     }
 
     // Flat array helpers - branchless linear search (cache-friendly for small N)
