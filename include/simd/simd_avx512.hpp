@@ -1,6 +1,12 @@
 #pragma once
 
 #include <cstddef>
+
+// Prevent direct inclusion of this header outside SIMD library
+#ifndef HFT_SIMD_INTERNAL_INCLUDE_ALLOWED
+#error "Do not include simd_avx512.hpp directly. Use simd_ops.hpp instead."
+#endif
+
 #include <immintrin.h>
 
 namespace hft {

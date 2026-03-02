@@ -1,6 +1,7 @@
 #pragma once
 
 #include "simd_config.hpp"
+#include "simd_guard.hpp"
 
 // Include the appropriate backend based on compile-time detection
 #if HFT_SIMD_AVX512
@@ -13,8 +14,87 @@
 #include "simd_scalar.hpp"
 #endif
 
+// Undefine guard to prevent SIMD intrinsics usage outside this library
+#undef HFT_SIMD_INTERNAL_INCLUDE_ALLOWED
+
 namespace hft {
 namespace simd {
+
+// SIMD step size based on architecture
+#if HFT_SIMD_AVX512
+constexpr size_t SIMD_STEP = 8; // AVX-512: 8 doubles
+#elif HFT_SIMD_AVX2
+constexpr size_t SIMD_STEP = 4; // AVX2: 4 doubles
+#elif HFT_SIMD_SSE2
+constexpr size_t SIMD_STEP = 2; // SSE2: 2 doubles
+#else
+constexpr size_t SIMD_STEP = 1; // Scalar: 1 double
+#endif
+
+/**
+ * Generic SIMD loop iterator
+ *
+ * Calls the provided lambda for each SIMD-sized chunk, automatically handling:
+ * - SIMD vectorized iterations (step size based on architecture)
+ * - Scalar remainder iterations
+ *
+ * @param start Starting index
+ * @param count Total number of elements
+ * @param simd_func Lambda for SIMD chunk: (int start_index) -> void
+ * @param scalar_func Lambda for scalar remainder: (int index) -> void
+ *
+ * Example:
+ *   simd::for_each(0, n,
+ *     [&](int i) {
+ *       // Process SIMD_STEP elements starting at i
+ *       // Can use AVX2 intrinsics here
+ *     },
+ *     [&](int i) {
+ *       // Process single element at i
+ *     }
+ *   );
+ */
+template <typename SimdFunc, typename ScalarFunc>
+inline void for_each(size_t start, size_t count, SimdFunc&& simd_func, ScalarFunc&& scalar_func) {
+    size_t i = start;
+
+    // SIMD iterations
+    for (; i + SIMD_STEP <= count; i += SIMD_STEP) {
+        simd_func(i);
+    }
+
+    // Scalar remainder
+    for (; i < count; i++) {
+        scalar_func(i);
+    }
+}
+
+/**
+ * Simpler version: Same lambda for both SIMD and scalar
+ *
+ * @param start Starting index
+ * @param count Total number of elements
+ * @param func Lambda: (int index, int step_size) -> void
+ *
+ * Example:
+ *   simd::for_each_step(0, n, [&](int i, int step) {
+ *     // step will be SIMD_STEP for vectorized, 1 for remainder
+ *   });
+ */
+template <typename Func>
+inline void for_each_step(size_t start, size_t count, Func&& func) {
+    size_t i = start;
+
+    // SIMD iterations with step size
+    for (; i + SIMD_STEP <= count; i += SIMD_STEP) {
+        func(i, SIMD_STEP);
+    }
+
+    // Scalar remainder with step=1
+    for (; i < count; i++) {
+        func(i, 1);
+    }
+}
 
 /**
  * SIMD Utility Library
