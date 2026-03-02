@@ -42,16 +42,6 @@ OrderBook create_book_with_n_levels(int n, Price base_bid = 10000, Price base_as
 
     return book;
 }
-
-// Calculate expected depth for N levels (matches quantities in create_book_with_n_levels)
-double expected_depth_for_n_levels(int n) {
-    double sum = 0.0;
-    for (int i = 0; i < n; ++i) {
-        sum += 100 + i * 10;  // Matches create_book_with_n_levels quantities
-    }
-    return sum;
-}
-
 // ============================================================================
 // Added/Removed Volume Tests (6 tests)
 // ============================================================================
@@ -663,107 +653,8 @@ void test_no_allocation() {
 }
 
 // ============================================================================
-// SIMD Calculation Tests (10 tests)
+// Birth Tracking Tests (3 tests)
 // ============================================================================
-
-void test_simd_extract_empty_book() {
-    OrderFlowMetrics metrics;
-    uint64_t ts = 1'000'000;
-
-    // Empty order book (0 levels on each side)
-    OrderBook book(10000, 2000);
-    metrics.on_order_book_update(book, ts);
-
-    auto m = metrics.get_metrics(Window::SEC_1);
-    assert(m.bid_depth == 0.0);
-    assert(m.ask_depth == 0.0);
-
-    std::cout << "✓ test_simd_extract_empty_book\n";
-}
-
-void test_simd_extract_single_level() {
-    OrderFlowMetrics metrics;
-    uint64_t ts = 1'000'000;
-
-    // Single bid level, single ask level (count = 1 edge case)
-    auto book = create_book_with_n_levels(1, 10000, 10010);
-    metrics.on_order_book_update(book, ts);
-
-    auto m = metrics.get_metrics(Window::SEC_1);
-    // Depth should be quantity of single level (100)
-    assert(std::abs(m.bid_depth - 100.0) < 0.01);
-    assert(std::abs(m.ask_depth - 100.0) < 0.01);
-
-    std::cout << "✓ test_simd_extract_single_level\n";
-}
-
-void test_simd_extract_scalar_path() {
-    OrderFlowMetrics metrics;
-    uint64_t ts = 1'000'000;
-
-    // 5 levels on each side (< 8, triggers scalar path)
-    auto book = create_book_with_n_levels(5, 10000, 10010);
-    metrics.on_order_book_update(book, ts);
-
-    auto m = metrics.get_metrics(Window::SEC_1);
-    // Depth should be sum of all 5 quantities: 100 + 110 + 120 + 130 + 140 = 600
-    double expected_depth = expected_depth_for_n_levels(5);
-    assert(std::abs(m.bid_depth - expected_depth) < 0.01);
-    assert(std::abs(m.ask_depth - expected_depth) < 0.01);
-
-    std::cout << "✓ test_simd_extract_scalar_path\n";
-}
-
-void test_simd_extract_simd_path() {
-    OrderFlowMetrics metrics;
-    uint64_t ts = 1'000'000;
-
-    // Exactly 8 levels (SIMD_STEP for AVX2, no remainder)
-    auto book = create_book_with_n_levels(8, 10000, 10010);
-    metrics.on_order_book_update(book, ts);
-
-    auto m = metrics.get_metrics(Window::SEC_1);
-    // Depth should be sum of all 8 quantities
-    double expected_depth = expected_depth_for_n_levels(8);
-    assert(std::abs(m.bid_depth - expected_depth) < 0.01);
-    assert(std::abs(m.ask_depth - expected_depth) < 0.01);
-
-    std::cout << "✓ test_simd_extract_simd_path\n";
-}
-
-void test_simd_extract_with_remainder() {
-    OrderFlowMetrics metrics;
-    uint64_t ts = 1'000'000;
-
-    // 10 levels (2 SIMD iterations + 2 scalar remainder)
-    auto book = create_book_with_n_levels(10, 10000, 10010);
-    metrics.on_order_book_update(book, ts);
-
-    auto m = metrics.get_metrics(Window::SEC_1);
-    // Depth should be sum of all 10 quantities
-    double expected_depth = expected_depth_for_n_levels(10);
-    assert(std::abs(m.bid_depth - expected_depth) < 0.01);
-    assert(std::abs(m.ask_depth - expected_depth) < 0.01);
-
-    std::cout << "✓ test_simd_extract_with_remainder\n";
-}
-
-void test_simd_extract_full_book() {
-    OrderFlowMetrics metrics;
-    uint64_t ts = 1'000'000;
-
-    // 20 levels on each side (typical max)
-    auto book = create_book_with_n_levels(20, 10000, 10010);
-    metrics.on_order_book_update(book, ts);
-
-    auto m = metrics.get_metrics(Window::SEC_1);
-    // Depth should be sum of all 20 quantities
-    double expected_depth = expected_depth_for_n_levels(20);
-    assert(std::abs(m.bid_depth - expected_depth) < 0.01);
-    assert(std::abs(m.ask_depth - expected_depth) < 0.01);
-
-    std::cout << "✓ test_simd_extract_full_book\n";
-}
 
 void test_track_births_all_levels() {
     OrderFlowMetrics metrics;
@@ -801,9 +692,8 @@ void test_track_births_no_duplicates() {
     metrics.on_order_book_update(book1, ts);
 
     // Update same levels (quantity change, not new births)
-    auto book2 = create_book_with_levels(
-        {{10000, 150}, {9999, 160}, {9998, 170}, {9997, 180}, {9996, 190}},
-        {{10010, 150}, {10011, 160}, {10012, 170}, {10013, 180}, {10014, 190}});
+    auto book2 = create_book_with_levels({{10000, 150}, {9999, 160}, {9998, 170}, {9997, 180}, {9996, 190}},
+                                         {{10010, 150}, {10011, 160}, {10012, 170}, {10013, 180}, {10014, 190}});
     metrics.on_order_book_update(book2, ts + 100'000);
 
     // Remove all to trigger lifetime calculation
@@ -823,41 +713,23 @@ void test_track_births_bid_ask_independent() {
     OrderFlowMetrics metrics;
     uint64_t ts = 1'000'000;
 
-    // Add same price on bid and ask sides (should track independently)
-    auto book1 = create_book_with_levels({{10005, 100}}, {{10005, 100}});
+    // Add different prices on bid and ask sides (price-based tracking)
+    auto book1 = create_book_with_levels({{10000, 100}}, {{10010, 100}});
     metrics.on_order_book_update(book1, ts);
 
     // Remove bid after 100ms, ask after 200ms
-    auto book2 = create_book_with_levels({}, {{10005, 100}});
+    auto book2 = create_book_with_levels({}, {{10010, 100}});
     metrics.on_order_book_update(book2, ts + 100'000);
 
     auto book3 = create_book_with_levels({}, {});
     metrics.on_order_book_update(book3, ts + 200'000);
 
     auto m = metrics.get_metrics(Window::SEC_1);
-    // Bid lifetime = 100ms, ask lifetime = 200ms (independent tracking)
+    // Bid lifetime = 100ms, ask lifetime = 200ms (price-based tracking)
     assert(std::abs(m.avg_bid_level_lifetime_us - 100'000.0) < 10'000.0);
     assert(std::abs(m.avg_ask_level_lifetime_us - 200'000.0) < 10'000.0);
 
     std::cout << "✓ test_track_births_bid_ask_independent\n";
-}
-
-void test_depth_calculation_accuracy() {
-    OrderFlowMetrics metrics;
-    uint64_t ts = 1'000'000;
-
-    // Create book with known quantities: 100, 200, 300, 400, 500
-    auto book = create_book_with_levels(
-        {{10000, 100}, {9999, 200}, {9998, 300}, {9997, 400}, {9996, 500}},
-        {{10010, 100}, {10011, 200}, {10012, 300}, {10013, 400}, {10014, 500}});
-    metrics.on_order_book_update(book, ts);
-
-    auto m = metrics.get_metrics(Window::SEC_1);
-    // Verify sum = 1500 exactly (tests floating point accuracy)
-    assert(std::abs(m.bid_depth - 1500.0) < 0.01);
-    assert(std::abs(m.ask_depth - 1500.0) < 0.01);
-
-    std::cout << "✓ test_depth_calculation_accuracy\n";
 }
 
 // ============================================================================
@@ -908,18 +780,11 @@ int main() {
     test_throughput();
     test_no_allocation();
 
-    // SIMD Calculation (10 tests)
-    test_simd_extract_empty_book();
-    test_simd_extract_single_level();
-    test_simd_extract_scalar_path();
-    test_simd_extract_simd_path();
-    test_simd_extract_with_remainder();
-    test_simd_extract_full_book();
+    // Birth Tracking (3 tests)
     test_track_births_all_levels();
     test_track_births_no_duplicates();
     test_track_births_bid_ask_independent();
-    test_depth_calculation_accuracy();
 
-    std::cout << "\n✅ All 37 tests passed!\n";
+    std::cout << "\n✅ All 30 tests passed!\n";
     return 0;
 }

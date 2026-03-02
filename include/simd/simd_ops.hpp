@@ -103,12 +103,14 @@ inline void for_each_step(size_t start, size_t count, Func&& func) {
 
     // SIMD iterations with step size and early exit
     for (; i + SIMD_STEP <= count; i += SIMD_STEP) {
-        if (!func(i, SIMD_STEP)) return;
+        if (!func(i, SIMD_STEP))
+            return;
     }
 
     // Scalar remainder with early exit
     for (; i < count; i++) {
-        if (!func(i, 1)) return;
+        if (!func(i, 1))
+            return;
     }
 }
 

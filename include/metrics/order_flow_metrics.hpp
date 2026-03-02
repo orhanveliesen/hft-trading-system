@@ -135,9 +135,17 @@ public:
         extract_levels(&snapshot.bid_levels[0], &current_bid_levels[0], current_bid_count, current_bid_depth);
         extract_levels(&snapshot.ask_levels[0], &current_ask_levels[0], current_ask_count, current_ask_depth);
 
-        // Track level births (DRY: generic helper)
-        track_level_births(current_bid_levels, current_bid_count, timestamp_us);
-        track_level_births(current_ask_levels, current_ask_count, timestamp_us);
+        // Track level births (local lambda, 2 uses)
+        auto track_births = [&](const std::array<PriceLevel, MaxDepthLevels>& levels, int count) {
+            simd::for_each_step(0, static_cast<size_t>(count), [&](size_t i, size_t step) {
+                for (size_t j = 0; j < step; ++j) {
+                    add_birth(levels[i + j].price, timestamp_us);
+                }
+                return true;
+            });
+        };
+        track_births(current_bid_levels, current_bid_count);
+        track_births(current_ask_levels, current_ask_count);
 
         // Compare with previous state and generate flow events
         // Process bid levels (current vs previous)
@@ -683,17 +691,6 @@ private:
         event.is_level_change = true;
         event.timestamp_us = timestamp_us;
         return event;
-    }
-
-    // Track level births (DRY helper with zero-overhead SIMD)
-    __attribute__((always_inline))
-    inline void track_level_births(const std::array<PriceLevel, MaxDepthLevels>& levels, int count, uint64_t timestamp_us) {
-        simd::for_each_step(0, static_cast<size_t>(count), [&](size_t i, size_t step) {
-            for (size_t j = 0; j < step; ++j) {
-                add_birth(levels[i + j].price, timestamp_us);
-            }
-            return true;  // Continue
-        });
     }
 
     // Flat array helpers - branchless linear search (cache-friendly for small N)
