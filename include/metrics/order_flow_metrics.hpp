@@ -119,24 +119,33 @@ public:
         std::array<PriceLevel, MaxDepthLevels> current_bid_levels{};
         std::array<PriceLevel, MaxDepthLevels> current_ask_levels{};
 
-        // Extract bid levels (SIMD-optimized: copy + depth calculation in single pass)
-        current_bid_depth = simd_extract_levels(&snapshot.bid_levels[0], &current_bid_levels[0], current_bid_count);
+        // Lambda for extracting levels with depth calculation (SIMD-optimized: single pass)
+        auto extract_levels = [&](const LevelInfo* source, PriceLevel* dest, int count, double& total_depth) {
+            simd::for_each_step(0, static_cast<size_t>(count), [&](size_t i, size_t step) {
+                for (size_t j = 0; j < step; j++) {
+                    dest[i + j].price = source[i + j].price;
+                    dest[i + j].quantity = source[i + j].quantity;
+                    total_depth += static_cast<double>(source[i + j].quantity);
+                }
+                return true;
+            });
+        };
 
-        // Extract ask levels (SIMD-optimized: copy + depth calculation in single pass)
-        current_ask_depth = simd_extract_levels(&snapshot.ask_levels[0], &current_ask_levels[0], current_ask_count);
+        // Extract bid and ask levels
+        extract_levels(&snapshot.bid_levels[0], &current_bid_levels[0], current_bid_count, current_bid_depth);
+        extract_levels(&snapshot.ask_levels[0], &current_ask_levels[0], current_ask_count, current_ask_depth);
 
-        // Track level births (SIMD iterator with architecture-aware step size)
-        simd::for_each_step(0, static_cast<size_t>(current_bid_count), [&](size_t i, size_t step) {
-            for (size_t j = 0; j < step; ++j) {
-                add_birth(current_bid_levels[i + j].price, timestamp_us);
-            }
-        });
-
-        simd::for_each_step(0, static_cast<size_t>(current_ask_count), [&](size_t i, size_t step) {
-            for (size_t j = 0; j < step; ++j) {
-                add_birth(current_ask_levels[i + j].price, timestamp_us);
-            }
-        });
+        // Track level births (local lambda, 2 uses)
+        auto track_births = [&](const std::array<PriceLevel, MaxDepthLevels>& levels, int count) {
+            simd::for_each_step(0, static_cast<size_t>(count), [&](size_t i, size_t step) {
+                for (size_t j = 0; j < step; ++j) {
+                    add_birth(levels[i + j].price, timestamp_us);
+                }
+                return true;
+            });
+        };
+        track_births(current_bid_levels, current_bid_count);
+        track_births(current_ask_levels, current_ask_count);
 
         // Compare with previous state and generate flow events
         // Process bid levels (current vs previous)
@@ -682,34 +691,6 @@ private:
         event.is_level_change = true;
         event.timestamp_us = timestamp_us;
         return event;
-    }
-
-    // SIMD helper: Extract levels with depth calculation (single pass)
-    static inline double simd_extract_levels(const LevelInfo* source, PriceLevel* dest, int count) {
-        // For small counts, scalar is faster due to overhead
-        if (count < 8) {
-            double total_depth = 0.0;
-            for (int i = 0; i < count; i++) {
-                dest[i].price = source[i].price;
-                dest[i].quantity = source[i].quantity;
-                total_depth += static_cast<double>(source[i].quantity);
-            }
-            return total_depth;
-        }
-
-        // Use generic SIMD iterator
-        double total_depth = 0.0;
-
-        simd::for_each_step(0, static_cast<size_t>(count), [&](size_t i, size_t step) {
-            // Copy struct data and accumulate depth (architecture-aware step size)
-            for (size_t j = 0; j < step; j++) {
-                dest[i + j].price = source[i + j].price;
-                dest[i + j].quantity = source[i + j].quantity;
-                total_depth += static_cast<double>(source[i + j].quantity);
-            }
-        });
-
-        return total_depth;
     }
 
     // Flat array helpers - branchless linear search (cache-friendly for small N)

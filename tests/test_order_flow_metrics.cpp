@@ -25,6 +25,23 @@ OrderBook create_book_with_levels(const std::vector<std::pair<Price, Quantity>>&
     return book;
 }
 
+// Helper to create book with N levels on each side (for SIMD edge case testing)
+OrderBook create_book_with_n_levels(int n, Price base_bid = 10000, Price base_ask = 10010) {
+    OrderBook book(base_bid - 1000, 3000);
+    OrderId id = 1;
+
+    // Add N bid levels
+    for (int i = 0; i < n; ++i) {
+        book.add_order(id++, Side::Buy, base_bid - i, 100 + i * 10);
+    }
+
+    // Add N ask levels
+    for (int i = 0; i < n; ++i) {
+        book.add_order(id++, Side::Sell, base_ask + i, 100 + i * 10);
+    }
+
+    return book;
+}
 // ============================================================================
 // Added/Removed Volume Tests (6 tests)
 // ============================================================================
@@ -636,6 +653,86 @@ void test_no_allocation() {
 }
 
 // ============================================================================
+// Birth Tracking Tests (3 tests)
+// ============================================================================
+
+void test_track_births_all_levels() {
+    OrderFlowMetrics metrics;
+    uint64_t ts = 1'000'000;
+
+    // Add 15 bid levels across 3 updates
+    auto book1 = create_book_with_n_levels(5, 10000, 10010);
+    metrics.on_order_book_update(book1, ts);
+
+    auto book2 = create_book_with_n_levels(10, 10000, 10010);
+    metrics.on_order_book_update(book2, ts + 100'000);
+
+    auto book3 = create_book_with_n_levels(15, 10000, 10010);
+    metrics.on_order_book_update(book3, ts + 200'000);
+
+    // Remove all levels to trigger birth tracking
+    auto book4 = create_book_with_levels({}, {});
+    metrics.on_order_book_update(book4, ts + 300'000);
+
+    auto m = metrics.get_metrics(Window::SEC_1);
+    // All 15 unique prices should be tracked in births
+    // Verify level lifetime metrics are captured (avg > 0)
+    assert(m.avg_bid_level_lifetime_us > 0.0);
+    assert(m.avg_ask_level_lifetime_us > 0.0);
+
+    std::cout << "✓ test_track_births_all_levels\n";
+}
+
+void test_track_births_no_duplicates() {
+    OrderFlowMetrics metrics;
+    uint64_t ts = 1'000'000;
+
+    // Add same levels multiple times
+    auto book1 = create_book_with_n_levels(5, 10000, 10010);
+    metrics.on_order_book_update(book1, ts);
+
+    // Update same levels (quantity change, not new births)
+    auto book2 = create_book_with_levels({{10000, 150}, {9999, 160}, {9998, 170}, {9997, 180}, {9996, 190}},
+                                         {{10010, 150}, {10011, 160}, {10012, 170}, {10013, 180}, {10014, 190}});
+    metrics.on_order_book_update(book2, ts + 100'000);
+
+    // Remove all to trigger lifetime calculation
+    auto book3 = create_book_with_levels({}, {});
+    metrics.on_order_book_update(book3, ts + 200'000);
+
+    auto m = metrics.get_metrics(Window::SEC_1);
+    // Should only count 5 unique birth events (no duplicates)
+    // Lifetime should be 200ms for all levels
+    assert(std::abs(m.avg_bid_level_lifetime_us - 200'000.0) < 10'000.0);
+    assert(std::abs(m.avg_ask_level_lifetime_us - 200'000.0) < 10'000.0);
+
+    std::cout << "✓ test_track_births_no_duplicates\n";
+}
+
+void test_track_births_bid_ask_independent() {
+    OrderFlowMetrics metrics;
+    uint64_t ts = 1'000'000;
+
+    // Add different prices on bid and ask sides (price-based tracking)
+    auto book1 = create_book_with_levels({{10000, 100}}, {{10010, 100}});
+    metrics.on_order_book_update(book1, ts);
+
+    // Remove bid after 100ms, ask after 200ms
+    auto book2 = create_book_with_levels({}, {{10010, 100}});
+    metrics.on_order_book_update(book2, ts + 100'000);
+
+    auto book3 = create_book_with_levels({}, {});
+    metrics.on_order_book_update(book3, ts + 200'000);
+
+    auto m = metrics.get_metrics(Window::SEC_1);
+    // Bid lifetime = 100ms, ask lifetime = 200ms (price-based tracking)
+    assert(std::abs(m.avg_bid_level_lifetime_us - 100'000.0) < 10'000.0);
+    assert(std::abs(m.avg_ask_level_lifetime_us - 200'000.0) < 10'000.0);
+
+    std::cout << "✓ test_track_births_bid_ask_independent\n";
+}
+
+// ============================================================================
 // Main
 // ============================================================================
 
@@ -683,6 +780,11 @@ int main() {
     test_throughput();
     test_no_allocation();
 
-    std::cout << "\n✅ All 27 tests passed!\n";
+    // Birth Tracking (3 tests)
+    test_track_births_all_levels();
+    test_track_births_no_duplicates();
+    test_track_births_bid_ask_independent();
+
+    std::cout << "\n✅ All 30 tests passed!\n";
     return 0;
 }

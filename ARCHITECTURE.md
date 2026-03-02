@@ -517,7 +517,7 @@ Real-time order book flow and change metrics for tracking book dynamics and canc
 
 ```mermaid
 classDiagram
-    class OrderFlowMetrics {
+    class OrderFlowMetrics~MaxDepthLevels=20~ {
         -array~FlowEvent,16384~ flow_events_
         -array~RecentTrade,256~ recent_trades_
         -array~LevelLifetime,4096~ lifetimes_
@@ -525,17 +525,20 @@ classDiagram
         -size_t flow_tail_
         -size_t trade_head_
         -size_t trade_tail_
-        -unordered_map~Price,Quantity~ prev_bid_levels_
-        -unordered_map~Price,Quantity~ prev_ask_levels_
-        -unordered_map~Price,uint64_t~ bid_level_birth_
-        -unordered_map~Price,uint64_t~ ask_level_birth_
+        -array~PriceLevel,MaxDepthLevels~ prev_bid_levels_
+        -array~PriceLevel,MaxDepthLevels~ prev_ask_levels_
+        -array~PriceBirth,MaxDepthLevels*2~ level_births_
+        -int prev_bid_count_
+        -int prev_ask_count_
+        -int birth_count_
         -array~Metrics,5~ cached_metrics_
         +on_trade(trade) void
         +on_order_book_update(book, timestamp_us) void
         +get_metrics(window) Metrics
         +reset() void
         -calculate_metrics(start_idx, end_idx) Metrics
-        -was_trade_at_price(price, timestamp_us) bool
+        -get_traded_quantity_at_price(price, timestamp_us) Quantity
+        -track_level_births(levels, count, timestamp_us) void
     }
 
     class Metrics {
@@ -565,6 +568,7 @@ classDiagram
     class FlowEvent {
         +Price price
         +double volume_delta
+        +double cancel_volume
         +bool is_bid
         +bool is_cancel
         +bool is_level_change
@@ -573,6 +577,7 @@ classDiagram
 
     class RecentTrade {
         +Price price
+        +Quantity quantity
         +uint64_t timestamp_us
     }
 
@@ -580,6 +585,16 @@ classDiagram
         +uint64_t birth_us
         +uint64_t death_us
         +bool is_bid
+    }
+
+    class PriceLevel {
+        +Price price
+        +Quantity quantity
+    }
+
+    class PriceBirth {
+        +Price price
+        +uint64_t birth_us
     }
 
     class Window {
@@ -618,26 +633,31 @@ classDiagram
 
 **Performance:**
 - on_trade(): < 100 ns (append to trade ring buffer)
-- on_order_book_update(): < 5 μs (compare prev vs current state)
+- on_order_book_update(): < 5 μs (SIMD-optimized level extraction + delta comparison)
 - get_metrics() cache hit: < 1 μs (cache lookup)
-- get_metrics() cache miss: < 5 μs (single-pass calculation)
-- Memory: ~1.5 MB (pre-allocated ring buffers + hash maps)
+- get_metrics() cache miss: < 5 μs (single-pass branchless calculation)
+- Memory: ~1.2 MB (pre-allocated ring buffers + fixed-size arrays)
 
 **Data Flow:**
 1. on_order_book_update() extracts current book state via snapshot
-2. Compare current vs previous state (stored in hash maps)
-3. Detect changes: new levels, removed levels, quantity changes
-4. For removals: check recent_trades_ (100ms correlation window)
+2. SIMD-optimized level extraction: copy levels + calculate depth (single pass)
+3. Track level births using SIMD iterator (architecture-aware vectorization)
+4. Compare current vs previous state (stored in flat arrays, O(n) linear search)
+5. Detect changes: new levels, removed levels, quantity changes
+6. For removals: check recent_trades_ (100ms correlation window)
    - Trade at price within 100ms → fill
    - No trade at price → cancel
-5. Generate FlowEvent for each change
-6. Track level lifetimes (birth to death)
-7. Ring buffers auto-prune events older than 1 minute
+7. Generate FlowEvent for each change
+8. Track level lifetimes (birth to death)
+9. Ring buffers auto-prune events older than 1 minute
 
 **Optimizations:**
 - **Ring buffers:** Power-of-2 sizes for fast modulo via bitwise AND
+- **SIMD iterators:** Uses `simd::for_each_step` for architecture-aware vectorization (AVX-512/AVX2/SSE2)
+- **Flat arrays:** Previous book state stored in fixed-size arrays (cache-friendly, O(n) linear search)
 - **Branchless accumulation:** Uses sign arithmetic and comparison masks
 - **Single-pass calculation:** One traversal computes all metrics
+- **Lambda reuse:** Local lambdas for extract_levels (DRY, following Rule of Three)
 - **Lazy caching:** Cache metrics per window, invalidate on new event
 - **Pre-allocation:** Fixed-size buffers, no heap allocation after warmup
 
@@ -671,6 +691,14 @@ classDiagram
         +accumulate_volumes(prices, qtys, is_buy, count, buy_vol, sell_vol, vwap_sum) void
         +horizontal_sum_4d(vec) double
         +blend(mask, a, b) double
+        +for_each_step(start, count, func) void
+    }
+
+    class SimdIterator {
+        <<utility>>
+        +SIMD_STEP : size_t
+        +for_each(start, count, simd_func, scalar_func) void
+        +for_each_step(start, count, func) void
     }
 
     class AVX512Backend {
@@ -713,6 +741,30 @@ classDiagram
 - accumulate_volumes(): 304 ns (~3.3M iterations/sec)
 - 4x faster than scalar implementation
 - Zero overhead abstraction (inlined)
+
+**SIMD Iterators:**
+
+Generic loop iterator with architecture-aware step sizes and early exit support:
+
+```cpp
+// Basic usage: process SIMD_STEP elements at a time
+simd::for_each_step(0, count, [&](size_t i, size_t step) {
+    for (size_t j = 0; j < step; j++) {
+        process(data[i + j]);
+    }
+    return true;  // Continue iteration
+});
+```
+
+**Features:**
+- Auto-detects SIMD width (8 for AVX-512, 4 for AVX2, 2 for SSE2, 1 for scalar)
+- Handles remainder elements with scalar loop (no manual tail handling)
+- Early exit support (return false to break)
+- Zero overhead (fully inlined with `__attribute__((always_inline))`)
+
+**Used by:**
+- `OrderFlowMetrics::track_level_births()` - Birth timestamp tracking
+- `OrderFlowMetrics::extract_levels()` - Level extraction + depth calculation
 
 ---
 
