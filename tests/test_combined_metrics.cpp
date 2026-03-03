@@ -16,6 +16,7 @@ bool approx_equal(double a, double b, double tol = 0.01) {
 
 // Helper to create order book with bid/ask
 OrderBook create_book_with_spread(Price bid, Quantity bid_qty, Price ask, Quantity ask_qty) {
+    // OrderBook(num_price_levels, max_orders): 9000 levels, 200K max orders
     OrderBook book(9000, 200000);
     book.add_order(1, Side::Buy, bid, bid_qty);
     book.add_order(2, Side::Sell, ask, ask_qty);
@@ -275,7 +276,7 @@ void test_spread_volatility() {
 
     CombinedMetrics combined(trade_metrics, book_metrics);
 
-    // Add spreads with variation: 5, 15, 10 (mean=10, variance=16.67, std=4.08)
+    // Add spreads with variation: 5, 15, 10 (mean=10, sample variance=25, std=5.0)
     auto book1 = create_book_with_spread(10000, 100, 10005, 100);
     book_metrics.on_order_book_update(book1, 1'000'000);
     combined.update(1'000'000);
