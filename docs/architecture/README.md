@@ -13,6 +13,7 @@ Shows the static structure of the system including:
 - **Network**: `UdpReceiver`, `PacketBuffer`, `MoldUDP64Header`
 - **Feed Handler**: `FeedHandler<Callback>`, `FeedCallback` concept
 - **IPC**: `SharedConfig`, `SharedRingBuffer`, `TradeEvent`, `SharedPortfolioState`
+- **Metrics**: `TradeStreamMetrics`, `OrderBookMetrics`, `OrderFlowMetrics`, `CombinedMetrics`
 - **Strategy**: `SmartStrategy`, `RegimeDetector`, `TechnicalIndicators`, `RiskManager`
 - **Paper Trading**: `PaperTradingEngine`, `PaperOrderSender`
 - **Trading Application**: `TradingApp`, `ExecutionEngine`, `Portfolio`, `EventPublisher`
@@ -169,6 +170,10 @@ Copy the PlantUML code to: https://www.plantuml.com/plantuml/uml/
 | FeedHandler | `include/feed_handler.hpp` | (header-only) |
 | SmartStrategy | `include/strategy/smart_strategy.hpp` | (header-only) |
 | SharedRingBuffer | `include/ipc/shared_ring_buffer.hpp` | (header-only) |
+| TradeStreamMetrics | `include/metrics/trade_stream_metrics.hpp` | (header-only) |
+| OrderBookMetrics | `include/metrics/order_book_metrics.hpp` | (header-only) |
+| OrderFlowMetrics | `include/metrics/order_flow_metrics.hpp` | (header-only) |
+| CombinedMetrics | `include/metrics/combined_metrics.hpp` | (header-only) |
 | Trader | - | `tools/trader.cpp` |
 | Dashboard | - | `tools/trader_dashboard.cpp` |
 | Observer | - | `tools/trader_observer.cpp` |

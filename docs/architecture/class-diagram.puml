@@ -557,6 +557,102 @@ package "C++20 Concepts" <<Frame>> {
 }
 
 ' ==============================================================================
+' Metrics Package
+' ==============================================================================
+package "Metrics" <<Frame>> {
+    class TradeStreamMetrics {
+        -trades_: array<Trade, 65536>
+        -head_: size_t
+        -tail_: size_t
+        -count_: size_t
+        -cached_metrics_: array<Metrics, 5>
+        --
+        +on_trade(price, qty, is_buy, timestamp)
+        +get_metrics(window): Metrics
+        +reset()
+    }
+
+    class OrderBookMetrics {
+        -metrics_: Metrics
+        -last_update_us_: uint64_t
+        --
+        +on_order_book_update(book, timestamp)
+        +get_metrics(): Metrics
+        +reset()
+    }
+
+    class OrderFlowMetrics {
+        -trades_: array<Trade, 65536>
+        -head_: size_t
+        -tail_: size_t
+        -count_: size_t
+        -cached_metrics_: array<Metrics, 5>
+        --
+        +on_trade(price, qty, side, timestamp)
+        +get_metrics(window): Metrics
+        +reset()
+    }
+
+    class CombinedMetrics {
+        -trade_metrics_: TradeStreamMetrics&
+        -book_metrics_: OrderBookMetrics&
+        -spread_history_: array<SpreadSample, 8192>
+        -trade_by_price_: array<TradeAtPrice, 256>
+        -prev_best_bid_: Price
+        -prev_best_ask_: Price
+        -cached_metrics_: array<Metrics, 5>
+        --
+        +update(timestamp)
+        +get_metrics(window): Metrics
+        +reset()
+    }
+
+    enum TradeWindow {
+        W1s
+        W5s
+        W10s
+        W30s
+        W1min
+    }
+
+    struct "TradeStreamMetrics::Metrics" as TradeMetrics {
+        +buy_volume: double
+        +sell_volume: double
+        +total_volume: double
+        +vwap: double
+        +realized_volatility: double
+        ...
+    }
+
+    struct "OrderBookMetrics::Metrics" as BookMetrics {
+        +spread: double
+        +spread_bps: double
+        +mid_price: double
+        +bid_depth_5: double
+        +imbalance_5: double
+        ...
+    }
+
+    struct "CombinedMetrics::Metrics" as CombinedMetricsStruct {
+        +trade_to_depth_ratio: double
+        +absorption_ratio_bid: double
+        +absorption_ratio_ask: double
+        +spread_mean: double
+        +spread_max: double
+        +spread_min: double
+        +spread_volatility: double
+    }
+
+    TradeStreamMetrics --> TradeWindow : uses
+    TradeStreamMetrics --> TradeMetrics : produces
+    OrderBookMetrics --> BookMetrics : produces
+    CombinedMetrics --> CombinedMetricsStruct : produces
+    CombinedMetrics --> TradeStreamMetrics : references
+    CombinedMetrics --> OrderBookMetrics : references
+    OrderFlowMetrics --> TradeWindow : uses
+}
+
+' ==============================================================================
 ' Relationships
 ' ==============================================================================
 
