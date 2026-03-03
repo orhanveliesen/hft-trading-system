@@ -174,6 +174,9 @@ Copy the PlantUML code to: https://www.plantuml.com/plantuml/uml/
 | OrderBookMetrics | `include/metrics/order_book_metrics.hpp` | (header-only) |
 | OrderFlowMetrics | `include/metrics/order_flow_metrics.hpp` | (header-only) |
 | CombinedMetrics | `include/metrics/combined_metrics.hpp` | (header-only) |
+| FuturesMarketData | `include/exchange/futures_market_data.hpp` | (header-only) |
+| BinanceFuturesWs | `include/exchange/binance_futures_ws.hpp` | (header-only) |
+| BinanceFuturesRest | `include/exchange/binance_futures_rest.hpp` | (header-only) |
 | Trader | - | `tools/trader.cpp` |
 | Dashboard | - | `tools/trader_dashboard.cpp` |
 | Observer | - | `tools/trader_observer.cpp` |
