@@ -488,8 +488,8 @@ void test_exit_on_disagreement() {
     book_metrics.on_order_book_update(book, base_time);
 
     // 3. Futures: Extreme positive funding + long liquidations → -40, clamped to -20
-    futures.on_mark_price(100000, 100000, 0.002, base_time);          // funding_rate > 0.001 → extreme
-    futures.on_liquidation(Side::Sell, 100000, 1000, base_time);      // Long liquidation
+    futures.on_mark_price(100000, 100000, 0.002, base_time);     // funding_rate > 0.001 → extreme
+    futures.on_liquidation(Side::Sell, 100000, 1000, base_time); // Long liquidation
     futures.on_liquidation(Side::Sell, 100000, 1500, base_time + 10000);
     futures.on_liquidation(Side::Sell, 100000, 500, base_time + 20000); // Additional long liq
 
@@ -516,8 +516,8 @@ void test_exit_on_disagreement() {
 
     Signal signal = strategy.generate(0, market, position, MarketRegime::Ranging, &ctx);
 
-    // Long + strong sell signal (score < -60) → Exit
-    assert(signal.type == SignalType::Sell);
+    // Long + strong bearish signal (score < -60) → Exit position
+    assert(signal.type == SignalType::Exit);
     assert(signal.suggested_qty == 50); // Exit full position
     std::cout << "[PASS] test_exit_on_disagreement\n";
 }
