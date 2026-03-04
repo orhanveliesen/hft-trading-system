@@ -1,6 +1,7 @@
 #include "../include/exchange/binance_futures_ws.hpp"
 #include "../include/exchange/futures_market_data.hpp"
 #include "../include/metrics/futures_metrics.hpp"
+
 #include <iostream>
 
 using namespace hft;
@@ -21,10 +22,12 @@ void test_compilation() {
     });
 
     // Test liquidation callback integration
-    ws.set_liquidation_callback([&](const LiquidationOrder& lo) { fm.on_liquidation(lo.side, lo.price, lo.quantity, lo.event_time * 1000); });
+    ws.set_liquidation_callback(
+        [&](const LiquidationOrder& lo) { fm.on_liquidation(lo.side, lo.price, lo.quantity, lo.event_time * 1000); });
 
     // Test book_ticker callback integration
-    ws.set_book_ticker_callback([&](const FuturesBookTicker& fbt) { fm.on_futures_bbo(fbt.bid_price, fbt.ask_price, fbt.event_time * 1000); });
+    ws.set_book_ticker_callback(
+        [&](const FuturesBookTicker& fbt) { fm.on_futures_bbo(fbt.bid_price, fbt.ask_price, fbt.event_time * 1000); });
 
     // Verify metrics can be retrieved
     auto metrics = fm.get_metrics(FuturesWindow::W1s);
