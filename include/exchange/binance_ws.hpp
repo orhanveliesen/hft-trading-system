@@ -277,6 +277,48 @@ public:
         return snapshot;
     }
 
+    /**
+     * Parse price/qty pairs from JSON array string.
+     * Format: ["42000.50","1.5"],["41999.00","3.2"]
+     *
+     * Public for testing. Returns number of levels parsed.
+     */
+    static int parse_levels(const std::string& json, std::array<WsDepthUpdate::Level, 20>& levels) {
+        int count = 0;
+        size_t pos = 0;
+
+        while (count < 20 && pos < json.length()) {
+            // Find next [ bracket
+            size_t bracket_start = json.find('[', pos);
+            if (bracket_start == std::string::npos)
+                break;
+
+            // Find closing ] bracket
+            size_t bracket_end = json.find(']', bracket_start);
+            if (bracket_end == std::string::npos)
+                break;
+
+            // Extract price and quantity strings
+            size_t price_start = json.find('"', bracket_start) + 1;
+            size_t price_end = json.find('"', price_start);
+            size_t qty_start = json.find('"', price_end + 1) + 1;
+            size_t qty_end = json.find('"', qty_start);
+
+            if (price_end != std::string::npos && qty_end != std::string::npos) {
+                double price = std::stod(json.substr(price_start, price_end - price_start));
+                double qty = std::stod(json.substr(qty_start, qty_end - qty_start));
+
+                levels[count].price = static_cast<Price>(price * 10000.0);
+                levels[count].quantity = static_cast<Quantity>(qty * 10000.0);
+                count++;
+            }
+
+            pos = bracket_end + 1;
+        }
+
+        return count;
+    }
+
 private:
     std::string host_;
     int port_;
@@ -473,44 +515,6 @@ private:
         }
 
         depth_callback_(depth);
-    }
-
-    // Helper: Parse price/qty pairs from JSON array string
-    // Format: ["42000.50","1.5"],["41999.00","3.2"]
-    int parse_levels(const std::string& json, std::array<WsDepthUpdate::Level, 20>& levels) {
-        int count = 0;
-        size_t pos = 0;
-
-        while (count < 20 && pos < json.length()) {
-            // Find next [ bracket
-            size_t bracket_start = json.find('[', pos);
-            if (bracket_start == std::string::npos)
-                break;
-
-            // Find closing ] bracket
-            size_t bracket_end = json.find(']', bracket_start);
-            if (bracket_end == std::string::npos)
-                break;
-
-            // Extract price and quantity strings
-            size_t price_start = json.find('"', bracket_start) + 1;
-            size_t price_end = json.find('"', price_start);
-            size_t qty_start = json.find('"', price_end + 1) + 1;
-            size_t qty_end = json.find('"', qty_start);
-
-            if (price_end != std::string::npos && qty_end != std::string::npos) {
-                double price = std::stod(json.substr(price_start, price_end - price_start));
-                double qty = std::stod(json.substr(qty_start, qty_end - qty_start));
-
-                levels[count].price = static_cast<Price>(price * 10000.0);
-                levels[count].quantity = static_cast<Quantity>(qty * 10000.0);
-                count++;
-            }
-
-            pos = bracket_end + 1;
-        }
-
-        return count;
     }
 
     // Simple JSON value extractors

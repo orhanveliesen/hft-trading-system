@@ -290,7 +290,7 @@ target_link_libraries(test_binance_ws_depth trader_core websockets)
 add_test(NAME BinanceWsDepthTests COMMAND test_binance_ws_depth)
 
 add_executable(test_metrics_wiring tests/test_metrics_wiring.cpp)
-target_link_libraries(test_metrics_wiring trader_core)
+target_link_libraries(test_metrics_wiring trader_core websockets)
 add_test(NAME MetricsWiringTests COMMAND test_metrics_wiring)
 
 # === Tools ===
