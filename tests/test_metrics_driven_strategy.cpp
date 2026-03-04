@@ -476,20 +476,22 @@ void test_exit_on_disagreement() {
     FuturesMetrics futures;
 
     // Multi-factor bearish signal to exceed -60 exit threshold:
-    // 1. Trade flow: 100% sells → -25
+    // 1. Trade flow: 100% sells → -25 (W5s window requires timestamps within 5s)
+    uint64_t base_time = 1000000; // 1 second
     for (int i = 0; i < 100; i++) {
-        trade.on_trade(100000, 100, false, i * 1000);
+        trade.on_trade(100000, 100, false, base_time + i * 10000); // Spread over 1s
     }
 
-    // 2. Book pressure: top_imbalance = -0.5 → -20 (more ask depth)
-    book.add_order(1, Side::Buy, 99900, 1000);  // Weak bid depth
+    // 2. Book pressure: top_imbalance < -0.3 → -20 (more ask depth)
+    book.add_order(1, Side::Buy, 99900, 1000);   // Weak bid depth
     book.add_order(2, Side::Sell, 100100, 5000); // Strong ask depth
-    book_metrics.on_order_book_update(book, 100000);
+    book_metrics.on_order_book_update(book, base_time);
 
     // 3. Futures: Extreme positive funding + long liquidations → -40, clamped to -20
-    futures.on_mark_price(100000, 100000, 0.002, 100000);   // funding_rate > 0.001 → extreme
-    futures.on_liquidation(Side::Sell, 100000, 1000, 110000); // Long liquidation
-    futures.on_liquidation(Side::Sell, 100000, 1500, 120000);
+    futures.on_mark_price(100000, 100000, 0.002, base_time);          // funding_rate > 0.001 → extreme
+    futures.on_liquidation(Side::Sell, 100000, 1000, base_time);      // Long liquidation
+    futures.on_liquidation(Side::Sell, 100000, 1500, base_time + 10000);
+    futures.on_liquidation(Side::Sell, 100000, 500, base_time + 20000); // Additional long liq
 
     // Total score: -25 (trade) - 20 (book) - 20 (futures) = -65 > -60 exit threshold
 
@@ -573,7 +575,7 @@ void test_book_pressure_bullish() {
     FuturesMetrics futures;
 
     // Create order book with strong bid depth
-    book.add_order(1, Side::Buy, 99900, 5000); // Strong bid
+    book.add_order(1, Side::Buy, 99900, 5000);   // Strong bid
     book.add_order(2, Side::Sell, 100100, 1000); // Weak ask
     book_metrics.on_order_book_update(book, 100000);
     // top_imbalance = (5000 - 1000) / (5000 + 1000) = 0.67 > 0.3 → +20
@@ -615,7 +617,7 @@ void test_book_pressure_bearish_spread_damping() {
     FuturesMetrics futures;
 
     // Create order book with strong ask depth + wide spread
-    book.add_order(1, Side::Buy, 98000, 1000);  // Weak bid
+    book.add_order(1, Side::Buy, 98000, 1000);   // Weak bid
     book.add_order(2, Side::Sell, 102000, 5000); // Strong ask
     book_metrics.on_order_book_update(book, 100000);
     // top_imbalance = (1000 - 5000) / (1000 + 5000) = -0.67 → -20
