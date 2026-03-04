@@ -70,6 +70,9 @@ public:
     // IStrategy Implementation
     // =========================================================================
 
+    // Bring base class 5-param generate() into scope (avoid name hiding)
+    using IStrategy::generate;
+
     Signal generate(Symbol symbol, const MarketSnapshot& market, const StrategyPosition& position,
                     MarketRegime regime) override {
         (void)symbol;

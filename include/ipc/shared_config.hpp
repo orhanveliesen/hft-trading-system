@@ -189,7 +189,7 @@ struct SharedConfig {
     // TunerState: OFF=traditional strategies, ON=AI-controlled, PAUSED=frozen config
     std::atomic<uint8_t> tuner_state;     // TunerState enum value
     std::atomic<uint8_t> manual_override; // 1 = manual override active (dashboard controls strategy)
-    std::atomic<uint8_t> reserved_tuner2; // Padding for alignment
+    std::atomic<uint8_t> metrics_mode;    // 0=off, 1=metrics-driven strategy
     std::atomic<uint8_t> reserved_tuner3; // Padding for alignment
 
     // Manual tune trigger (dashboard can request immediate tuning)
@@ -304,6 +304,9 @@ struct SharedConfig {
     bool is_tuner_on() const { return tuner_state.load() == static_cast<uint8_t>(TunerState::ON); }
     bool is_tuner_paused() const { return tuner_state.load() == static_cast<uint8_t>(TunerState::PAUSED); }
     int32_t get_tuner_interval_sec() const { return tuner_interval_sec.load(); }
+
+    // Metrics mode accessors
+    bool is_metrics_mode_enabled() const { return metrics_mode.load() != 0; }
 
     // Manual override accessors
     bool is_manual_override() const { return manual_override.load() != 0; }
@@ -578,6 +581,12 @@ struct SharedConfig {
         sequence.fetch_add(1);
     }
 
+    // Metrics mode mutator
+    void set_metrics_mode(bool enabled) {
+        metrics_mode.store(enabled ? 1 : 0);
+        sequence.fetch_add(1);
+    }
+
     // Position sizing mutators
     void set_position_sizing_mode(uint8_t mode) {
         position_sizing_mode.store(mode);
@@ -785,7 +794,7 @@ struct SharedConfig {
         // Tuner state (simplified - single enum)
         tuner_state.store(static_cast<uint8_t>(TunerState::ON)); // ON by default
         manual_override.store(0);
-        reserved_tuner2.store(0);
+        metrics_mode.store(0); // OFF by default
         reserved_tuner3.store(0);
         manual_tune_request_ns.store(0);
         tuner_interval_sec.store(300); // Default: 5 minutes

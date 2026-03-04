@@ -61,6 +61,8 @@
 #include "../include/strategy/fair_value_strategy.hpp"
 #include "../include/strategy/istrategy.hpp"
 #include "../include/strategy/market_maker_strategy.hpp"
+#include "../include/strategy/metrics_context.hpp"
+#include "../include/strategy/metrics_driven_strategy.hpp"
 #include "../include/strategy/momentum_strategy.hpp"
 #include "../include/strategy/strategy_constants.hpp"
 #include "../include/strategy/strategy_selector.hpp"
@@ -435,6 +437,18 @@ public:
     }
 
     std::optional<Symbol> lookup_symbol(const std::string& ticker) const { return engine_.lookup_symbol(ticker); }
+
+    void set_metrics_arrays(std::array<TradeStreamMetrics, MAX_SYMBOLS>* trade,
+                            std::array<OrderBookMetrics, MAX_SYMBOLS>* book,
+                            std::array<OrderFlowMetrics<20>, MAX_SYMBOLS>* flow,
+                            std::array<std::unique_ptr<CombinedMetrics>, MAX_SYMBOLS>* combined,
+                            std::array<FuturesMetrics, MAX_SYMBOLS>* futures) {
+        trade_metrics_ = trade;
+        book_metrics_ = book;
+        flow_metrics_ = flow;
+        combined_metrics_ = combined;
+        futures_metrics_ = futures;
+    }
 
     void on_quote(const std::string& ticker, Price bid, Price ask, Quantity bid_size, Quantity ask_size) {
         // Hot path - no locks, O(1) array access
@@ -843,6 +857,13 @@ private:
     SharedEventLog* event_log_ = nullptr;                // Event log for tuner/web
     uint32_t last_config_seq_ = 0;                       // Track config changes
 
+    // Metrics arrays (injected from run() scope)
+    std::array<TradeStreamMetrics, MAX_SYMBOLS>* trade_metrics_ = nullptr;
+    std::array<OrderBookMetrics, MAX_SYMBOLS>* book_metrics_ = nullptr;
+    std::array<OrderFlowMetrics<20>, MAX_SYMBOLS>* flow_metrics_ = nullptr;
+    std::array<std::unique_ptr<CombinedMetrics>, MAX_SYMBOLS>* combined_metrics_ = nullptr;
+    std::array<FuturesMetrics, MAX_SYMBOLS>* futures_metrics_ = nullptr;
+
     // Paper exchange (only used in paper mode)
     hft::exchange::PaperExchange paper_exchange_;
 
@@ -1141,6 +1162,10 @@ private:
 
         auto fv_strategy = std::make_unique<FairValueStrategy>(fv_config);
         strategy_selector_.register_strategy(std::move(fv_strategy));
+
+        // MetricsDrivenStrategy (multi-factor metrics-based)
+        auto metrics_strategy = std::make_unique<MetricsDrivenStrategy>();
+        strategy_selector_.register_strategy(std::move(metrics_strategy));
 
         std::cout << "[STRATEGY] Registered " << strategy_selector_.count() << " strategies: ";
         for (auto name : strategy_selector_.strategy_names()) {
@@ -1562,26 +1587,51 @@ private:
         // 3. Get current regime
         MarketRegime regime = strat->current_regime;
 
-        // 4. Select strategy and generate signal based on TunerState
+        // 3b. Build metrics context for this symbol
+        MetricsContext metrics_ctx;
+        if (trade_metrics_ && id < MAX_SYMBOLS) {
+            metrics_ctx.trade = &(*trade_metrics_)[id];
+            metrics_ctx.book = &(*book_metrics_)[id];
+            metrics_ctx.flow = &(*flow_metrics_)[id];
+            metrics_ctx.combined = (*combined_metrics_)[id].get();
+            metrics_ctx.futures = &(*futures_metrics_)[id];
+        }
+
+        // 4. Select strategy and generate signal based on mode (METRICS → CONFIG → REGIME)
         Signal signal;
         const char* strategy_name = "Unknown";
+
+        // Determine which strategy selection mode to use
+        bool use_metrics_strategy = shared_config_ && shared_config_->is_metrics_mode_enabled();
         bool use_config_strategy =
             shared_config_ && (shared_config_->is_tuner_on() || shared_config_->is_tuner_paused());
-        if (use_config_strategy) {
-            // TunerState ON/PAUSED: Use ConfigStrategy (config-driven)
+
+        if (use_metrics_strategy) {
+            // METRICS mode: Use MetricsDrivenStrategy (selected by name, not regime)
+            auto* metrics_strat = strategy_selector_.select_by_name("MetricsDriven");
+            if (!metrics_strat || !metrics_strat->ready()) {
+                return false; // MetricsDrivenStrategy not registered or not ready
+            }
+            signal = metrics_strat->generate(id, market, position, regime, &metrics_ctx);
+            strategy_name = "MetricsDriven";
+        } else if (use_config_strategy) {
+            // CONFIG mode: TunerState ON/PAUSED → use ConfigStrategy
             auto& cfg_strat = config_strategies_[id];
-            if (!cfg_strat || !cfg_strat->ready())
+            if (!cfg_strat || !cfg_strat->ready()) {
                 return false;
-            signal = cfg_strat->generate(id, market, position, regime);
+            }
+            signal = cfg_strat->generate(id, market, position, regime, &metrics_ctx);
             strategy_name = "Config";
         } else {
-            // TunerState OFF: Use traditional regime-based strategy selection
+            // REGIME mode: TunerState OFF → regime-based selection
             IStrategy* strategy = strategy_selector_.select_for_regime(regime);
-            if (!strategy || !strategy->ready())
+            if (!strategy || !strategy->ready()) {
                 return false;
-            signal = strategy->generate(id, market, position, regime);
+            }
+            signal = strategy->generate(id, market, position, regime, &metrics_ctx);
             strategy_name = strategy->name().data();
         }
+
         if (!signal.is_actionable())
             return false;
 
@@ -2045,6 +2095,10 @@ int run(const CLIArgs& args) {
     // Initialize futures metrics array (avoid heap allocation and string hash on hot path)
     // Use same pattern as existing trader: Symbol id (uint32_t) + array indexing
     std::array<FuturesMetrics, MAX_SYMBOLS> futures_metrics_array;
+
+    // Inject metrics arrays into TradingApp
+    app.set_metrics_arrays(&trade_metrics_array, &order_book_metrics_array, &order_flow_metrics_array,
+                           &combined_metrics_array, &futures_metrics_array);
 
     ws.set_connect_callback([](bool c) {
         if (c) {

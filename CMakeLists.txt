@@ -79,6 +79,18 @@ add_executable(test_strategy tests/test_strategy.cpp)
 target_link_libraries(test_strategy trader_core)
 add_test(NAME StrategyTests COMMAND test_strategy)
 
+add_executable(test_metrics_driven_strategy tests/test_metrics_driven_strategy.cpp)
+target_link_libraries(test_metrics_driven_strategy trader_core)
+add_test(NAME MetricsDrivenStrategyTests COMMAND test_metrics_driven_strategy)
+
+add_executable(test_strategy_interface tests/test_strategy_interface.cpp)
+target_link_libraries(test_strategy_interface trader_core)
+add_test(NAME StrategyInterfaceTests COMMAND test_strategy_interface)
+
+add_executable(test_metrics_mode tests/test_metrics_mode.cpp)
+target_link_libraries(test_metrics_mode trader_core)
+add_test(NAME MetricsModeTests COMMAND test_metrics_mode)
+
 add_executable(test_simd tests/test_simd.cpp)
 target_link_libraries(test_simd trader_core)
 add_test(NAME SimdTests COMMAND test_simd)
