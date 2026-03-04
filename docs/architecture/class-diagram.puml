@@ -607,6 +607,32 @@ package "Metrics" <<Frame>> {
         +reset()
     }
 
+    class FuturesMetrics {
+        -events_: array<LiquidationEvent, 8192>
+        -event_head_: size_t
+        -event_tail_: size_t
+        -event_count_: size_t
+        -funding_rate_: double
+        -futures_bid_, futures_ask_: double
+        -spot_bid_, spot_ask_: double
+        -window_states_: array<WindowState, 5>
+        --
+        +on_mark_price(mark, index, rate, ts)
+        +on_liquidation(side, price, qty, ts)
+        +on_futures_bbo(bid, ask, ts)
+        +on_spot_bbo(bid, ask, ts)
+        +get_metrics(window): Metrics
+        +update(now_us)
+    }
+
+    enum FuturesWindow {
+        W1s
+        W5s
+        W10s
+        W30s
+        W1min
+    }
+
     enum TradeWindow {
         W1s
         W5s
@@ -650,6 +676,7 @@ package "Metrics" <<Frame>> {
     CombinedMetrics --> TradeStreamMetrics : references
     CombinedMetrics --> OrderBookMetrics : references
     OrderFlowMetrics --> TradeWindow : uses
+    FuturesMetrics --> FuturesWindow : uses
 }
 
 ' ==============================================================================
@@ -772,6 +799,11 @@ package "Exchange" <<Frame>> {
 
 ' Core relationships
 Order --* PriceLevel : "linked list"
+
+' Metrics relationships
+FuturesMetrics ..> MarkPriceUpdate : consumes
+FuturesMetrics ..> LiquidationOrder : consumes
+FuturesMetrics ..> FuturesBookTicker : consumes
 
 ' Strategy relationships
 SmartStrategy ..> RiskManager : uses
