@@ -212,12 +212,12 @@ void test_parse_levels_basic() {
     int count = BinanceWs::parse_levels(json, levels);
 
     assert(count == 3);
-    assert(levels[0].price == 420005000);  // 42000.50 * 10000
-    assert(levels[0].quantity == 15000);   // 1.5 * 10000
-    assert(levels[1].price == 419990000);  // 41999.00 * 10000
-    assert(levels[1].quantity == 32000);   // 3.2 * 10000
-    assert(levels[2].price == 419980000);  // 41998.00 * 10000
-    assert(levels[2].quantity == 21000);   // 2.1 * 10000
+    assert(levels[0].price == 420005000); // 42000.50 * 10000
+    assert(levels[0].quantity == 15000); // 1.5 * 10000
+    assert(levels[1].price == 419990000); // 41999.00 * 10000
+    assert(levels[1].quantity == 32000); // 3.2 * 10000
+    assert(levels[2].price == 419980000); // 41998.00 * 10000
+    assert(levels[2].quantity == 21000); // 2.1 * 10000
 
     std::cout << "✓ test_parse_levels_basic\n";
 }
@@ -254,8 +254,8 @@ void test_parse_levels_single_level() {
     int count = BinanceWs::parse_levels(json, levels);
 
     assert(count == 1);
-    assert(levels[0].price == 500000000);  // 50000.00 * 10000
-    assert(levels[0].quantity == 10000);   // 1.0 * 10000
+    assert(levels[0].price == 500000000); // 50000.00 * 10000
+    assert(levels[0].quantity == 10000); // 1.0 * 10000
 
     std::cout << "✓ test_parse_levels_single_level\n";
 }

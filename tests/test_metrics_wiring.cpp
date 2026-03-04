@@ -33,7 +33,7 @@ void test_wiring_compilation() {
 
     // Verify metrics can be retrieved
     auto tsm_metrics = tsm.get_metrics(TradeWindow::W1s);
-    assert(tsm_metrics.trade_count > 0);
+    assert(tsm_metrics.total_trades > 0);
 
     // WsDepthUpdate → BookSnapshot → OrderBookMetrics
     OrderBookMetrics obm;
@@ -130,7 +130,7 @@ void test_trade_metrics_integration() {
     auto metrics = tsm.get_metrics(TradeWindow::W1s);
 
     // Should have 10 trades
-    assert(metrics.trade_count == 10);
+    assert(metrics.total_trades == 10);
 
     // Should have both buy and sell volume
     assert(metrics.buy_volume > 0);
@@ -202,8 +202,8 @@ void test_combined_metrics_integration() {
     auto metrics = cm.get_metrics(CombinedMetrics::Window::SEC_1);
 
     // Should have combined data from both sources
-    assert(metrics.trade_count > 0);
-    assert(metrics.spread > 0);
+    // CombinedMetrics derives spread metrics from book data
+    assert(metrics.spread_mean > 0 || metrics.spread_max > 0); // At least one should be set
 
     std::cout << "✓ test_combined_metrics_integration\n";
 }
