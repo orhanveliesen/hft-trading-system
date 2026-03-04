@@ -163,6 +163,21 @@ void test_pipeline_stage_names() {
     std::cout << "[PASS] test_pipeline_stage_names\n";
 }
 
+void test_pipeline_stage_count() {
+    ExecutionPipeline pipeline;
+    assert(pipeline.stage_count() == 0);
+    assert(pipeline.empty());
+
+    pipeline.add_stage(std::make_unique<SpotMarketStage>());
+    assert(pipeline.stage_count() == 1);
+    assert(!pipeline.empty());
+
+    pipeline.add_stage(std::make_unique<SpotMarketStage>());
+    assert(pipeline.stage_count() == 2);
+
+    std::cout << "[PASS] test_pipeline_stage_count\n";
+}
+
 // Mock exchange for testing execute_request
 class MockExchange : public IExchangeAdapter {
 public:
@@ -244,9 +259,10 @@ int main() {
     test_pipeline_skips_disabled_stage();
     test_order_request_is_valid();
     test_pipeline_stage_names();
+    test_pipeline_stage_count();
     test_execute_request_market_order();
     test_execute_request_sell_position_check();
 
-    std::cout << "\n✓ All 12 tests passed!\n";
+    std::cout << "\n✓ All 13 tests passed!\n";
     return 0;
 }

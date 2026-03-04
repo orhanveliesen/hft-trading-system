@@ -21,7 +21,7 @@ struct ExecutionContext {
 /// Base interface for execution pipeline stages
 class IExecutionStage {
 public:
-    virtual ~IExecutionStage() = default;
+    virtual ~IExecutionStage() = default; // LCOV_EXCL_LINE
 
     /// Process signal, return zero or more OrderRequests
     /// Each stage independently decides whether to produce orders
