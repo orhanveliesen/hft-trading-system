@@ -229,8 +229,8 @@ inline double MetricsDrivenStrategy::score_trade_flow(const TradeStreamMetrics* 
     } else if (buy_ratio < 0.35) {
         return -25.0;
     } else {
-        // Interpolate linearly
-        return (buy_ratio - 0.5) * 2.0 * 25.0;
+        // Interpolate linearly: slope = 25 / 0.15 = 166.67
+        return (buy_ratio - 0.5) / 0.15 * 25.0;
     }
 }
 
@@ -329,6 +329,12 @@ inline double MetricsDrivenStrategy::score_futures_sentiment(const FuturesMetric
     if (std::abs(m.basis_bps) > 50.0) {
         score *= 0.7; // 30% reduction
     }
+
+    // Clamp to weight limit [-20, +20]
+    if (score > 20.0)
+        score = 20.0;
+    if (score < -20.0)
+        score = -20.0;
 
     return score;
 }
