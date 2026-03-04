@@ -33,7 +33,11 @@
 #include "../include/ipc/trade_event.hpp"
 #include "../include/ipc/tuner_event.hpp"
 #include "../include/ipc/udp_telemetry.hpp"
+#include "../include/metrics/combined_metrics.hpp"
 #include "../include/metrics/futures_metrics.hpp"
+#include "../include/metrics/order_book_metrics.hpp"
+#include "../include/metrics/order_flow_metrics.hpp"
+#include "../include/metrics/trade_stream_metrics.hpp"
 #include "../include/paper/paper_order_sender.hpp"
 #include "../include/paper/queue_fill_detector.hpp"
 #include "../include/risk/enhanced_risk_manager.hpp"
@@ -2013,8 +2017,25 @@ int run(const CLIArgs& args) {
 
     auto symbols = args.symbols.empty() ? fetch_default_symbols() : args.symbols;
     std::cout << "Registering " << symbols.size() << " symbols...\n";
-    for (auto& s : symbols)
+
+    // Spot metrics arrays (declared before symbol registration)
+    std::array<TradeStreamMetrics, MAX_SYMBOLS> trade_metrics_array;
+    std::array<OrderBookMetrics, MAX_SYMBOLS> order_book_metrics_array;
+    std::array<OrderFlowMetrics<20>, MAX_SYMBOLS> order_flow_metrics_array;
+    std::array<std::unique_ptr<CombinedMetrics>, MAX_SYMBOLS> combined_metrics_array;
+
+    // Register symbols and initialize CombinedMetrics
+    for (auto& s : symbols) {
         app.add_symbol(s);
+
+        // Initialize CombinedMetrics for this symbol
+        auto opt = app.lookup_symbol(s);
+        if (opt && *opt < MAX_SYMBOLS) {
+            Symbol id = *opt;
+            combined_metrics_array[id] =
+                std::make_unique<CombinedMetrics>(trade_metrics_array[id], order_book_metrics_array[id]);
+        }
+    }
 
     BinanceWs ws(false);
 
@@ -2081,6 +2102,51 @@ int run(const CLIArgs& args) {
                 .count());
     });
 
+    // Spot trade stream callback
+    ws.set_trade_callback([&](const WsTrade& t) {
+        auto opt = app.lookup_symbol(t.symbol);
+        if (!opt || *opt >= MAX_SYMBOLS)
+            return;
+        Symbol id = *opt;
+
+        // t.price is already Price type, t.quantity is double
+        Quantity qty = static_cast<Quantity>(t.quantity * config::scaling::QUANTITY_SCALE);
+        bool is_buy = !t.is_buyer_maker; // Taker side determines direction
+        uint64_t ts_us = t.time * 1000;  // ms → us
+
+        // Feed to metrics
+        trade_metrics_array[id].on_trade(t.price, qty, is_buy, ts_us);
+        order_flow_metrics_array[id].on_trade(t.price, qty, ts_us);
+
+        // Update combined metrics
+        if (combined_metrics_array[id]) {
+            combined_metrics_array[id]->update(ts_us);
+        }
+    });
+
+    // Spot depth stream callback
+    ws.set_depth_callback([&](const WsDepthUpdate& d) {
+        auto opt = app.lookup_symbol(d.symbol);
+        if (!opt || *opt >= MAX_SYMBOLS)
+            return;
+        Symbol id = *opt;
+
+        // Convert depth to snapshot
+        auto snapshot = BinanceWs::depth_to_snapshot(d);
+        uint64_t ts_us =
+            std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now().time_since_epoch())
+                .count();
+
+        // Feed to metrics
+        order_book_metrics_array[id].on_depth_snapshot(snapshot, ts_us);
+        order_flow_metrics_array[id].on_depth_snapshot(snapshot, ts_us);
+
+        // Update combined metrics
+        if (combined_metrics_array[id]) {
+            combined_metrics_array[id]->update(ts_us);
+        }
+    });
+
     // Futures callbacks
     futures_ws.set_connect_callback([](bool c) {
         if (c) {
@@ -2116,8 +2182,11 @@ int run(const CLIArgs& args) {
         futures_metrics_array[*opt].on_futures_bbo(fbt.bid_price, fbt.ask_price, fbt.event_time * 1000);
     });
 
-    for (auto& s : symbols)
+    for (auto& s : symbols) {
         ws.subscribe_book_ticker(s);
+        ws.subscribe_trade(s);     // Add trade stream
+        ws.subscribe_depth(s, 20); // Add depth stream - top 20 levels every 100ms
+    }
 
     // Subscribe to futures streams
     for (auto& s : symbols) {

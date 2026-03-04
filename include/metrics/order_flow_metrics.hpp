@@ -104,6 +104,21 @@ public:
     }
 
     /**
+     * Process a trade (for WebSocket trade feeds)
+     */
+    inline void on_trade(Price price, Quantity quantity, uint64_t timestamp_us) {
+        cleanup_old_trades(timestamp_us);
+
+        // Add to recent trades buffer
+        recent_trades_[trade_tail_] = RecentTrade{price, quantity, timestamp_us};
+
+        size_t new_tail = (trade_tail_ + 1) & TRADE_MASK;
+        size_t would_overflow = (new_tail == trade_head_);
+        trade_head_ = (trade_head_ + would_overflow) & TRADE_MASK;
+        trade_tail_ = new_tail;
+    }
+
+    /**
      * Process order book update (compare prev vs new state)
      */
     inline void on_order_book_update(const OrderBook& book, uint64_t timestamp_us) {
@@ -275,6 +290,173 @@ public:
         }
 
         // Update previous state (flat array copy, cache-friendly)
+        prev_bid_levels_ = current_bid_levels;
+        prev_ask_levels_ = current_ask_levels;
+        prev_bid_count_ = current_bid_count;
+        prev_ask_count_ = current_ask_count;
+        prev_bid_depth_ = current_bid_depth;
+        prev_ask_depth_ = current_ask_depth;
+        prev_timestamp_us_ = timestamp_us;
+    }
+
+    /**
+     * Process depth snapshot (for WebSocket depth feeds)
+     *
+     * Same logic as on_order_book_update but takes BookSnapshot directly.
+     * Code duplication is intentional to avoid creating fake OrderBook.
+     */
+    inline void on_depth_snapshot(const BookSnapshot& snapshot, uint64_t timestamp_us) {
+        // Calculate total depth and store current levels in flat arrays
+        double current_bid_depth = 0.0;
+        double current_ask_depth = 0.0;
+        int current_bid_count = snapshot.bid_level_count;
+        int current_ask_count = snapshot.ask_level_count;
+
+        std::array<PriceLevel, MaxDepthLevels> current_bid_levels{};
+        std::array<PriceLevel, MaxDepthLevels> current_ask_levels{};
+
+        // Lambda for extracting levels with depth calculation (SIMD-optimized: single pass)
+        auto extract_levels = [&](const LevelInfo* source, PriceLevel* dest, int count, double& total_depth) {
+            simd::for_each_step(0, static_cast<size_t>(count), [&](size_t i, size_t step) {
+                for (size_t j = 0; j < step; j++) {
+                    dest[i + j].price = source[i + j].price;
+                    dest[i + j].quantity = source[i + j].quantity;
+                    total_depth += static_cast<double>(source[i + j].quantity);
+                }
+                return true;
+            });
+        };
+
+        // Extract bid and ask levels
+        extract_levels(&snapshot.bid_levels[0], &current_bid_levels[0], current_bid_count, current_bid_depth);
+        extract_levels(&snapshot.ask_levels[0], &current_ask_levels[0], current_ask_count, current_ask_depth);
+
+        // Track level births (local lambda, 2 uses)
+        auto track_births = [&](const std::array<PriceLevel, MaxDepthLevels>& levels, int count) {
+            simd::for_each_step(0, static_cast<size_t>(count), [&](size_t i, size_t step) {
+                for (size_t j = 0; j < step; ++j) {
+                    add_birth(levels[i + j].price, timestamp_us);
+                }
+                return true;
+            });
+        };
+        track_births(current_bid_levels, current_bid_count);
+        track_births(current_ask_levels, current_ask_count);
+
+        // Compare with previous state and generate flow events
+        // Process bid levels (current vs previous)
+        for (int i = 0; i < current_bid_count; i++) {
+            Price price = current_bid_levels[i].price;
+            Quantity current_qty = current_bid_levels[i].quantity;
+
+            const PriceLevel* prev = find_price(prev_bid_levels_, prev_bid_count_, price);
+
+            auto handle_new_level = [&]() {
+                add_flow_event(make_flow_event(price, static_cast<double>(current_qty), 0.0, true, timestamp_us));
+            };
+
+            auto handle_qty_change = [&]() {
+                double delta =
+                    static_cast<double>(static_cast<int64_t>(current_qty) - static_cast<int64_t>(prev->quantity));
+
+                double removed = std::max(0.0, -delta);
+                Quantity traded = get_traded_quantity_at_price(price, timestamp_us);
+                double fill_vol = std::min(removed, static_cast<double>(traded));
+                double cancel_vol = removed - fill_vol;
+
+                add_flow_event(make_flow_event(price, delta, cancel_vol, true, timestamp_us));
+            };
+
+            if (!prev) {
+                handle_new_level();
+            } else if (current_qty != prev->quantity) {
+                handle_qty_change();
+            }
+        }
+
+        // Check for removed bid levels
+        for (int i = 0; i < prev_bid_count_; i++) {
+            Price price = prev_bid_levels_[i].price;
+            Quantity prev_qty = prev_bid_levels_[i].quantity;
+
+            const PriceLevel* current = find_price(current_bid_levels, current_bid_count, price);
+            if (!current) {
+                double removed = static_cast<double>(prev_qty);
+                Quantity traded = get_traded_quantity_at_price(price, timestamp_us);
+                double fill_vol = std::min(removed, static_cast<double>(traded));
+                double cancel_vol = removed - fill_vol;
+
+                add_flow_event(make_flow_event(price, -removed, cancel_vol, true, timestamp_us));
+
+                const PriceBirth* birth = find_birth(price);
+                if (birth) {
+                    LevelLifetime lifetime;
+                    lifetime.birth_us = birth->birth_us;
+                    lifetime.death_us = timestamp_us;
+                    lifetime.is_bid = true;
+                    add_lifetime(lifetime);
+                    remove_birth(price);
+                }
+            }
+        }
+
+        // Process ask levels (current vs previous)
+        for (int i = 0; i < current_ask_count; i++) {
+            Price price = current_ask_levels[i].price;
+            Quantity current_qty = current_ask_levels[i].quantity;
+
+            const PriceLevel* prev = find_price(prev_ask_levels_, prev_ask_count_, price);
+
+            auto handle_new_level = [&]() {
+                add_flow_event(make_flow_event(price, static_cast<double>(current_qty), 0.0, false, timestamp_us));
+            };
+
+            auto handle_qty_change = [&]() {
+                double delta =
+                    static_cast<double>(static_cast<int64_t>(current_qty) - static_cast<int64_t>(prev->quantity));
+
+                double removed = std::max(0.0, -delta);
+                Quantity traded = get_traded_quantity_at_price(price, timestamp_us);
+                double fill_vol = std::min(removed, static_cast<double>(traded));
+                double cancel_vol = removed - fill_vol;
+
+                add_flow_event(make_flow_event(price, delta, cancel_vol, false, timestamp_us));
+            };
+
+            if (!prev) {
+                handle_new_level();
+            } else if (current_qty != prev->quantity) {
+                handle_qty_change();
+            }
+        }
+
+        // Check for removed ask levels
+        for (int i = 0; i < prev_ask_count_; i++) {
+            Price price = prev_ask_levels_[i].price;
+            Quantity prev_qty = prev_ask_levels_[i].quantity;
+
+            const PriceLevel* current = find_price(current_ask_levels, current_ask_count, price);
+            if (!current) {
+                double removed = static_cast<double>(prev_qty);
+                Quantity traded = get_traded_quantity_at_price(price, timestamp_us);
+                double fill_vol = std::min(removed, static_cast<double>(traded));
+                double cancel_vol = removed - fill_vol;
+
+                add_flow_event(make_flow_event(price, -removed, cancel_vol, false, timestamp_us));
+
+                const PriceBirth* birth = find_birth(price);
+                if (birth) {
+                    LevelLifetime lifetime;
+                    lifetime.birth_us = birth->birth_us;
+                    lifetime.death_us = timestamp_us;
+                    lifetime.is_bid = false;
+                    add_lifetime(lifetime);
+                    remove_birth(price);
+                }
+            }
+        }
+
+        // Update previous state
         prev_bid_levels_ = current_bid_levels;
         prev_ask_levels_ = current_ask_levels;
         prev_bid_count_ = current_bid_count;
