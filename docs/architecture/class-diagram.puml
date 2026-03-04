@@ -496,7 +496,45 @@ package "Trading Application" <<Frame>> {
         +cancel_order(symbol, order_id): bool
         +on_fill(symbol, id, side, qty, price)
         +has_pending_order(symbol): bool
+        +execute_request(req, market): uint64_t
     }
+
+    ' Execution Pipeline
+    interface IExecutionStage {
+        +process(signal, ctx): vector<OrderRequest>
+        +name(): string_view
+        +enabled(): bool
+    }
+
+    class ExecutionPipeline {
+        -stages_: vector<unique_ptr<IExecutionStage>>
+        --
+        +add_stage(stage)
+        +process(signal, ctx): vector<OrderRequest>
+        +stage_count(): size_t
+        +stage_names(): vector<string_view>
+    }
+
+    class SpotMarketStage {
+        --
+        +process(signal, ctx): vector<OrderRequest>
+        +name(): "SpotMarket"
+    }
+
+    struct OrderRequest {
+        +symbol: Symbol
+        +side: Side
+        +type: OrderType
+        +qty: double
+        +venue: Venue
+        +is_valid(): bool
+    }
+
+    ExecutionPipeline o-- IExecutionStage : stages
+    SpotMarketStage ..|> IExecutionStage
+    IExecutionStage ..> OrderRequest : produces
+    ExecutionEngine <.. ExecutionPipeline : execute_request()
+    TradingApp --> ExecutionPipeline : METRICS mode only
 
     class Portfolio {
         -cash_: double

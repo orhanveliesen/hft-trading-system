@@ -57,6 +57,8 @@
 #include "../include/exchange/paper_exchange_adapter.hpp"
 #include "../include/exchange/production_order_sender.hpp"
 #include "../include/execution/execution_engine.hpp"
+#include "../include/execution/execution_pipeline.hpp"
+#include "../include/execution/spot_market_stage.hpp"
 #include "../include/strategy/config_strategy.hpp"
 #include "../include/strategy/fair_value_strategy.hpp"
 #include "../include/strategy/istrategy.hpp"
@@ -347,6 +349,14 @@ public:
 
             std::cout << "[EXEC] ExecutionEngine initialized with PaperExchangeAdapter\n";
         }
+
+        // Initialize execution pipeline
+        execution_pipeline_.add_stage(std::make_unique<execution::SpotMarketStage>());
+        std::cout << "[EXEC] ExecutionPipeline initialized with " << execution_pipeline_.stage_count() << " stages: ";
+        for (auto name : execution_pipeline_.stage_names()) {
+            std::cout << name << " ";
+        }
+        std::cout << "\n";
 
         // UDP Telemetry for remote monitoring
         if (telemetry_.is_valid()) {
@@ -870,6 +880,7 @@ private:
     // Unified strategy architecture
     StrategySelector strategy_selector_;
     execution::ExecutionEngine execution_engine_;
+    execution::ExecutionPipeline execution_pipeline_;
     std::unique_ptr<PaperExchangeAdapter> paper_adapter_; // Owned adapter for IExchange
 
     // Per-symbol ConfigStrategy instances (used when TunerState is ON or PAUSED)
@@ -1650,7 +1661,8 @@ private:
         }
 
         // 5. Apply order type preference from config (overrides strategy default)
-        if (shared_config_) {
+        // SKIP for METRICS mode — pipeline handles order type
+        if (!use_metrics_strategy && shared_config_) {
             uint8_t pref = shared_config_->get_order_type_default();
             switch (pref) {
             case 1: // MarketOnly
@@ -1709,9 +1721,28 @@ private:
             }
         }
 
-        // 6. Execute signal using ExecutionEngine
-        // The engine decides limit vs market based on signal.order_pref, strength, regime, spread
-        uint64_t order_id = execution_engine_.execute(id, signal, market, regime);
+        // 6. Execute signal
+        uint64_t order_id = 0;
+
+        if (use_metrics_strategy) {
+            // METRICS mode: Route through execution pipeline
+            execution::ExecutionContext exec_ctx;
+            exec_ctx.symbol = id;
+            exec_ctx.market = market;
+            exec_ctx.position = position;
+            exec_ctx.regime = regime;
+            exec_ctx.metrics = &metrics_ctx;
+
+            auto requests = execution_pipeline_.process(signal, exec_ctx);
+            for (const auto& req : requests) {
+                order_id = execution_engine_.execute_request(req, market);
+                if (order_id > 0)
+                    break; // Phase 4.1: single order per signal
+            }
+        } else {
+            // CONFIG/REGIME mode: Direct execution (unchanged legacy path)
+            order_id = execution_engine_.execute(id, signal, market, regime);
+        }
 
         if (order_id > 0) {
             // Reserve cash for buy orders

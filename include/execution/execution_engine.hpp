@@ -3,6 +3,7 @@
 #include "../strategy/istrategy.hpp"
 #include "../types.hpp"
 #include "../util/time_utils.hpp"
+#include "order_request.hpp"
 
 #include <cstdint>
 #include <functional>
@@ -17,7 +18,7 @@ using namespace strategy;
 // Order Types for Execution
 // =============================================================================
 
-enum class OrderType : uint8_t { Market, Limit };
+// OrderType moved to types.hpp to avoid circular dependency
 
 struct PendingOrder {
     uint64_t order_id = 0;
@@ -208,6 +209,48 @@ public:
         if (order_id > 0 && on_order_) {
             Price order_price = (order_type == OrderType::Market) ? expected_price : limit_price;
             on_order_(order_id, symbol, side, qty, order_price, order_type);
+        }
+
+        return order_id;
+    }
+
+    /// Execute an OrderRequest directly (used by pipeline)
+    /// Skips decide_order_type() — type already determined by pipeline stage
+    uint64_t execute_request(const OrderRequest& req, const strategy::MarketSnapshot& market) {
+        if (!req.is_valid() || !exchange_) {
+            return 0;
+        }
+
+        Side side = req.side;
+        double qty = req.qty;
+        Price expected_price = (side == Side::Buy) ? market.ask : market.bid;
+
+        // Position check for sells (same as execute())
+        if (side == Side::Sell && get_position_) {
+            double current_position = get_position_(req.symbol);
+            if (current_position < MIN_POSITION_THRESHOLD) {
+                return 0;
+            }
+            if (qty > current_position) {
+                qty = current_position;
+            }
+        }
+
+        // Send order based on type
+        uint64_t order_id = 0;
+        if (req.type == OrderType::Market) {
+            order_id = exchange_->send_market_order(req.symbol, side, qty, expected_price);
+        } else {
+            Price limit_price = req.limit_price > 0 ? req.limit_price : expected_price;
+            order_id = exchange_->send_limit_order(req.symbol, side, qty, limit_price);
+            if (order_id > 0) {
+                track_pending_order(order_id, req.symbol, side, qty, limit_price, expected_price);
+            }
+        }
+
+        if (order_id > 0 && on_order_) {
+            Price order_price = (req.type == OrderType::Market) ? expected_price : req.limit_price;
+            on_order_(order_id, req.symbol, side, qty, order_price, req.type);
         }
 
         return order_id;

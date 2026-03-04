@@ -39,6 +39,8 @@ constexpr Quantity CANCELLED_SELF_TRADE = 0; // Cancelled due to self-trade prev
 
 enum class Side : uint8_t { Buy = 0, Sell = 1 };
 
+enum class OrderType : uint8_t { Market, Limit };
+
 // Order operation result
 enum class OrderResult : uint8_t {
     Success = 0,
