@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../types.hpp"
+#include "metrics_context.hpp"
 #include "regime_detector.hpp"
 
 #include <cstdint>
@@ -148,6 +149,25 @@ public:
      */
     virtual Signal generate(Symbol symbol, const MarketSnapshot& market, const StrategyPosition& position,
                             MarketRegime regime) = 0;
+
+    /**
+     * Generate trading signal with metrics context.
+     *
+     * Default implementation ignores metrics and delegates to base generate().
+     * Metrics-aware strategies override this method.
+     *
+     * @param symbol Symbol ID
+     * @param market Current market data (bid/ask/sizes)
+     * @param position Current position information
+     * @param regime Current market regime
+     * @param metrics Per-symbol metrics context (can be nullptr if unavailable)
+     * @return Signal with type, strength, quantity, and order preference
+     */
+    virtual Signal generate(Symbol symbol, const MarketSnapshot& market, const StrategyPosition& position,
+                            MarketRegime regime, const MetricsContext* metrics) {
+        (void)metrics;
+        return generate(symbol, market, position, regime);
+    }
 
     // =========================================================================
     // Metadata

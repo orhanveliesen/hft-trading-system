@@ -1,6 +1,7 @@
 #pragma once
 
 #include "istrategy.hpp"
+#include "metrics_context.hpp"
 
 #include <algorithm>
 #include <functional>
@@ -120,14 +121,14 @@ public:
 
     /// Get signals from all suitable strategies and combine them
     Signal composite_signal(Symbol symbol, const MarketSnapshot& market, const StrategyPosition& position,
-                            MarketRegime regime) const {
+                            MarketRegime regime, const MetricsContext* metrics = nullptr) const {
         std::vector<Signal> signals;
         signals.reserve(strategies_.size());
 
         // Collect signals from all suitable strategies
         for (const auto& s : strategies_) {
             if (s->suitable_for_regime(regime) && s->ready()) {
-                Signal sig = s->generate(symbol, market, position, regime);
+                Signal sig = s->generate(symbol, market, position, regime, metrics);
                 if (sig.is_actionable()) {
                     signals.push_back(sig);
                 }

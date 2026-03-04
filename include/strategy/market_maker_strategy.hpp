@@ -52,6 +52,12 @@ public:
     // IStrategy Implementation
     // =========================================================================
 
+    // Explicit 5-param override for single vtable lookup (no metrics support)
+    Signal generate(Symbol symbol, const MarketSnapshot& market, const StrategyPosition& position, MarketRegime regime,
+                    const MetricsContext*) override {
+        return generate(symbol, market, position, regime);
+    }
+
     Signal generate(Symbol symbol, const MarketSnapshot& market, const StrategyPosition& position,
                     MarketRegime regime) override {
         (void)symbol;

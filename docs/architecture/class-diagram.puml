@@ -815,6 +815,15 @@ OrderBookMetrics <-- CombinedMetrics : reads
 ' Strategy relationships
 SmartStrategy ..> RiskManager : uses
 
+' Strategy metrics consumption
+IStrategy ..> MetricsContext : optional
+MetricsDrivenStrategy --> MetricsContext : consumes
+MetricsDrivenStrategy ..> TradeStreamMetrics : reads
+MetricsDrivenStrategy ..> OrderBookMetrics : reads
+MetricsDrivenStrategy ..> OrderFlowMetrics : reads
+MetricsDrivenStrategy ..> CombinedMetrics : reads
+MetricsDrivenStrategy ..> FuturesMetrics : reads
+
 ' Paper trading relationships
 PaperOrderSender ..|> OrderSenderConcept : satisfies
 PaperTradingEngine ..> SmartStrategy : can use
