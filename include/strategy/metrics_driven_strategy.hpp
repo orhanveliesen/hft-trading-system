@@ -207,9 +207,9 @@ inline Signal MetricsDrivenStrategy::generate(Symbol symbol, const MarketSnapsho
     }
 
     if (score > 0) {
-        return Signal::buy(strength, suggested_qty, "Multi-factor bullish");
+        return Signal{SignalType::Buy, strength, OrderPreference::Market, suggested_qty, 0, "Multi-factor bullish"};
     } else {
-        return Signal::sell(strength, suggested_qty, "Multi-factor bearish");
+        return Signal{SignalType::Sell, strength, OrderPreference::Market, suggested_qty, 0, "Multi-factor bearish"};
     }
 }
 

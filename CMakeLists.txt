@@ -305,6 +305,10 @@ add_executable(test_metrics_wiring tests/test_metrics_wiring.cpp)
 target_link_libraries(test_metrics_wiring trader_core websockets)
 add_test(NAME MetricsWiringTests COMMAND test_metrics_wiring)
 
+add_executable(test_execution_pipeline tests/test_execution_pipeline.cpp)
+target_link_libraries(test_execution_pipeline trader_core)
+add_test(NAME ExecutionPipelineTests COMMAND test_execution_pipeline)
+
 # === Tools ===
 add_executable(trader tools/trader.cpp)
 target_link_libraries(trader trader_core websockets pthread rt curl)

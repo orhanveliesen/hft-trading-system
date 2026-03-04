@@ -338,6 +338,7 @@ void test_strong_buy_signal() {
 
     // Score = +25, above threshold 20 → Buy signal
     assert(signal.type == SignalType::Buy);
+    assert(signal.order_pref == OrderPreference::Market);
     std::cout << "[PASS] test_strong_buy_signal\n";
 }
 
@@ -376,6 +377,7 @@ void test_strong_sell_signal() {
 
     // Score = -25, below threshold -20 → Sell signal
     assert(signal.type == SignalType::Sell);
+    assert(signal.order_pref == OrderPreference::Market);
     std::cout << "[PASS] test_strong_sell_signal\n";
 }
 
