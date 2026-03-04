@@ -34,6 +34,12 @@ public:
         last_update_us_ = timestamp_us;
     }
 
+    // Direct BookSnapshot input (for WebSocket depth feeds)
+    void on_depth_snapshot(const BookSnapshot& snapshot, uint64_t timestamp_us) {
+        calculate_metrics(snapshot);
+        last_update_us_ = timestamp_us;
+    }
+
     struct Metrics {
         // Spread
         double spread = 0.0;

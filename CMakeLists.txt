@@ -285,6 +285,14 @@ add_executable(test_trader_futures_integration tests/test_trader_futures_integra
 target_link_libraries(test_trader_futures_integration trader_core websockets)
 add_test(NAME TraderFuturesIntegrationTests COMMAND test_trader_futures_integration)
 
+add_executable(test_binance_ws_depth tests/test_binance_ws_depth.cpp)
+target_link_libraries(test_binance_ws_depth trader_core websockets)
+add_test(NAME BinanceWsDepthTests COMMAND test_binance_ws_depth)
+
+add_executable(test_metrics_wiring tests/test_metrics_wiring.cpp)
+target_link_libraries(test_metrics_wiring trader_core)
+add_test(NAME MetricsWiringTests COMMAND test_metrics_wiring)
+
 # === Tools ===
 add_executable(trader tools/trader.cpp)
 target_link_libraries(trader trader_core websockets pthread rt curl)

@@ -805,6 +805,13 @@ FuturesMetrics ..> MarkPriceUpdate : consumes
 FuturesMetrics ..> LiquidationOrder : consumes
 FuturesMetrics ..> FuturesBookTicker : consumes
 
+' Spot metrics data flow
+BinanceWs ..> TradeStreamMetrics : WsTrade
+BinanceWs ..> OrderBookMetrics : WsDepthUpdate
+BinanceWs ..> OrderFlowMetrics : WsTrade + WsDepthUpdate
+TradeStreamMetrics <-- CombinedMetrics : reads
+OrderBookMetrics <-- CombinedMetrics : reads
+
 ' Strategy relationships
 SmartStrategy ..> RiskManager : uses
 

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "../orderbook.hpp"
 #include "../types.hpp"
 #include "market_data.hpp"
 
@@ -68,10 +69,30 @@ struct WsKline {
     bool is_closed = false; // True when candle is finalized
 };
 
+/**
+ * Depth update (partial book snapshot)
+ */
+struct WsDepthUpdate {
+    std::string symbol;
+    uint64_t last_update_id = 0;
+
+    struct Level {
+        Price price = 0;       // Actual price * 10000
+        Quantity quantity = 0; // Actual qty * QUANTITY_SCALE
+    };
+
+    // Fixed-size arrays matching BookSnapshot::MAX_LEVELS (20)
+    std::array<Level, 20> bids{};
+    std::array<Level, 20> asks{};
+    int bid_count = 0;
+    int ask_count = 0;
+};
+
 // Callbacks
 using BookTickerCallback = std::function<void(const BookTicker&)>;
 using WsTradeCallback = std::function<void(const WsTrade&)>;
 using WsKlineCallback = std::function<void(const WsKline&)>;
+using WsDepthCallback = std::function<void(const WsDepthUpdate&)>;
 using WsErrorCallback = std::function<void(const std::string&)>;
 using WsConnectCallback = std::function<void(bool connected)>;
 // Callback concepts for compile-time type checking
@@ -154,6 +175,8 @@ public:
 
     void set_kline_callback(WsKlineCallback cb) { kline_callback_ = std::move(cb); }
 
+    void set_depth_callback(WsDepthCallback cb) { depth_callback_ = std::move(cb); }
+
     void set_error_callback(WsErrorCallback cb) { error_callback_ = std::move(cb); }
 
     void set_connect_callback(WsConnectCallback cb) { connect_callback_ = std::move(cb); }
@@ -218,6 +241,42 @@ public:
         reconnect_callback_ = std::forward<Callback>(cb);
     }
 
+    /**
+     * Convert WsDepthUpdate to hft::BookSnapshot for metrics consumption.
+     *
+     * Binance sends aggregated levels, OrderBook expects order-by-order.
+     * Metrics only use hft::BookSnapshot, so we convert directly.
+     */
+    static hft::BookSnapshot depth_to_snapshot(const WsDepthUpdate& depth) {
+        hft::BookSnapshot snapshot;
+
+        // Best bid/ask
+        if (depth.bid_count > 0) {
+            snapshot.best_bid = depth.bids[0].price;
+            snapshot.best_bid_qty = depth.bids[0].quantity;
+        }
+        if (depth.ask_count > 0) {
+            snapshot.best_ask = depth.asks[0].price;
+            snapshot.best_ask_qty = depth.asks[0].quantity;
+        }
+
+        // Copy levels
+        snapshot.bid_level_count = std::min(depth.bid_count, static_cast<int>(hft::BookSnapshot::MAX_LEVELS));
+        snapshot.ask_level_count = std::min(depth.ask_count, static_cast<int>(hft::BookSnapshot::MAX_LEVELS));
+
+        for (int i = 0; i < snapshot.bid_level_count; ++i) {
+            snapshot.bid_levels[i].price = depth.bids[i].price;
+            snapshot.bid_levels[i].quantity = depth.bids[i].quantity;
+        }
+
+        for (int i = 0; i < snapshot.ask_level_count; ++i) {
+            snapshot.ask_levels[i].price = depth.asks[i].price;
+            snapshot.ask_levels[i].quantity = depth.asks[i].quantity;
+        }
+
+        return snapshot;
+    }
+
 private:
     std::string host_;
     int port_;
@@ -237,6 +296,7 @@ private:
     BookTickerCallback book_ticker_callback_;
     WsTradeCallback trade_callback_;
     WsKlineCallback kline_callback_;
+    WsDepthCallback depth_callback_;
     WsErrorCallback error_callback_;
     WsConnectCallback connect_callback_;
     WsReconnectCallback reconnect_callback_;
@@ -305,6 +365,12 @@ private:
             parse_trade(data_json);
         } else if (stream_name.find("@kline") != std::string::npos || data_json.find("\"k\":") != std::string::npos) {
             parse_kline(data_json);
+        } else if (stream_name.find("@depth") != std::string::npos || data_json.find("\"bids\"") != std::string::npos) {
+            // Extract symbol from stream name (e.g., "btcusdt@depth20@100ms")
+            std::string symbol = stream_name.substr(0, stream_name.find('@'));
+            // Convert to uppercase for consistency
+            std::transform(symbol.begin(), symbol.end(), symbol.begin(), ::toupper);
+            parse_depth(data_json, symbol);
         }
     }
 
@@ -370,6 +436,81 @@ private:
         kline.is_closed = extract_bool(k_json, "x");
 
         kline_callback_(kline);
+    }
+
+    // Parse depth: {"lastUpdateId":160,"bids":[["42000.50","1.5"]],"asks":[["42001.00","2.0"]]}
+    // Symbol comes from stream name (e.g., btcusdt@depth20@100ms), passed as parameter
+    void parse_depth(const std::string& json, const std::string& symbol) {
+        if (!depth_callback_)
+            return;
+
+        WsDepthUpdate depth;
+        depth.symbol = symbol;
+        depth.last_update_id = extract_uint64(json, "lastUpdateId");
+
+        // Parse bids array
+        size_t bids_pos = json.find("\"bids\":[");
+        if (bids_pos != std::string::npos) {
+            size_t start = bids_pos + 8; // After "bids":[
+            // Find outer closing ]] - nested array end
+            size_t end = json.find("]]", start);
+            if (end != std::string::npos) {
+                std::string bids_json = json.substr(start, end - start);
+                depth.bid_count = parse_levels(bids_json, depth.bids);
+            }
+        }
+
+        // Parse asks array
+        size_t asks_pos = json.find("\"asks\":[");
+        if (asks_pos != std::string::npos) {
+            size_t start = asks_pos + 8; // After "asks":[
+            // Find outer closing ]] - nested array end
+            size_t end = json.find("]]", start);
+            if (end != std::string::npos) {
+                std::string asks_json = json.substr(start, end - start);
+                depth.ask_count = parse_levels(asks_json, depth.asks);
+            }
+        }
+
+        depth_callback_(depth);
+    }
+
+    // Helper: Parse price/qty pairs from JSON array string
+    // Format: ["42000.50","1.5"],["41999.00","3.2"]
+    int parse_levels(const std::string& json, std::array<WsDepthUpdate::Level, 20>& levels) {
+        int count = 0;
+        size_t pos = 0;
+
+        while (count < 20 && pos < json.length()) {
+            // Find next [ bracket
+            size_t bracket_start = json.find('[', pos);
+            if (bracket_start == std::string::npos)
+                break;
+
+            // Find closing ] bracket
+            size_t bracket_end = json.find(']', bracket_start);
+            if (bracket_end == std::string::npos)
+                break;
+
+            // Extract price and quantity strings
+            size_t price_start = json.find('"', bracket_start) + 1;
+            size_t price_end = json.find('"', price_start);
+            size_t qty_start = json.find('"', price_end + 1) + 1;
+            size_t qty_end = json.find('"', qty_start);
+
+            if (price_end != std::string::npos && qty_end != std::string::npos) {
+                double price = std::stod(json.substr(price_start, price_end - price_start));
+                double qty = std::stod(json.substr(qty_start, qty_end - qty_start));
+
+                levels[count].price = static_cast<Price>(price * 10000.0);
+                levels[count].quantity = static_cast<Quantity>(qty * 10000.0);
+                count++;
+            }
+
+            pos = bracket_end + 1;
+        }
+
+        return count;
     }
 
     // Simple JSON value extractors
