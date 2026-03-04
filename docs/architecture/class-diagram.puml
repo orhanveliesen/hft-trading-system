@@ -607,6 +607,32 @@ package "Metrics" <<Frame>> {
         +reset()
     }
 
+    class FuturesMetrics {
+        -events_: array<LiquidationEvent, 10000>
+        -event_head_: size_t
+        -event_tail_: size_t
+        -event_count_: size_t
+        -funding_rate_: double
+        -futures_bid_, futures_ask_: double
+        -spot_bid_, spot_ask_: double
+        -window_states_: array<WindowState, 5>
+        --
+        +on_mark_price(mark, index, rate, ts)
+        +on_liquidation(side, price, qty, ts)
+        +on_futures_bbo(bid, ask, ts)
+        +on_spot_bbo(bid, ask, ts)
+        +get_metrics(window): Metrics
+        +update(now_us)
+    }
+
+    enum FuturesWindow {
+        W1s
+        W5s
+        W10s
+        W30s
+        W1min
+    }
+
     enum TradeWindow {
         W1s
         W5s
@@ -650,6 +676,121 @@ package "Metrics" <<Frame>> {
     CombinedMetrics --> TradeStreamMetrics : references
     CombinedMetrics --> OrderBookMetrics : references
     OrderFlowMetrics --> TradeWindow : uses
+    FuturesMetrics --> FuturesWindow : uses
+}
+
+' ==============================================================================
+' Exchange Package (Binance Futures Data Layer)
+' ==============================================================================
+package "Exchange" <<Frame>> {
+    class BinanceFuturesWs {
+        -host_: string
+        -port_: int
+        -streams_: vector<string>
+        -wsi_: lws*
+        -context_: lws_context*
+        --
+        +subscribe_mark_price(symbol, update_speed)
+        +subscribe_liquidation(symbol)
+        +subscribe_book_ticker(symbol)
+        +subscribe_agg_trade(symbol)
+        +subscribe_kline(symbol, interval)
+        +set_mark_price_callback(cb)
+        +set_liquidation_callback(cb)
+        +set_book_ticker_callback(cb)
+        +set_agg_trade_callback(cb)
+        +set_kline_callback(cb)
+        +connect(): bool
+        +disconnect()
+        --
+        {static} +parse_mark_price_update(json): MarkPriceUpdate
+        {static} +parse_liquidation_order(json): LiquidationOrder
+        {static} +parse_futures_book_ticker(json): FuturesBookTicker
+        {static} +parse_agg_trade(json): WsAggTrade
+        {static} +parse_kline(json): WsKline
+    }
+
+    class BinanceFuturesRest {
+        -base_url_: string
+        -curl_: CURL*
+        --
+        +fetch_funding_rate(symbol): FundingRate
+        +fetch_funding_rate_history(symbol, ...): vector<FundingRate>
+        +fetch_open_interest(symbol): OpenInterest
+        +fetch_open_interest_history(symbol, ...): vector<OpenInterest>
+        +fetch_mark_price(symbol): MarkPriceUpdate
+        +fetch_klines(symbol, interval, ...): vector<Kline>
+        +fetch_klines_range(symbol, interval, start, end): vector<Kline>
+        --
+        {static} +parse_funding_rate_json(json): FundingRate
+        {static} +parse_open_interest_json(json): OpenInterest
+        {static} +parse_mark_price_json(json): MarkPriceUpdate
+        {static} +parse_klines_json(json): vector<Kline>
+    }
+
+    class FundingRate <<struct>> {
+        +symbol: string
+        +funding_rate: double
+        +mark_price: double
+        +funding_time: Timestamp
+        +event_time: Timestamp
+    }
+
+    class MarkPriceUpdate <<struct>> {
+        +symbol: string
+        +mark_price: double
+        +index_price: double
+        +funding_rate: double
+        +next_funding_time: Timestamp
+        +event_time: Timestamp
+    }
+
+    class OpenInterest <<struct>> {
+        +symbol: string
+        +open_interest: double
+        +open_interest_value: double
+        +time: Timestamp
+    }
+
+    class LiquidationOrder <<struct>> {
+        +symbol: string
+        +side: Side
+        +price: double
+        +quantity: double
+        +avg_price: double
+        +order_status: string
+        +trade_time: Timestamp
+        +event_time: Timestamp
+    }
+
+    class FuturesBookTicker <<struct>> {
+        +symbol: string
+        +bid_price: double
+        +bid_qty: double
+        +ask_price: double
+        +ask_qty: double
+        +transaction_time: Timestamp
+        +event_time: Timestamp
+    }
+
+    class WsAggTrade <<struct>> {
+        +symbol: string
+        +agg_trade_id: uint64_t
+        +price: double
+        +quantity: double
+        +first_trade_id: uint64_t
+        +last_trade_id: uint64_t
+        +time: Timestamp
+        +is_buyer_maker: bool
+    }
+
+    BinanceFuturesWs ..> MarkPriceUpdate : produces
+    BinanceFuturesWs ..> LiquidationOrder : produces
+    BinanceFuturesWs ..> FuturesBookTicker : produces
+    BinanceFuturesWs ..> WsAggTrade : produces
+    BinanceFuturesRest ..> FundingRate : produces
+    BinanceFuturesRest ..> OpenInterest : produces
+    BinanceFuturesRest ..> MarkPriceUpdate : produces
 }
 
 ' ==============================================================================
@@ -772,6 +913,11 @@ package "Exchange" <<Frame>> {
 
 ' Core relationships
 Order --* PriceLevel : "linked list"
+
+' Metrics relationships
+FuturesMetrics ..> MarkPriceUpdate : consumes
+FuturesMetrics ..> LiquidationOrder : consumes
+FuturesMetrics ..> FuturesBookTicker : consumes
 
 ' Strategy relationships
 SmartStrategy ..> RiskManager : uses

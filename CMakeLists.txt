@@ -277,6 +277,14 @@ add_executable(test_binance_futures_rest tests/test_binance_futures_rest.cpp)
 target_link_libraries(test_binance_futures_rest trader_core curl)
 add_test(NAME BinanceFuturesRestTests COMMAND test_binance_futures_rest)
 
+add_executable(test_futures_metrics tests/test_futures_metrics.cpp)
+target_link_libraries(test_futures_metrics trader_core)
+add_test(NAME FuturesMetricsTests COMMAND test_futures_metrics)
+
+add_executable(test_trader_futures_integration tests/test_trader_futures_integration.cpp)
+target_link_libraries(test_trader_futures_integration trader_core websockets)
+add_test(NAME TraderFuturesIntegrationTests COMMAND test_trader_futures_integration)
+
 # === Tools ===
 add_executable(trader tools/trader.cpp)
 target_link_libraries(trader trader_core websockets pthread rt curl)

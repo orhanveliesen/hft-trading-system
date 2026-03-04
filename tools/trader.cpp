@@ -17,7 +17,9 @@
  *   trader -h                        # Help
  */
 
+#include "../include/exchange/binance_futures_ws.hpp"
 #include "../include/exchange/binance_ws.hpp"
+#include "../include/exchange/futures_market_data.hpp"
 #include "../include/exchange/paper_exchange.hpp"
 #include "../include/ipc/event_publisher.hpp"
 #include "../include/ipc/execution_report.hpp"
@@ -31,6 +33,7 @@
 #include "../include/ipc/trade_event.hpp"
 #include "../include/ipc/tuner_event.hpp"
 #include "../include/ipc/udp_telemetry.hpp"
+#include "../include/metrics/futures_metrics.hpp"
 #include "../include/paper/paper_order_sender.hpp"
 #include "../include/paper/queue_fill_detector.hpp"
 #include "../include/risk/enhanced_risk_manager.hpp"
@@ -426,6 +429,8 @@ public:
             }
         }
     }
+
+    std::optional<Symbol> lookup_symbol(const std::string& ticker) const { return engine_.lookup_symbol(ticker); }
 
     void on_quote(const std::string& ticker, Price bid, Price ask, Quantity bid_size, Quantity ask_size) {
         // Hot path - no locks, O(1) array access
@@ -2013,6 +2018,13 @@ int run(const CLIArgs& args) {
 
     BinanceWs ws(false);
 
+    // Add futures WS (non-critical, supplementary signal)
+    exchange::BinanceFuturesWs futures_ws(false);
+
+    // Initialize futures metrics array (avoid heap allocation and string hash on hot path)
+    // Use same pattern as existing trader: Symbol id (uint32_t) + array indexing
+    std::array<FuturesMetrics, MAX_SYMBOLS> futures_metrics_array;
+
     ws.set_connect_callback([](bool c) {
         if (c) {
             std::cout << "[OK] Connected to Binance\n\n";
@@ -2052,10 +2064,67 @@ int run(const CLIArgs& args) {
         Quantity bid_size = static_cast<Quantity>(bt.bid_qty * config::scaling::QUANTITY_SCALE);
         Quantity ask_size = static_cast<Quantity>(bt.ask_qty * config::scaling::QUANTITY_SCALE);
         app.on_quote(bt.symbol, bt.bid_price, bt.ask_price, bid_size, ask_size);
+
+        // Feed spot BBO to futures metrics for basis calculation
+        auto opt = app.lookup_symbol(bt.symbol);
+        if (!opt || *opt >= MAX_SYMBOLS)
+            return;
+        // Convert spot Price (uint32_t, scaled by *10000) to double
+        // Spot: Price type (uint32_t) = actual_price * 10000
+        // Futures: double = actual_price (no scaling, PR #48)
+        // Therefore: divide by 10000.0 to get actual price for basis calculation
+        double spot_bid = static_cast<double>(bt.bid_price) / 10000.0;
+        double spot_ask = static_cast<double>(bt.ask_price) / 10000.0;
+        futures_metrics_array[*opt].on_spot_bbo(
+            spot_bid, spot_ask,
+            std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now().time_since_epoch())
+                .count());
+    });
+
+    // Futures callbacks
+    futures_ws.set_connect_callback([](bool c) {
+        if (c) {
+            std::cout << "[OK] Connected to Binance Futures\n";
+        } else {
+            std::cout << "[INFO] Disconnected from Binance Futures (non-critical)\n";
+        }
+    });
+
+    futures_ws.set_error_callback(
+        [](const std::string& err) { std::cerr << "[FUTURES WS INFO] " << err << " (non-critical)\n"; });
+
+    futures_ws.set_mark_price_callback([&](const exchange::MarkPriceUpdate& mp) {
+        auto opt = app.lookup_symbol(mp.symbol);
+        if (!opt || *opt >= MAX_SYMBOLS)
+            return;
+        futures_metrics_array[*opt].on_mark_price(mp.mark_price, mp.index_price, mp.funding_rate,
+                                                  mp.event_time * 1000); // ms to us
+    });
+
+    futures_ws.set_liquidation_callback([&](const exchange::LiquidationOrder& lo) {
+        auto opt = app.lookup_symbol(lo.symbol);
+        if (!opt || *opt >= MAX_SYMBOLS)
+            return;
+        futures_metrics_array[*opt].on_liquidation(lo.side, lo.price, lo.quantity, lo.event_time * 1000);
+    });
+
+    futures_ws.set_book_ticker_callback([&](const exchange::FuturesBookTicker& fbt) {
+        auto opt = app.lookup_symbol(fbt.symbol);
+        if (!opt || *opt >= MAX_SYMBOLS)
+            return;
+        // FuturesBookTicker uses double for prices (PR #48 fix for BTC overflow)
+        futures_metrics_array[*opt].on_futures_bbo(fbt.bid_price, fbt.ask_price, fbt.event_time * 1000);
     });
 
     for (auto& s : symbols)
         ws.subscribe_book_ticker(s);
+
+    // Subscribe to futures streams
+    for (auto& s : symbols) {
+        futures_ws.subscribe_mark_price(s);
+        futures_ws.subscribe_liquidation(s);
+        futures_ws.subscribe_book_ticker(s);
+    }
 
     std::cout << "Connecting...\n";
     if (!ws.connect()) {
@@ -2070,6 +2139,11 @@ int run(const CLIArgs& args) {
     if (!ws.is_connected()) {
         std::cerr << "Connection timeout\n";
         return 1;
+    }
+
+    // Connect futures WS (non-blocking, failure is non-critical)
+    if (!futures_ws.connect()) {
+        std::cout << "[INFO] Futures WS connection failed (non-critical, continuing with spot only)\n";
     }
 
     // Mark as running now that we're connected
