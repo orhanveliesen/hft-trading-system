@@ -89,11 +89,17 @@ public:
         if (existing) {
             // Direction changed → cancel and place new
             if (existing->side != side) {
-                cancel_pending(symbol);
+                bool cancelled = cancel_pending(symbol);
+                if (!cancelled) {
+                    return {}; // Can't place new order — old one still stuck
+                }
             }
             // Price drifted → cancel and replace
             else if (should_replace(symbol, limit_price)) {
-                cancel_pending(symbol);
+                bool cancelled = cancel_pending(symbol);
+                if (!cancelled) {
+                    return {}; // Can't replace — old order still stuck
+                }
             }
             // Otherwise keep existing
             else {
@@ -132,8 +138,11 @@ public:
 
         for (auto& pending : pending_) {
             if (pending.active) {
-                engine_->cancel_pending_for_symbol(pending.symbol);
-                pending.clear();
+                int resolved = engine_->cancel_pending_for_symbol(pending.symbol);
+                if (resolved > 0) {
+                    pending.clear();
+                }
+                // If failed, leave active — recover_stuck_orders will handle
             }
         }
     }
@@ -197,14 +206,25 @@ private:
     }
 
     /// Cancel pending order for symbol
-    void cancel_pending(Symbol symbol) {
+    /// Returns true if order confirmed gone (Success/NotFound)
+    /// Returns false if cancel failed (order may still be active)
+    bool cancel_pending(Symbol symbol) {
         if (!engine_)
-            return;
+            return false;
 
         PendingLimit* pending = find_pending(symbol);
-        if (pending) {
-            engine_->cancel_pending_for_symbol(symbol);
+        if (!pending)
+            return true; // Nothing to cancel
+
+        int resolved = engine_->cancel_pending_for_symbol(symbol);
+        if (resolved > 0) {
             pending->clear();
+            return true;
+        } else {
+            // Cancel failed — DON'T clear local state
+            // Order may still be on exchange
+            // recover_stuck_orders() will handle retry
+            return false;
         }
     }
 

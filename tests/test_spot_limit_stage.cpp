@@ -15,6 +15,7 @@ class MockExchange : public IExchangeAdapter {
 public:
     int cancel_calls = 0;
     uint64_t next_order_id = 1000;
+    CancelResult cancel_result = CancelResult::Success; // Configurable for testing
 
     uint64_t send_market_order(Symbol symbol, Side side, double qty, Price expected_price) override {
         return next_order_id++;
@@ -24,9 +25,9 @@ public:
         return next_order_id++;
     }
 
-    bool cancel_order(uint64_t order_id) override {
+    CancelResult cancel_order(uint64_t order_id) override {
         cancel_calls++;
-        return true;
+        return cancel_result; // Return configurable result
     }
 
     bool is_order_pending(uint64_t order_id) const override { return false; }

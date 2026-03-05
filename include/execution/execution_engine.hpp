@@ -7,6 +7,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <iostream>
 #include <vector>
 
 namespace hft {
@@ -20,6 +21,14 @@ using namespace strategy;
 
 // OrderType moved to types.hpp to avoid circular dependency
 
+/// State machine for pending orders
+enum class OrderState : uint8_t {
+    Inactive,    // Slot is free
+    Active,      // Order is live on exchange
+    CancelSent,  // Cancel requested, awaiting confirmation
+    CancelFailed // Cancel failed (network/rate-limit), needs retry
+};
+
 struct PendingOrder {
     uint64_t order_id = 0;
     Symbol symbol = 0;
@@ -28,7 +37,15 @@ struct PendingOrder {
     Price limit_price = 0;
     Price expected_fill_price = 0; // For slippage tracking
     uint64_t submit_time_ns = 0;
-    bool active = false;
+    OrderState state = OrderState::Inactive; // State machine
+
+    // Cancel retry tracking
+    uint8_t cancel_attempts = 0;
+    uint64_t last_cancel_attempt_ns = 0;
+
+    bool is_active() const {
+        return state == OrderState::Active || state == OrderState::CancelSent || state == OrderState::CancelFailed;
+    }
 
     void clear() {
         order_id = 0;
@@ -38,7 +55,9 @@ struct PendingOrder {
         limit_price = 0;
         expected_fill_price = 0;
         submit_time_ns = 0;
-        active = false;
+        state = OrderState::Inactive;
+        cancel_attempts = 0;
+        last_cancel_attempt_ns = 0;
     }
 };
 
@@ -91,7 +110,7 @@ public:
     virtual uint64_t send_limit_order(Symbol symbol, Side side, double qty, Price limit_price) = 0;
 
     /// Cancel order by ID
-    virtual bool cancel_order(uint64_t order_id) = 0;
+    virtual CancelResult cancel_order(uint64_t order_id) = 0;
 
     /// Check if order is still pending
     virtual bool is_order_pending(uint64_t order_id) const = 0;
@@ -266,7 +285,9 @@ public:
 
         // Find pending order to calculate slippage
         for (auto& po : pending_orders_) {
-            if (po.active && po.order_id == order_id) {
+            if (po.is_active() && po.order_id == order_id) {
+                // Fill resolves any cancel-in-progress state
+                // (cancel was racing with fill — fill won)
                 // Slippage = difference from expected
                 // For buys: positive slippage = paid more = bad
                 // For sells: negative slippage = received less = bad
@@ -288,13 +309,14 @@ public:
     /// Cancel stale pending orders (call periodically)
     void cancel_stale_orders(uint64_t current_time_ns) {
         for (auto& po : pending_orders_) {
-            if (po.active) {
-                uint64_t age = current_time_ns - po.submit_time_ns;
-                if (age > config_.limit_timeout_ns) {
-                    if (exchange_->cancel_order(po.order_id)) {
-                        po.clear();
-                    }
-                }
+            if (!po.is_active())
+                continue;
+
+            uint64_t age = current_time_ns - po.submit_time_ns;
+
+            if (po.state == OrderState::Active && age > config_.limit_timeout_ns) {
+                // Stale active order → try cancel
+                try_cancel(po);
             }
         }
     }
@@ -303,25 +325,65 @@ public:
     size_t pending_order_count() const {
         size_t count = 0;
         for (const auto& po : pending_orders_) {
-            if (po.active)
+            if (po.is_active())
                 count++;
         }
         return count;
     }
 
     /// Cancel all pending orders for a specific symbol
-    /// Returns number of orders cancelled
+    /// Returns number of orders confirmed cancelled (Success + NotFound)
+    /// Orders with NetworkError/RateLimited remain active for retry
     int cancel_pending_for_symbol(Symbol symbol) {
-        int cancelled = 0;
+        int resolved = 0;
         for (auto& po : pending_orders_) {
-            if (po.active && po.symbol == symbol) {
-                if (exchange_->cancel_order(po.order_id)) {
-                    po.clear();
-                    cancelled++;
+            if (po.is_active() && po.symbol == symbol) {
+                auto result = try_cancel(po);
+                if (result == CancelResult::Success || result == CancelResult::NotFound) {
+                    resolved++;
                 }
             }
         }
-        return cancelled;
+        return resolved;
+    }
+
+    static constexpr uint8_t MAX_CANCEL_ATTEMPTS = 3;
+    static constexpr uint64_t CANCEL_RETRY_INTERVAL_NS = 1'000'000'000; // 1 second
+
+    /// Recover stuck orders — call periodically (e.g., every second from heartbeat)
+    /// For CancelFailed orders: retry cancel or query exchange
+    void recover_stuck_orders() {
+        if (!exchange_)
+            return;
+
+        uint64_t now = util::now_ns();
+
+        for (auto& po : pending_orders_) {
+            if (po.state != OrderState::CancelFailed)
+                continue;
+
+            // Respect retry interval
+            if (now - po.last_cancel_attempt_ns < CANCEL_RETRY_INTERVAL_NS)
+                continue;
+
+            if (po.cancel_attempts < MAX_CANCEL_ATTEMPTS) {
+                // Retry cancel
+                try_cancel(po);
+            } else {
+                // Max retries exceeded → query exchange for ground truth
+                if (exchange_->is_order_pending(po.order_id)) {
+                    // Still there — one final cancel attempt
+                    std::cout << "[CANCEL] Order " << po.order_id << " still pending after " << (int)po.cancel_attempts
+                              << " cancel attempts, final try\n";
+                    po.cancel_attempts = 0; // Reset for final round
+                    try_cancel(po);
+                } else {
+                    // Gone (filled or expired without our knowledge)
+                    std::cout << "[CANCEL] Order " << po.order_id << " no longer on exchange, force clearing\n";
+                    po.clear();
+                }
+            }
+        }
     }
 
     // =========================================================================
@@ -336,7 +398,7 @@ public:
     void track_pending_order_for_test(uint64_t order_id, Symbol symbol, Side side, double qty, Price limit_price,
                                       uint64_t submit_time_ns) {
         for (auto& po : pending_orders_) {
-            if (!po.active) {
+            if (!po.is_active()) {
                 po.order_id = order_id;
                 po.symbol = symbol;
                 po.side = side;
@@ -344,7 +406,9 @@ public:
                 po.limit_price = limit_price;
                 po.expected_fill_price = limit_price;
                 po.submit_time_ns = submit_time_ns;
-                po.active = true;
+                po.state = OrderState::Active;
+                po.cancel_attempts = 0;
+                po.last_cancel_attempt_ns = 0;
                 return;
             }
         }
@@ -428,7 +492,7 @@ private:
                              Price expected_price) {
         // Find free slot
         for (auto& po : pending_orders_) {
-            if (!po.active) {
+            if (!po.is_active()) {
                 po.order_id = order_id;
                 po.symbol = symbol;
                 po.side = side;
@@ -436,11 +500,48 @@ private:
                 po.limit_price = limit_price;
                 po.expected_fill_price = expected_price;
                 po.submit_time_ns = util::now_ns();
-                po.active = true;
+                po.state = OrderState::Active;
+                po.cancel_attempts = 0;
+                po.last_cancel_attempt_ns = 0;
                 return;
             }
         }
         // No free slot - should not happen if max_pending_orders is set correctly
+    }
+
+    /**
+     * Attempt to cancel a single pending order with state tracking
+     */
+    CancelResult try_cancel(PendingOrder& po) {
+        if (!exchange_)
+            return CancelResult::NetworkError;
+
+        po.state = OrderState::CancelSent;
+        po.cancel_attempts++;
+        po.last_cancel_attempt_ns = util::now_ns();
+
+        auto result = exchange_->cancel_order(po.order_id);
+
+        switch (result) {
+        case CancelResult::Success:
+            po.clear();
+            return CancelResult::Success;
+
+        case CancelResult::NotFound:
+            // Order already gone (filled or expired) — clear local state
+            po.clear();
+            return CancelResult::NotFound;
+
+        case CancelResult::NetworkError:
+        case CancelResult::RateLimited:
+            po.state = OrderState::CancelFailed;
+            std::cout << "[CANCEL] Order " << po.order_id << " symbol=" << po.symbol << " cancel failed ("
+                      << (result == CancelResult::NetworkError ? "network" : "rate-limited") << "), attempt "
+                      << (int)po.cancel_attempts << "\n";
+            return result;
+        }
+
+        return CancelResult::NetworkError; // Unreachable, compiler happy
     }
 };
 

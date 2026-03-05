@@ -179,7 +179,7 @@ public:
         return 5678;
     }
 
-    bool cancel_order(uint64_t order_id) override { return true; }
+    CancelResult cancel_order(uint64_t order_id) override { return CancelResult::Success; }
     bool is_order_pending(uint64_t order_id) const override { return false; }
     bool is_paper() const override { return true; }
 };

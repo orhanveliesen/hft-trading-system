@@ -41,6 +41,14 @@ enum class Side : uint8_t { Buy = 0, Sell = 1 };
 
 enum class OrderType : uint8_t { Market, Limit };
 
+/// Result of order cancellation attempt
+enum class CancelResult : uint8_t {
+    Success,      // Order cancelled, confirmed by exchange
+    NotFound,     // Order doesn't exist (already filled, expired, or never existed)
+    NetworkError, // Network timeout / connection issue — order may or may not be cancelled
+    RateLimited   // Exchange throttled us — order still active, retry later
+};
+
 // Order operation result
 enum class OrderResult : uint8_t {
     Success = 0,

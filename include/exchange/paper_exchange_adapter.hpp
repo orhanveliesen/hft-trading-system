@@ -142,7 +142,10 @@ public:
         return report.order_id;
     }
 
-    bool cancel_order(uint64_t order_id) override { return paper_.cancel_order(order_id, util::now_ns()); }
+    CancelResult cancel_order(uint64_t order_id) override {
+        bool found = paper_.cancel_order(order_id, util::now_ns());
+        return found ? CancelResult::Success : CancelResult::NotFound;
+    }
 
     bool is_order_pending(uint64_t order_id) const override { return paper_.find_order(order_id) != nullptr; }
 
