@@ -331,6 +331,25 @@ public:
     const ExecutionConfig& config() const { return config_; }
     void set_config(const ExecutionConfig& config) { config_ = config; }
 
+    /// Track a pending limit order (for testing)
+    /// Allows custom submit_time_ns for timeout testing
+    void track_pending_order_for_test(uint64_t order_id, Symbol symbol, Side side, double qty, Price limit_price,
+                                      uint64_t submit_time_ns) {
+        for (auto& po : pending_orders_) {
+            if (!po.active) {
+                po.order_id = order_id;
+                po.symbol = symbol;
+                po.side = side;
+                po.quantity = qty;
+                po.limit_price = limit_price;
+                po.expected_fill_price = limit_price;
+                po.submit_time_ns = submit_time_ns;
+                po.active = true;
+                return;
+            }
+        }
+    }
+
 private:
     ExecutionConfig config_;
     IExchangeAdapter* exchange_ = nullptr;
