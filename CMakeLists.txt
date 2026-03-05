@@ -309,6 +309,22 @@ add_executable(test_execution_pipeline tests/test_execution_pipeline.cpp)
 target_link_libraries(test_execution_pipeline trader_core)
 add_test(NAME ExecutionPipelineTests COMMAND test_execution_pipeline)
 
+add_executable(test_execution_scorer tests/test_execution_scorer.cpp)
+target_link_libraries(test_execution_scorer trader_core)
+add_test(NAME ExecutionScorerTests COMMAND test_execution_scorer)
+
+add_executable(test_execution_scorer_integration tests/test_execution_scorer_integration.cpp)
+target_link_libraries(test_execution_scorer_integration trader_core)
+add_test(NAME ExecutionScorerIntegrationTests COMMAND test_execution_scorer_integration)
+
+add_executable(test_execution_scorer_edge_cases tests/test_execution_scorer_edge_cases.cpp)
+target_link_libraries(test_execution_scorer_edge_cases trader_core)
+add_test(NAME ExecutionScorerEdgeCasesTests COMMAND test_execution_scorer_edge_cases)
+
+add_executable(test_spot_limit_stage tests/test_spot_limit_stage.cpp)
+target_link_libraries(test_spot_limit_stage trader_core)
+add_test(NAME SpotLimitStageTests COMMAND test_spot_limit_stage)
+
 # === Tools ===
 add_executable(trader tools/trader.cpp)
 target_link_libraries(trader trader_core websockets pthread rt curl)

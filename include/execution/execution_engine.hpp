@@ -309,6 +309,21 @@ public:
         return count;
     }
 
+    /// Cancel all pending orders for a specific symbol
+    /// Returns number of orders cancelled
+    int cancel_pending_for_symbol(Symbol symbol) {
+        int cancelled = 0;
+        for (auto& po : pending_orders_) {
+            if (po.active && po.symbol == symbol) {
+                if (exchange_->cancel_order(po.order_id)) {
+                    po.clear();
+                    cancelled++;
+                }
+            }
+        }
+        return cancelled;
+    }
+
     // =========================================================================
     // Configuration
     // =========================================================================

@@ -1,4 +1,5 @@
 #pragma once
+#include "execution_scorer.hpp"
 #include "execution_stage.hpp"
 
 namespace hft {
@@ -11,13 +12,25 @@ namespace execution {
 /// - Sell qty capped to current position (prevent overselling)
 /// - OrderPreference from signal is IGNORED — this stage always produces Market
 ///
-/// Future: SpotLimitStage (Phase 4.2) will handle limit orders separately
+/// Phase 4.2: Execution score gate added
+/// - Only fires when exec_score ≤ 0 (Market preferred)
+/// - If exec_score > 0, SpotLimitStage handles it
 class SpotMarketStage : public IExecutionStage {
 public:
     std::vector<OrderRequest> process(const strategy::Signal& signal, const ExecutionContext& ctx) override {
         if (!signal.is_actionable()) {
             return {};
         }
+
+        // Phase 4.2: Check execution score — only fire for Market preference
+        if (ctx.metrics) {
+            Side side = signal.is_buy() ? Side::Buy : Side::Sell;
+            auto exec = ExecutionScorer::compute(signal, ctx.metrics, side);
+            if (exec.prefer_limit()) {
+                return {}; // SpotLimitStage will handle this
+            }
+        }
+        // No metrics → default to Market (safe fallback)
 
         OrderRequest req;
         req.symbol = ctx.symbol;
