@@ -46,7 +46,7 @@ public:
     uint64_t send_limit_order(Symbol symbol, Side side, double qty, Price limit_price) override = 0;
 
     /// Cancel a pending order
-    bool cancel_order(uint64_t order_id) override = 0;
+    CancelResult cancel_order(uint64_t order_id) override = 0;
 
     /// Check if order is still pending
     bool is_order_pending(uint64_t order_id) const override = 0;

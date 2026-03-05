@@ -51,7 +51,7 @@ public:
         return next_order_id++;
     }
 
-    bool cancel_order(uint64_t order_id) override { return true; }
+    CancelResult cancel_order(uint64_t order_id) override { return CancelResult::Success; }
 
     bool is_order_pending(uint64_t order_id) const override { return false; }
 

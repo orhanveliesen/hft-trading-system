@@ -855,6 +855,12 @@ public:
     // Called periodically from main loop for IPC heartbeat
     void publish_heartbeat() { publisher_.heartbeat(); }
 
+    // Recover stuck cancel orders (called from heartbeat loop)
+    void recover_stuck_orders() { execution_engine_.recover_stuck_orders(); }
+
+    // Get execution engine reference for periodic maintenance
+    execution::ExecutionEngine& execution_engine() { return execution_engine_; }
+
 private:
     CLIArgs args_;
     OrderSender sender_;
@@ -2348,6 +2354,12 @@ int run(const CLIArgs& args) {
         if (std::chrono::duration_cast<std::chrono::seconds>(now - last_heartbeat).count() >= 1) {
             if (g_shared_config) {
                 g_shared_config->update_heartbeat();
+
+                // Recover stuck cancel orders (every second)
+                app.recover_stuck_orders();
+
+                // Cancel stale limit orders (every second)
+                app.execution_engine().cancel_stale_orders(util::now_ns());
 
                 // Connection health monitoring with auto-recovery
                 static int unhealthy_count = 0;
