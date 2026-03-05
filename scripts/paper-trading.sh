@@ -259,6 +259,7 @@ fi
 # Step 4: Start Trader
 # ============================================
 log "Starting Trader (paper mode, ${HOURS}h)..."
+ulimit -s unlimited  # Prevent stack overflow in WSL2 with debug builds
 "$BUILD_DIR/trader" --paper -d "$DURATION_SECS" --verbose > "$LOG_DIR/trader.log" 2>&1 &
 TRADER_PID=$!
 sleep 3
