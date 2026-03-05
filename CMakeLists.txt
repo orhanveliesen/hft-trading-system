@@ -328,7 +328,6 @@ add_test(NAME SpotLimitStageTests COMMAND test_spot_limit_stage)
 add_executable(test_cancel_fault_tolerance tests/test_cancel_fault_tolerance.cpp)
 target_link_libraries(test_cancel_fault_tolerance trader_core)
 add_test(NAME CancelFaultToleranceTests COMMAND test_cancel_fault_tolerance)
-
 # === Tools ===
 add_executable(trader tools/trader.cpp)
 target_link_libraries(trader trader_core websockets pthread rt curl)
