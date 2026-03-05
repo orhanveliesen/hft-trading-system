@@ -832,6 +832,66 @@ package "Exchange" <<Frame>> {
 }
 
 ' ==============================================================================
+' Execution Package
+' ==============================================================================
+package "Execution" <<Frame>> {
+    class ExecutionScorer <<utility>> {
+        {static} +compute(signal, metrics, side): ExecScoreResult
+        {static} -score_spread_value(metrics): double
+        {static} -score_fill_probability(metrics): double
+        {static} -score_adverse_selection(metrics, side): double
+        {static} -score_signal_urgency(signal): double
+        {static} -lerp_score(value, low, high, score_low, score_high): double
+    }
+
+    class ExecScoreResult <<struct>> {
+        +score: double
+        +spread_value: double
+        +fill_prob: double
+        +adverse: double
+        +urgency: double
+        +prefer_limit(): bool
+    }
+
+    class SpotLimitStage {
+        -engine_: ExecutionEngine*
+        -config_: Config
+        -pending_: array<PendingLimit, 64>
+        --
+        +process(signal, ctx): vector<OrderRequest>
+        +cancel_all()
+        +on_fill(order_id, symbol)
+        +track_pending(symbol, order_id, side, price, qty, time)
+        -cancel_pending(symbol)
+        -calculate_limit_price(ctx, side, score): Price
+        -should_replace(symbol, price): bool
+    }
+
+    class SpotMarketStage {
+        +process(signal, ctx): vector<OrderRequest>
+    }
+
+    class PendingLimit <<struct>> {
+        +order_id: uint64_t
+        +symbol: Symbol
+        +side: Side
+        +limit_price: Price
+        +qty: double
+        +submit_time_ns: uint64_t
+        +active: bool
+        +clear()
+    }
+
+    SpotLimitStage ..|> IExecutionStage
+    SpotMarketStage ..|> IExecutionStage
+    SpotLimitStage --> ExecutionEngine : cancel_pending_for_symbol()
+    SpotMarketStage ..> ExecutionScorer : checks score
+    SpotLimitStage ..> ExecutionScorer : uses
+    ExecutionScorer ..> ExecScoreResult : returns
+    SpotLimitStage *-- PendingLimit : tracks
+}
+
+' ==============================================================================
 ' Relationships
 ' ==============================================================================
 

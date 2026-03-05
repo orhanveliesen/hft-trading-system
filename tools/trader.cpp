@@ -58,6 +58,7 @@
 #include "../include/exchange/production_order_sender.hpp"
 #include "../include/execution/execution_engine.hpp"
 #include "../include/execution/execution_pipeline.hpp"
+#include "../include/execution/spot_limit_stage.hpp"
 #include "../include/execution/spot_market_stage.hpp"
 #include "../include/strategy/config_strategy.hpp"
 #include "../include/strategy/fair_value_strategy.hpp"
@@ -351,6 +352,9 @@ public:
         }
 
         // Initialize execution pipeline
+        auto spot_limit = std::make_unique<execution::SpotLimitStage>(&execution_engine_);
+        spot_limit_stage_ = spot_limit.get(); // Keep raw pointer for callbacks
+        execution_pipeline_.add_stage(std::move(spot_limit));
         execution_pipeline_.add_stage(std::make_unique<execution::SpotMarketStage>());
         std::cout << "[EXEC] ExecutionPipeline initialized with " << execution_pipeline_.stage_count() << " stages: ";
         for (auto name : execution_pipeline_.stage_names()) {
@@ -614,6 +618,9 @@ public:
         // Check for market-wide crash - emergency liquidate all positions
         if (market_health_.should_liquidate()) {
             emergency_liquidate(bid);
+            if (spot_limit_stage_) {
+                spot_limit_stage_->cancel_all(); // Cancel all pending limits
+            }
         }
 
         // Generate buy signals
@@ -881,7 +888,8 @@ private:
     StrategySelector strategy_selector_;
     execution::ExecutionEngine execution_engine_;
     execution::ExecutionPipeline execution_pipeline_;
-    std::unique_ptr<PaperExchangeAdapter> paper_adapter_; // Owned adapter for IExchange
+    execution::SpotLimitStage* spot_limit_stage_ = nullptr; // Non-owning pointer for callbacks
+    std::unique_ptr<PaperExchangeAdapter> paper_adapter_;   // Owned adapter for IExchange
 
     // Per-symbol ConfigStrategy instances (used when TunerState is ON or PAUSED)
     std::array<std::unique_ptr<ConfigStrategy>, MAX_SYMBOLS> config_strategies_;
@@ -1402,6 +1410,11 @@ private:
 
         world->on_fill(side, qty, price);
         world->on_our_fill(id, qty);
+
+        // Notify SpotLimitStage that this order filled
+        if (spot_limit_stage_) {
+            spot_limit_stage_->on_fill(id, symbol);
+        }
     }
 
     /**
@@ -1736,8 +1749,14 @@ private:
             auto requests = execution_pipeline_.process(signal, exec_ctx);
             for (const auto& req : requests) {
                 order_id = execution_engine_.execute_request(req, market);
-                if (order_id > 0)
+                if (order_id > 0) {
+                    // Track pending in SpotLimitStage if it's a limit order
+                    if (req.type == hft::OrderType::Limit && req.source_stage == std::string_view("SpotLimit")) {
+                        spot_limit_stage_->track_pending(req.symbol, order_id, req.side, req.limit_price, req.qty,
+                                                         util::now_ns());
+                    }
                     break; // Phase 4.1: single order per signal
+                }
             }
         } else {
             // CONFIG/REGIME mode: Direct execution (unchanged legacy path)
