@@ -184,11 +184,11 @@ private:
 
         if (max_absorption < 1.5) {
             score += 4.0;
-        } else if (max_absorption > 3.0) {  // LCOV_EXCL_LINE
-            score -= 4.0;  // LCOV_EXCL_LINE
-        } else {  // LCOV_EXCL_LINE
-            score += lerp_score(max_absorption, 1.5, 3.0, 4.0, -4.0);  // LCOV_EXCL_LINE
-        }  // LCOV_EXCL_LINE
+        } else if (max_absorption > 3.0) { // LCOV_EXCL_LINE
+            score -= 4.0; // LCOV_EXCL_LINE
+        } else { // LCOV_EXCL_LINE
+            score += lerp_score(max_absorption, 1.5, 3.0, 4.0, -4.0); // LCOV_EXCL_LINE
+        } // LCOV_EXCL_LINE
 
         // Component 3: Volume removed (direction-dependent)
         auto flow_metrics = metrics->flow->get_metrics(Window::SEC_5);
@@ -225,9 +225,9 @@ private:
             return 0.0;
         case strategy::SignalStrength::Weak:
             return 10.0;
-        default:  // LCOV_EXCL_LINE
-            return 0.0;  // LCOV_EXCL_LINE
-        }  // LCOV_EXCL_LINE
+        default: // LCOV_EXCL_LINE
+            return 0.0; // LCOV_EXCL_LINE
+        } // LCOV_EXCL_LINE
     }
 
     /// Linear interpolation with clamping

@@ -353,7 +353,7 @@ public:
 
         // Initialize execution pipeline
         auto spot_limit = std::make_unique<execution::SpotLimitStage>(&execution_engine_);
-        spot_limit_stage_ = spot_limit.get();  // Keep raw pointer for callbacks
+        spot_limit_stage_ = spot_limit.get(); // Keep raw pointer for callbacks
         execution_pipeline_.add_stage(std::move(spot_limit));
         execution_pipeline_.add_stage(std::make_unique<execution::SpotMarketStage>());
         std::cout << "[EXEC] ExecutionPipeline initialized with " << execution_pipeline_.stage_count() << " stages: ";
@@ -619,7 +619,7 @@ public:
         if (market_health_.should_liquidate()) {
             emergency_liquidate(bid);
             if (spot_limit_stage_) {
-                spot_limit_stage_->cancel_all();  // Cancel all pending limits
+                spot_limit_stage_->cancel_all(); // Cancel all pending limits
             }
         }
 
@@ -888,7 +888,7 @@ private:
     StrategySelector strategy_selector_;
     execution::ExecutionEngine execution_engine_;
     execution::ExecutionPipeline execution_pipeline_;
-    execution::SpotLimitStage* spot_limit_stage_ = nullptr;  // Non-owning pointer for callbacks
+    execution::SpotLimitStage* spot_limit_stage_ = nullptr; // Non-owning pointer for callbacks
     std::unique_ptr<PaperExchangeAdapter> paper_adapter_; // Owned adapter for IExchange
 
     // Per-symbol ConfigStrategy instances (used when TunerState is ON or PAUSED)
@@ -1752,8 +1752,8 @@ private:
                 if (order_id > 0) {
                     // Track pending in SpotLimitStage if it's a limit order
                     if (req.type == hft::OrderType::Limit && req.source_stage == std::string_view("SpotLimit")) {
-                        spot_limit_stage_->track_pending(req.symbol, order_id, req.side,
-                                                         req.limit_price, req.qty, util::now_ns());
+                        spot_limit_stage_->track_pending(req.symbol, order_id, req.side, req.limit_price, req.qty,
+                                                         util::now_ns());
                     }
                     break; // Phase 4.1: single order per signal
                 }

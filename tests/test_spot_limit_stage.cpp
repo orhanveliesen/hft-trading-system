@@ -146,8 +146,7 @@ void test_cancel_on_direction_change() {
     assert(order_id > 0);
 
     // Track it in the stage as well
-    stage.track_pending(ctx.symbol, order_id, Side::Buy, requests[0].limit_price, requests[0].qty,
-                        util::now_ns());
+    stage.track_pending(ctx.symbol, order_id, Side::Buy, requests[0].limit_price, requests[0].qty, util::now_ns());
 
     int cancel_count_before = exchange.cancel_calls;
 
@@ -185,12 +184,11 @@ void test_no_replace_within_threshold() {
     MarketSnapshot market;
     market.bid = ctx.market.bid;
     market.ask = ctx.market.ask;
-    
+
     uint64_t order_id = engine.execute_request(requests[0], market);
     assert(order_id > 0);
 
-    stage.track_pending(ctx.symbol, order_id, Side::Buy, requests[0].limit_price, requests[0].qty,
-                        util::now_ns());
+    stage.track_pending(ctx.symbol, order_id, Side::Buy, requests[0].limit_price, requests[0].qty, util::now_ns());
 
     int cancel_count = exchange.cancel_calls;
 
@@ -225,12 +223,11 @@ void test_replace_when_price_drifted() {
     MarketSnapshot market;
     market.bid = ctx.market.bid;
     market.ask = ctx.market.ask;
-    
+
     uint64_t order_id = engine.execute_request(requests[0], market);
     assert(order_id > 0);
 
-    stage.track_pending(ctx.symbol, order_id, Side::Buy, requests[0].limit_price, requests[0].qty,
-                        util::now_ns());
+    stage.track_pending(ctx.symbol, order_id, Side::Buy, requests[0].limit_price, requests[0].qty, util::now_ns());
 
     int cancel_count = exchange.cancel_calls;
 
