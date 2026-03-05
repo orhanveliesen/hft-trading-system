@@ -889,7 +889,7 @@ private:
     execution::ExecutionEngine execution_engine_;
     execution::ExecutionPipeline execution_pipeline_;
     execution::SpotLimitStage* spot_limit_stage_ = nullptr; // Non-owning pointer for callbacks
-    std::unique_ptr<PaperExchangeAdapter> paper_adapter_; // Owned adapter for IExchange
+    std::unique_ptr<PaperExchangeAdapter> paper_adapter_;   // Owned adapter for IExchange
 
     // Per-symbol ConfigStrategy instances (used when TunerState is ON or PAUSED)
     std::array<std::unique_ptr<ConfigStrategy>, MAX_SYMBOLS> config_strategies_;

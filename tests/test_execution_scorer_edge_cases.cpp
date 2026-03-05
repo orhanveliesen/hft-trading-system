@@ -72,8 +72,8 @@ void test_partial_metrics_book_only() {
     // Should still compute spread_value and urgency, but fill_prob and adverse = 0
     assert(result.spread_value > 0.0); // Wide spread
     assert(result.fill_prob == 0.0);   // No combined/flow
-    assert(result.adverse == 0.0);      // No futures/combined/flow
-    assert(result.urgency == 10.0);     // Weak signal
+    assert(result.adverse == 0.0);     // No futures/combined/flow
+    assert(result.urgency == 10.0);    // Weak signal
 
     std::cout << "[PASS] test_partial_metrics_book_only\n";
 }
@@ -287,8 +287,7 @@ void test_adverse_absorption_boundaries() {
 
     // Just verify absorption_ratio code path is hit
     auto cm = combined.get_metrics(CombinedMetrics::Window::SEC_5);
-    std::cout << "[PASS] test_adverse_absorption_boundaries (absorption_bid="
-              << cm.absorption_ratio_bid << ")\n";
+    std::cout << "[PASS] test_adverse_absorption_boundaries (absorption_bid=" << cm.absorption_ratio_bid << ")\n";
 }
 
 // Edge case 9: Volume removed for Buy vs Sell side
@@ -664,8 +663,8 @@ void test_absorption_ratio_high_and_mid() {
         auto cm = combined.get_metrics(CombinedMetrics::Window::SEC_5);
         double max_abs = std::max(cm.absorption_ratio_bid, cm.absorption_ratio_ask);
 
-        std::cout << "[DEBUG] Absorption ratio: bid=" << cm.absorption_ratio_bid
-                  << ", ask=" << cm.absorption_ratio_ask << ", max=" << max_abs << "\n";
+        std::cout << "[DEBUG] Absorption ratio: bid=" << cm.absorption_ratio_bid << ", ask=" << cm.absorption_ratio_ask
+                  << ", max=" << max_abs << "\n";
 
         // Note: If absorption < 3.0, this line may be unreachable with current metrics calculation
         if (max_abs > 3.0) {
