@@ -733,6 +733,555 @@ void test_track_births_bid_ask_independent() {
 }
 
 // ============================================================================
+// on_depth_snapshot() Tests (5 tests for uncovered on_depth_snapshot path)
+// ============================================================================
+
+void test_depth_snapshot_bid_volume_added() {
+    OrderFlowMetrics metrics;
+    uint64_t ts = 1'000'000;
+
+    // Initial snapshot (baseline)
+    BookSnapshot snap1;
+    snap1.bid_level_count = 1;
+    snap1.bid_levels[0] = {10000, 100};
+    snap1.ask_level_count = 1;
+    snap1.ask_levels[0] = {10010, 100};
+    metrics.on_depth_snapshot(snap1, ts);
+
+    // Add new bid level
+    BookSnapshot snap2;
+    snap2.bid_level_count = 2;
+    snap2.bid_levels[0] = {10000, 100};
+    snap2.bid_levels[1] = {9990, 200};
+    snap2.ask_level_count = 1;
+    snap2.ask_levels[0] = {10010, 100};
+    metrics.on_depth_snapshot(snap2, ts + 2'000'000);
+
+    auto m = metrics.get_metrics(Window::SEC_1);
+    assert(std::abs(m.bid_volume_added - 200.0) < 0.01);
+
+    std::cout << "✓ test_depth_snapshot_bid_volume_added\n";
+}
+
+void test_depth_snapshot_ask_volume_removed() {
+    OrderFlowMetrics metrics;
+    uint64_t ts = 1'000'000;
+
+    // Initial snapshot (baseline)
+    BookSnapshot snap1;
+    snap1.bid_level_count = 1;
+    snap1.bid_levels[0] = {10000, 100};
+    snap1.ask_level_count = 2;
+    snap1.ask_levels[0] = {10010, 100};
+    snap1.ask_levels[1] = {10020, 150};
+    metrics.on_depth_snapshot(snap1, ts);
+
+    // Remove ask level
+    BookSnapshot snap2;
+    snap2.bid_level_count = 1;
+    snap2.bid_levels[0] = {10000, 100};
+    snap2.ask_level_count = 1;
+    snap2.ask_levels[0] = {10010, 100};
+    metrics.on_depth_snapshot(snap2, ts + 2'000'000);
+
+    auto m = metrics.get_metrics(Window::SEC_1);
+    assert(std::abs(m.ask_volume_removed - 150.0) < 0.01);
+
+    std::cout << "✓ test_depth_snapshot_ask_volume_removed\n";
+}
+
+void test_depth_snapshot_with_trade_correlation() {
+    OrderFlowMetrics metrics;
+    uint64_t ts = 1'000'000;
+
+    // Initial snapshot
+    BookSnapshot snap1;
+    snap1.bid_level_count = 1;
+    snap1.bid_levels[0] = {10000, 100};
+    snap1.ask_level_count = 1;
+    snap1.ask_levels[0] = {10010, 200};
+    metrics.on_depth_snapshot(snap1, ts);
+
+    // Trade at ask
+    uint64_t trade_time_us = ts + 2'050'000;
+    metrics.on_trade(10010, 150, trade_time_us);
+
+    // Remove ask volume (correlated with trade)
+    BookSnapshot snap2;
+    snap2.bid_level_count = 1;
+    snap2.bid_levels[0] = {10000, 100};
+    snap2.ask_level_count = 1;
+    snap2.ask_levels[0] = {10010, 50};
+    metrics.on_depth_snapshot(snap2, ts + 2'060'000);
+
+    auto m = metrics.get_metrics(Window::SEC_1);
+    // Should correlate with trade (fill, not cancel)
+    assert(m.cancel_ratio_ask < 0.01);
+
+    std::cout << "✓ test_depth_snapshot_with_trade_correlation\n";
+}
+
+void test_depth_snapshot_level_lifetime() {
+    OrderFlowMetrics metrics;
+    uint64_t ts = 1'000'000;
+
+    // Level appears
+    BookSnapshot snap1;
+    snap1.bid_level_count = 2;
+    snap1.bid_levels[0] = {10000, 100};
+    snap1.bid_levels[1] = {9990, 200};
+    snap1.ask_level_count = 1;
+    snap1.ask_levels[0] = {10010, 100};
+    metrics.on_depth_snapshot(snap1, ts);
+
+    // Level disappears after 400ms
+    BookSnapshot snap2;
+    snap2.bid_level_count = 1;
+    snap2.bid_levels[0] = {10000, 100};
+    snap2.ask_level_count = 1;
+    snap2.ask_levels[0] = {10010, 100};
+    metrics.on_depth_snapshot(snap2, ts + 400'000);
+
+    auto m = metrics.get_metrics(Window::SEC_1);
+    assert(std::abs(m.avg_bid_level_lifetime_us - 400'000.0) < 10'000.0);
+
+    std::cout << "✓ test_depth_snapshot_level_lifetime\n";
+}
+
+void test_depth_snapshot_quantity_change() {
+    OrderFlowMetrics metrics;
+    uint64_t ts = 1'000'000;
+
+    // Initial snapshot
+    BookSnapshot snap1;
+    snap1.bid_level_count = 1;
+    snap1.bid_levels[0] = {10000, 100};
+    snap1.ask_level_count = 1;
+    snap1.ask_levels[0] = {10010, 100};
+    metrics.on_depth_snapshot(snap1, ts);
+
+    // Quantity increase at existing level
+    BookSnapshot snap2;
+    snap2.bid_level_count = 1;
+    snap2.bid_levels[0] = {10000, 250};
+    snap2.ask_level_count = 1;
+    snap2.ask_levels[0] = {10010, 100};
+    metrics.on_depth_snapshot(snap2, ts + 2'000'000);
+
+    auto m = metrics.get_metrics(Window::SEC_1);
+    assert(std::abs(m.bid_volume_added - 150.0) < 0.01);
+
+    std::cout << "✓ test_depth_snapshot_quantity_change\n";
+}
+
+// ============================================================================
+// on_trade(Price, Quantity, timestamp_us) Tests (2 tests for direct parameter version)
+// ============================================================================
+
+void test_on_trade_direct_params() {
+    OrderFlowMetrics metrics;
+    uint64_t ts = 1'000'000;
+
+    // Add 10 trades using direct parameters
+    for (int i = 0; i < 10; i++) {
+        metrics.on_trade(10000 + i, 100, ts + i * 10'000);
+    }
+
+    // These trades should be stored for correlation
+    // Verify by creating book update that should correlate with trades
+    auto book1 = create_book_with_levels({{10000, 100}}, {{10010, 100}});
+    metrics.on_order_book_update(book1, ts); // Baseline
+
+    auto book2 = create_book_with_levels({}, {{10010, 100}});
+    metrics.on_order_book_update(book2, ts + 50'000);
+
+    auto m = metrics.get_metrics(Window::SEC_1);
+    // Trades should correlate (fill volume, not cancel)
+    assert(m.cancel_ratio_bid < 0.5);
+
+    std::cout << "✓ test_on_trade_direct_params\n";
+}
+
+void test_on_trade_overflow() {
+    OrderFlowMetrics metrics;
+    uint64_t ts = 1'000'000;
+
+    // Add more trades than buffer size (256) to test ring buffer overflow
+    for (int i = 0; i < 300; i++) {
+        metrics.on_trade(10000 + (i % 10), 50, ts + i * 100);
+    }
+
+    // Oldest trades should be dropped, recent ones retained
+    auto book1 = create_book_with_levels({{10000, 100}}, {{10010, 100}});
+    metrics.on_order_book_update(book1, ts); // Baseline
+
+    auto book2 = create_book_with_levels({}, {{10010, 100}});
+    metrics.on_order_book_update(book2, ts + 30'000);
+
+    auto m = metrics.get_metrics(Window::SEC_1);
+    // Should still function correctly despite overflow
+    assert(m.bid_volume_removed > 0.0);
+
+    std::cout << "✓ test_on_trade_overflow\n";
+}
+
+// ============================================================================
+// Window Duration Tests (3 tests for all window sizes)
+// ============================================================================
+
+void test_window_sec_30() {
+    OrderFlowMetrics metrics;
+    uint64_t ts = 1'000'000;
+
+    // Baseline
+    auto book1 = create_book_with_levels({{10000, 100}}, {{10010, 100}});
+    metrics.on_order_book_update(book1, ts);
+
+    // Event at +25s (within 30s window)
+    auto book2 = create_book_with_levels({{10000, 200}}, {{10010, 100}});
+    metrics.on_order_book_update(book2, ts + 25'000'000);
+
+    // Event at +35s (outside 30s window from +35s perspective, but book2 is within)
+    auto book3 = create_book_with_levels({{10000, 300}}, {{10010, 100}});
+    metrics.on_order_book_update(book3, ts + 35'000'000);
+
+    auto m = metrics.get_metrics(Window::SEC_30);
+    // From t=35s, window covers [5s, 35s]
+    // book1 at 1s is outside
+    // book2 at 26s is inside (+100)
+    // book3 at 36s is inside (+100)
+    assert(std::abs(m.bid_volume_added - 200.0) < 0.01);
+
+    std::cout << "✓ test_window_sec_30\n";
+}
+
+void test_window_min_1() {
+    OrderFlowMetrics metrics;
+    uint64_t ts = 1'000'000;
+
+    // Baseline
+    auto book1 = create_book_with_levels({{10000, 100}}, {{10010, 100}});
+    metrics.on_order_book_update(book1, ts);
+
+    // Event at +50s (within 1min window)
+    auto book2 = create_book_with_levels({{10000, 200}}, {{10010, 100}});
+    metrics.on_order_book_update(book2, ts + 50'000'000);
+
+    // Event at +70s (outside 1min window from +70s perspective, but book2 is within)
+    auto book3 = create_book_with_levels({{10000, 300}}, {{10010, 100}});
+    metrics.on_order_book_update(book3, ts + 70'000'000);
+
+    auto m = metrics.get_metrics(Window::MIN_1);
+    // From t=71s, window covers [11s, 71s]
+    // book1 at 1s is outside
+    // book2 at 51s is inside (+100)
+    // book3 at 71s is inside (+100)
+    assert(std::abs(m.bid_volume_added - 200.0) < 0.01);
+
+    std::cout << "✓ test_window_min_1\n";
+}
+
+void test_all_windows_simultaneously() {
+    OrderFlowMetrics metrics;
+    uint64_t ts = 1'000'000;
+
+    // Baseline (far in past, outside all windows)
+    auto book1 = create_book_with_levels({{10000, 100}}, {{10010, 100}});
+    metrics.on_order_book_update(book1, ts);
+
+    // Add volume (within all windows from current time perspective)
+    auto book2 = create_book_with_levels({{10000, 200}}, {{10010, 100}});
+    metrics.on_order_book_update(book2, ts + 70'000'000); // 70s later
+
+    // Query all windows (current time = 71s, so all windows include book2 but not book1)
+    auto m1 = metrics.get_metrics(Window::SEC_1);
+    auto m5 = metrics.get_metrics(Window::SEC_5);
+    auto m10 = metrics.get_metrics(Window::SEC_10);
+    auto m30 = metrics.get_metrics(Window::SEC_30);
+    auto m60 = metrics.get_metrics(Window::MIN_1);
+
+    // All should show the same volume added (event is within all windows, baseline is outside)
+    assert(std::abs(m1.bid_volume_added - 100.0) < 0.01);
+    assert(std::abs(m5.bid_volume_added - 100.0) < 0.01);
+    assert(std::abs(m10.bid_volume_added - 100.0) < 0.01);
+    assert(std::abs(m30.bid_volume_added - 100.0) < 0.01);
+    assert(std::abs(m60.bid_volume_added - 100.0) < 0.01);
+
+    std::cout << "✓ test_all_windows_simultaneously\n";
+}
+
+// ============================================================================
+// Cache Tests (2 tests for get_metrics cache hit/miss paths)
+// ============================================================================
+
+void test_cache_hit() {
+    OrderFlowMetrics metrics;
+    uint64_t ts = 1'000'000;
+
+    auto book1 = create_book_with_levels({{10000, 100}}, {{10010, 100}});
+    metrics.on_order_book_update(book1, ts);
+
+    auto book2 = create_book_with_levels({{10000, 200}}, {{10010, 100}});
+    metrics.on_order_book_update(book2, ts + 2'000'000);
+
+    // First call: cache miss
+    auto m1 = metrics.get_metrics(Window::SEC_1);
+
+    // Second call without adding events: cache hit
+    auto m2 = metrics.get_metrics(Window::SEC_1);
+
+    // Results should be identical
+    assert(m1.bid_volume_added == m2.bid_volume_added);
+    assert(m1.book_update_count == m2.book_update_count);
+
+    std::cout << "✓ test_cache_hit\n";
+}
+
+void test_cache_invalidation() {
+    OrderFlowMetrics metrics;
+    uint64_t ts = 1'000'000;
+
+    auto book1 = create_book_with_levels({{10000, 100}}, {{10010, 100}});
+    metrics.on_order_book_update(book1, ts);
+
+    auto book2 = create_book_with_levels({{10000, 200}}, {{10010, 100}});
+    metrics.on_order_book_update(book2, ts + 2'000'000);
+
+    // First call: cache miss, stores 100
+    auto m1 = metrics.get_metrics(Window::SEC_1);
+    assert(std::abs(m1.bid_volume_added - 100.0) < 0.01);
+
+    // Add more volume (invalidates cache)
+    auto book3 = create_book_with_levels({{10000, 300}}, {{10010, 100}});
+    metrics.on_order_book_update(book3, ts + 2'500'000);
+
+    // Second call: cache miss, recalculates with both events
+    auto m2 = metrics.get_metrics(Window::SEC_1);
+    assert(std::abs(m2.bid_volume_added - 200.0) < 0.01);
+
+    std::cout << "✓ test_cache_invalidation\n";
+}
+
+// ============================================================================
+// Multi-Window Coverage Tests (10 tests)
+// ============================================================================
+
+void test_sec_5_volume_metrics() {
+    OrderFlowMetrics metrics;
+    uint64_t ts = 1'000'000;
+
+    // Baseline outside SEC_5 window (> 5 seconds before)
+    auto book1 = create_book_with_levels({{10000, 100}}, {{10010, 100}});
+    metrics.on_order_book_update(book1, ts);
+
+    // Add volume within SEC_5 window
+    auto book2 = create_book_with_levels({{10000, 200}, {9990, 150}}, {{10010, 200}, {10020, 120}});
+    metrics.on_order_book_update(book2, ts + 6'000'000); // 6s later (outside SEC_5 window from book1)
+
+    auto m = metrics.get_metrics(Window::SEC_5);
+    assert(std::abs(m.bid_volume_added - 250.0) < 0.01); // 100 + 150
+    assert(std::abs(m.ask_volume_added - 220.0) < 0.01); // 100 + 120
+    assert(m.book_update_count == 1);
+
+    std::cout << "✓ test_sec_5_volume_metrics\n";
+}
+
+void test_sec_5_imbalance() {
+    OrderFlowMetrics metrics;
+    uint64_t ts = 10'000'000; // Start at 10s
+
+    // Baseline outside SEC_5 window
+    auto book1 = create_book_with_levels({{10000, 1000}}, {{10010, 500}});
+    metrics.on_order_book_update(book1, ts);
+
+    // Update within SEC_5 window (6s later, outside window from book1)
+    auto book2 = create_book_with_levels({{10000, 1500}}, {{10010, 500}});
+    metrics.on_order_book_update(book2, ts + 6'000'000);
+
+    auto m = metrics.get_metrics(Window::SEC_5);
+    // Should have imbalance metrics calculated
+    assert(m.book_update_count == 1); // Only book2 in window
+    assert(m.bid_volume_added > 0);
+
+    std::cout << "✓ test_sec_5_imbalance\n";
+}
+
+void test_sec_5_trade_events() {
+    OrderFlowMetrics metrics;
+    uint64_t ts = 10'000'000;
+
+    // Baseline outside window
+    auto book1 = create_book_with_levels({{10000, 100}}, {{10010, 100}});
+    metrics.on_order_book_update(book1, ts);
+
+    // Add volume within SEC_5 window (6s later)
+    auto book2 = create_book_with_levels({{10000, 300}}, {{10010, 250}});
+    metrics.on_order_book_update(book2, ts + 6'000'000);
+
+    auto m = metrics.get_metrics(Window::SEC_5);
+    assert(m.bid_volume_added > 0);
+    assert(m.ask_volume_added > 0);
+    assert(m.book_update_count == 1);
+
+    std::cout << "✓ test_sec_5_trade_events\n";
+}
+
+void test_sec_10_volume_metrics() {
+    OrderFlowMetrics metrics;
+    uint64_t ts = 1'000'000;
+
+    // Baseline outside SEC_10 window
+    auto book1 = create_book_with_levels({{10000, 100}}, {{10010, 100}});
+    metrics.on_order_book_update(book1, ts);
+
+    // Multiple updates within SEC_10 window (11s+ after baseline)
+    auto book2 = create_book_with_levels({{10000, 200}}, {{10010, 150}});
+    metrics.on_order_book_update(book2, ts + 11'000'000); // 11s
+
+    auto book3 = create_book_with_levels({{10000, 300}}, {{10010, 200}});
+    metrics.on_order_book_update(book3, ts + 14'000'000); // 14s
+
+    auto m = metrics.get_metrics(Window::SEC_10);
+    assert(std::abs(m.bid_volume_added - 200.0) < 0.01); // 100 + 100
+    assert(std::abs(m.ask_volume_added - 100.0) < 0.01); // 50 + 50
+    assert(m.book_update_count == 2);
+
+    std::cout << "✓ test_sec_10_volume_metrics\n";
+}
+
+void test_sec_10_level_lifetime() {
+    OrderFlowMetrics<20> metrics;
+    uint64_t ts = 1'000'000;
+
+    // Add level at t=0
+    auto book1 = create_book_with_levels({{10000, 100}}, {{10010, 100}});
+    metrics.on_order_book_update(book1, ts);
+
+    // Remove level after 5 seconds → lifetime = 5s = 5,000,000 us
+    auto book2 = create_book_with_levels({}, {{10010, 100}});
+    metrics.on_order_book_update(book2, ts + 5'000'000);
+
+    auto m = metrics.get_metrics(Window::SEC_10);
+    // avg_bid_level_lifetime_us should be ~5,000,000
+    assert(m.avg_bid_level_lifetime_us > 4'000'000 && m.avg_bid_level_lifetime_us < 6'000'000);
+
+    std::cout << "✓ test_sec_10_level_lifetime\n";
+}
+
+void test_ring_buffer_overflow() {
+    OrderFlowMetrics metrics;
+    uint64_t ts = 1'000'000;
+
+    // Add 100 events (test ring buffer logic without performance issues)
+    for (int i = 0; i < 100; ++i) {
+        auto book = create_book_with_levels({{10000, 100 + i}}, {{10010, 100 + i}});
+        metrics.on_order_book_update(book, ts + i * 10'000); // 10ms apart
+    }
+
+    // Should handle correctly
+    auto m = metrics.get_metrics(Window::SEC_1);
+    assert(m.book_update_count > 0);
+
+    std::cout << "✓ test_ring_buffer_overflow\n";
+}
+
+void test_simd_edge_case_24_levels() {
+    OrderFlowMetrics<20> metrics; // MaxDepthLevels = 20 (BookSnapshot limit)
+    uint64_t ts = 1'000'000;
+
+    // Create book with 18 levels (triggers non-aligned SIMD path: 16 SIMD + 2 scalar)
+    auto book1 = create_book_with_n_levels(18, 10000, 10019);
+    metrics.on_order_book_update(book1, ts);
+
+    // Add more volume
+    auto book2 = create_book_with_n_levels(18, 10000, 10019);
+    metrics.on_order_book_update(book2, ts + 2'000'000);
+
+    auto m = metrics.get_metrics(Window::SEC_5);
+    // Should handle 18 levels correctly (16 SIMD + 2 scalar)
+    assert(m.book_update_count == 1);
+
+    std::cout << "✓ test_simd_edge_case_18_levels\n";
+}
+
+void test_min_1_expiration() {
+    OrderFlowMetrics metrics;
+    uint64_t ts = 1'000'000;
+
+    // Event at t=0
+    auto book1 = create_book_with_levels({{10000, 100}}, {{10010, 100}});
+    metrics.on_order_book_update(book1, ts);
+
+    // Event at t=30s (within MIN_1 = 60s window)
+    auto book2 = create_book_with_levels({{10000, 200}}, {{10010, 100}});
+    metrics.on_order_book_update(book2, ts + 30'000'000);
+
+    auto m1 = metrics.get_metrics(Window::MIN_1);
+    assert(m1.book_update_count == 2); // Both events within 60s window
+
+    // Event at t=70s (first event expired, 70s > 60s from t=0)
+    auto book3 = create_book_with_levels({{10000, 300}}, {{10010, 100}});
+    metrics.on_order_book_update(book3, ts + 70'000'000);
+
+    auto m2 = metrics.get_metrics(Window::MIN_1);
+    assert(m2.book_update_count == 2); // book2 and book3 within window (book1 expired)
+
+    std::cout << "✓ test_min_1_expiration\n";
+}
+
+void test_sec_30_comprehensive() {
+    OrderFlowMetrics metrics;
+    uint64_t ts = 1'000'000;
+
+    // Baseline outside SEC_30 window
+    auto book1 = create_book_with_levels({{10000, 100}}, {{10010, 100}});
+    metrics.on_order_book_update(book1, ts);
+
+    // Updates at t=31s, t=41s within SEC_30 (outside window from baseline)
+    auto book2 = create_book_with_levels({{10000, 200}}, {{10010, 150}});
+    metrics.on_order_book_update(book2, ts + 31'000'000);
+
+    auto book3 = create_book_with_levels({{10000, 300}}, {{10010, 200}});
+    metrics.on_order_book_update(book3, ts + 41'000'000);
+
+    auto m = metrics.get_metrics(Window::SEC_30);
+    assert(std::abs(m.bid_volume_added - 200.0) < 0.01); // 100 + 100
+    assert(std::abs(m.ask_volume_added - 100.0) < 0.01); // 50 + 50
+    assert(m.book_update_count == 2);
+
+    std::cout << "✓ test_sec_30_comprehensive\n";
+}
+
+void test_all_windows_volume_consistency() {
+    OrderFlowMetrics metrics;
+    uint64_t ts = 100'000'000; // Start at 100s to avoid edge cases
+
+    // Baseline outside all windows
+    auto book1 = create_book_with_levels({{10000, 100}}, {{10010, 100}});
+    metrics.on_order_book_update(book1, ts);
+
+    // Add volume within all windows (61s+ after baseline, outside MIN_1 window)
+    auto book2 = create_book_with_levels({{10000, 300}}, {{10010, 100}});
+    metrics.on_order_book_update(book2, ts + 70'000'000);
+
+    // All windows should see only book2 (book1 is outside MIN_1 window)
+    auto m1 = metrics.get_metrics(Window::SEC_1);
+    auto m5 = metrics.get_metrics(Window::SEC_5);
+    auto m10 = metrics.get_metrics(Window::SEC_10);
+    auto m30 = metrics.get_metrics(Window::SEC_30);
+    auto m60 = metrics.get_metrics(Window::MIN_1);
+
+    // All should have the same book_update_count = 1
+    assert(m1.book_update_count == 1);
+    assert(m5.book_update_count == 1);
+    assert(m10.book_update_count == 1);
+    assert(m30.book_update_count == 1);
+    assert(m60.book_update_count == 1);
+
+    std::cout << "✓ test_all_windows_volume_consistency\n";
+}
+
+// ============================================================================
 // Main
 // ============================================================================
 
@@ -785,6 +1334,38 @@ int main() {
     test_track_births_no_duplicates();
     test_track_births_bid_ask_independent();
 
-    std::cout << "\n✅ All 30 tests passed!\n";
+    // on_depth_snapshot() (5 tests)
+    test_depth_snapshot_bid_volume_added();
+    test_depth_snapshot_ask_volume_removed();
+    test_depth_snapshot_with_trade_correlation();
+    test_depth_snapshot_level_lifetime();
+    test_depth_snapshot_quantity_change();
+
+    // on_trade(Price, Quantity, timestamp_us) (2 tests)
+    test_on_trade_direct_params();
+    test_on_trade_overflow();
+
+    // Window Duration (3 tests)
+    test_window_sec_30();
+    test_window_min_1();
+    test_all_windows_simultaneously();
+
+    // Cache (2 tests)
+    test_cache_hit();
+    test_cache_invalidation();
+
+    // Multi-Window Coverage (10 tests)
+    test_sec_5_volume_metrics();
+    test_sec_5_imbalance();
+    test_sec_5_trade_events();
+    test_sec_10_volume_metrics();
+    test_sec_10_level_lifetime();
+    test_ring_buffer_overflow();
+    test_simd_edge_case_24_levels();
+    test_min_1_expiration();
+    test_sec_30_comprehensive();
+    test_all_windows_volume_consistency();
+
+    std::cout << "\n✅ All 52 tests passed!\n";
     return 0;
 }

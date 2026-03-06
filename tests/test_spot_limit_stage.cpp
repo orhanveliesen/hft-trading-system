@@ -432,7 +432,8 @@ void test_stuck_order_on_direction_change() {
     // Track the pending order
     uint64_t order_id = 1000;
     stage.track_pending(ctx.symbol, order_id, Side::Buy, requests[0].limit_price, requests[0].qty, util::now_ns());
-    engine.track_pending_order_for_test(order_id, ctx.symbol, Side::Buy, requests[0].qty, requests[0].limit_price, util::now_ns());
+    engine.track_pending_order_for_test(order_id, ctx.symbol, Side::Buy, requests[0].qty, requests[0].limit_price,
+                                        util::now_ns());
 
     // Try to place Sell order (direction change)
     signal = Signal::sell(SignalStrength::Weak, 10.0, "test");

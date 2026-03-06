@@ -369,6 +369,44 @@ TEST(handles_invalid_host) {
 }
 
 // =============================================================================
+// Error Path Tests - JSON Parsing (Remove LCOV_EXCL_LINE)
+// =============================================================================
+
+TEST(parse_response_invalid_json) {
+    std::string invalid_json = "not json at all";
+    RagQueryResponse response;
+    bool result = RagClient::parse_query_response(invalid_json, response);
+    ASSERT_FALSE(result);
+}
+
+TEST(parse_response_missing_context_key) {
+    // Valid JSON but missing "context" key - tests extract_string missing key path
+    std::string json = R"({"n_chunks": 5, "sources": []})";
+    RagQueryResponse response;
+    bool result = RagClient::parse_query_response(json, response);
+    ASSERT_TRUE(result); // Should succeed but context is empty
+    ASSERT_EQ(response.context, "");
+}
+
+TEST(parse_response_malformed_colon) {
+    // Malformed JSON - missing colon - tests extract_string missing colon path
+    std::string json = R"({"context" "some text", "n_chunks": 5})";
+    RagQueryResponse response;
+    bool result = RagClient::parse_query_response(json, response);
+    ASSERT_TRUE(result);             // Parser is lenient, returns partial data
+    ASSERT_EQ(response.context, ""); // Context extraction fails
+}
+
+TEST(parse_response_missing_n_chunks) {
+    // Missing n_chunks key - tests extract_number missing key path
+    std::string json = R"({"context": "test", "sources": []})";
+    RagQueryResponse response;
+    bool result = RagClient::parse_query_response(json, response);
+    ASSERT_TRUE(result);
+    ASSERT_EQ(response.n_chunks, 0); // Missing number returns 0
+}
+
+// =============================================================================
 // Main
 // =============================================================================
 
@@ -406,6 +444,12 @@ int main() {
     RUN_TEST(handles_connection_refused);
     RUN_TEST(handles_invalid_host);
 
-    std::cout << "\n=== All tests completed ===\n\n";
+    std::cout << "\nJSON Parsing Error Path Tests:\n";
+    RUN_TEST(parse_response_invalid_json);
+    RUN_TEST(parse_response_missing_context_key);
+    RUN_TEST(parse_response_malformed_colon);
+    RUN_TEST(parse_response_missing_n_chunks);
+
+    std::cout << "\n=== All 22 tests completed ===\n\n";
     return 0;
 }

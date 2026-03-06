@@ -2273,7 +2273,7 @@ int run(const CLIArgs& args) {
         auto opt = app.lookup_symbol(mp.symbol);
         if (!opt || *opt >= MAX_SYMBOLS)
             return;
-        futures_metrics_array[*opt].on_mark_price(mp.mark_price, mp.index_price, mp.funding_rate,
+        futures_metrics_array[*opt].on_mark_price(mp.mark_price, mp.index_price, mp.funding_rate, mp.next_funding_time,
                                                   mp.event_time * 1000); // ms to us
     });
 

@@ -328,7 +328,7 @@ void test_missing_book_metrics_returns_urgency_only() {
     // No book metrics, only trade metrics
     TradeStreamMetrics trade;
     MetricsContext metrics;
-    metrics.trade = &trade;  // Only trade, no book
+    metrics.trade = &trade; // Only trade, no book
 
     Signal signal = Signal::buy(SignalStrength::Weak, 10.0, "test");
     auto result = ExecutionScorer::compute(signal, &metrics, Side::Buy);
@@ -365,7 +365,8 @@ int main() {
     test_missing_book_metrics_returns_urgency_only();
 
     std::cout << "\n15 ExecutionScorer tests passed (4 skipped)!\n";
-    std::cout << "✓ Coverage: score_spread_value (enhanced), score_signal_urgency (full), absorption branches (verified)\n";
+    std::cout
+        << "✓ Coverage: score_spread_value (enhanced), score_signal_urgency (full), absorption branches (verified)\n";
     std::cout << "✓ Invalid enum default case covered\n";
     std::cout << "✓ Additional edge cases: narrow spread lerp, missing metrics, direct signal strength\n";
     std::cout << "⚠ score_fill_probability, score_adverse_selection: need integration tests\n";

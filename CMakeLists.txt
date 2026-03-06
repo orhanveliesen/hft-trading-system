@@ -328,6 +328,36 @@ add_test(NAME SpotLimitStageTests COMMAND test_spot_limit_stage)
 add_executable(test_cancel_fault_tolerance tests/test_cancel_fault_tolerance.cpp)
 target_link_libraries(test_cancel_fault_tolerance trader_core)
 add_test(NAME CancelFaultToleranceTests COMMAND test_cancel_fault_tolerance)
+
+add_executable(test_strategy_factory tests/test_strategy_factory.cpp)
+target_link_libraries(test_strategy_factory trader_core)
+add_test(NAME StrategyFactoryTests COMMAND test_strategy_factory)
+
+add_executable(test_order_type_str tests/test_order_type_str.cpp)
+target_link_libraries(test_order_type_str trader_core)
+add_test(NAME OrderTypeStrTests COMMAND test_order_type_str)
+
+# Phase 5.0: Event-Driven Architecture Tests
+add_executable(test_event_bus tests/test_event_bus.cpp)
+add_test(NAME EventBusTests COMMAND test_event_bus)
+
+add_executable(test_shared_metrics_snapshot tests/test_shared_metrics_snapshot.cpp)
+target_link_libraries(test_shared_metrics_snapshot rt)
+add_test(NAME SharedMetricsSnapshotTests COMMAND test_shared_metrics_snapshot)
+
+add_executable(test_trading_engine_template tests/test_trading_engine_template.cpp)
+target_link_libraries(test_trading_engine_template trader_core)
+add_test(NAME TradingEngineTemplateTests COMMAND test_trading_engine_template)
+
+add_executable(test_limit_manager tests/test_limit_manager.cpp)
+target_link_libraries(test_limit_manager trader_core)
+add_test(NAME LimitManagerTests COMMAND test_limit_manager)
+
+# TODO: Fix test_strategy_evaluator.cpp type mismatches (MockMetricsManager vs core::MetricsManager)
+# add_executable(test_strategy_evaluator tests/test_strategy_evaluator.cpp)
+# target_link_libraries(test_strategy_evaluator trader_core)
+# add_test(NAME StrategyEvaluatorTests COMMAND test_strategy_evaluator)
+
 # === Tools ===
 add_executable(trader tools/trader.cpp)
 target_link_libraries(trader trader_core websockets pthread rt curl)
