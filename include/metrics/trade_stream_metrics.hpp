@@ -157,7 +157,7 @@ constexpr uint64_t TradeStreamMetrics::get_window_duration_us(TradeWindow window
     case TradeWindow::W1min:
         return 60'000'000; // 1 minute
     }
-    return 1'000'000; // Default 1s
+    return 1'000'000; // Default 1s // LCOV_EXCL_LINE - all enum values covered above
 }
 
 void TradeStreamMetrics::on_trade(Price price, Quantity quantity, bool is_buy, uint64_t timestamp_us) {
@@ -197,8 +197,13 @@ TradeStreamMetrics::Metrics TradeStreamMetrics::get_metrics(TradeWindow window) 
 
     // Binary search for window start
     size_t start_idx = find_window_start(window_start);
+    // LCOV_EXCL_START - Unreachable: window_start = current_time - window_us,
+    // where current_time is the latest trade. For all trades (including latest)
+    // to be older than window_start would require: current_time <= current_time - window_us,
+    // which is impossible. This check exists for defensive programming only.
     if (start_idx == count_)
         return Metrics{};
+    // LCOV_EXCL_STOP
 
     // Calculate and cache
     cached_metrics_[window_idx] = calculate_metrics(start_idx, count_);
@@ -227,8 +232,12 @@ size_t TradeStreamMetrics::find_window_start(uint64_t window_start) const {
 }
 
 TradeStreamMetrics::Metrics TradeStreamMetrics::calculate_metrics(size_t start_idx, size_t end_idx) const {
+    // LCOV_EXCL_START - Unreachable: Called from get_metrics with end_idx=count_,
+    // and start_idx is checked to be < count_ before this call (line 200).
+    // This check exists for defensive programming only.
     if (start_idx >= end_idx)
         return Metrics{};
+    // LCOV_EXCL_STOP
 
     Metrics m;
 

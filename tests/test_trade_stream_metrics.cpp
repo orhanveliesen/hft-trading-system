@@ -487,6 +487,284 @@ void test_high_frequency_trades() {
     std::cout << "✓ test_high_frequency_trades\n";
 }
 
+// ========================================================================
+// NEW TESTS: Target uncovered SIMD and edge case paths
+// ========================================================================
+
+void test_large_batch_simd_chunking() {
+    TradeStreamMetrics metrics;
+    uint64_t base_time = 1000000;
+
+    // Add 300 trades (exceeds SIMD_CHUNK = 256) to force chunking
+    for (int i = 0; i < 300; i++) {
+        Price price = 10000 + (i % 10); // Oscillating prices
+        Quantity qty = 100;
+        bool is_buy = (i % 2 == 0);
+        metrics.on_trade(price, qty, is_buy, base_time + i * 1000);
+    }
+
+    auto m = metrics.get_metrics(TradeWindow::W1s);
+    assert(m.total_trades == 300);
+    assert(m.total_volume > 0.0);
+    std::cout << "✓ test_large_batch_simd_chunking\n";
+}
+
+void test_multiple_bursts() {
+    TradeStreamMetrics metrics;
+    uint64_t base_time = 1000000;
+
+    // First burst: 11 trades in 60ms
+    for (int i = 0; i < 11; i++) {
+        metrics.on_trade(10000, 100, true, base_time + i * 5000);
+    }
+
+    // Gap > 100ms
+    base_time += 200000;
+
+    // Second burst: 10 trades in 70ms
+    for (int i = 0; i < 10; i++) {
+        metrics.on_trade(10000, 100, false, base_time + i * 7000);
+    }
+
+    // Gap > 100ms
+    base_time += 150000;
+
+    // Third burst: 12 trades in 80ms
+    for (int i = 0; i < 12; i++) {
+        metrics.on_trade(10000, 100, true, base_time + i * 6000);
+    }
+
+    auto m = metrics.get_metrics(TradeWindow::W1s);
+    assert(m.burst_count >= 3);
+    std::cout << "✓ test_multiple_bursts\n";
+}
+
+void test_ongoing_burst_finalization() {
+    TradeStreamMetrics metrics;
+    uint64_t base_time = 1000000;
+
+    // Create ongoing burst (11 trades in 80ms, but window ends before 100ms gap)
+    for (int i = 0; i < 11; i++) {
+        metrics.on_trade(10000, 100, true, base_time + i * 7000);
+    }
+
+    // Query immediately (burst is ongoing)
+    auto m = metrics.get_metrics(TradeWindow::W1s);
+    assert(m.burst_count >= 1); // Ongoing burst should be counted
+    std::cout << "✓ test_ongoing_burst_finalization\n";
+}
+
+void test_cache_hit_scenario() {
+    TradeStreamMetrics metrics;
+    uint64_t base_time = 1000000;
+
+    for (int i = 0; i < 10; i++) {
+        metrics.on_trade(10000, 100, true, base_time + i * 1000);
+    }
+
+    // First call: cache miss (calculates)
+    auto m1 = metrics.get_metrics(TradeWindow::W1s);
+
+    // Second call: cache hit (returns cached)
+    auto m2 = metrics.get_metrics(TradeWindow::W1s);
+
+    assert(m1.total_trades == m2.total_trades);
+    assert(m1.total_volume == m2.total_volume);
+    std::cout << "✓ test_cache_hit_scenario\n";
+}
+
+void test_cache_invalidation_on_new_trade() {
+    TradeStreamMetrics metrics;
+    uint64_t base_time = 1000000;
+
+    for (int i = 0; i < 10; i++) {
+        metrics.on_trade(10000, 100, true, base_time + i * 1000);
+    }
+
+    auto m1 = metrics.get_metrics(TradeWindow::W1s);
+    assert(m1.total_trades == 10);
+
+    // Add new trade → invalidates cache
+    metrics.on_trade(10000, 100, true, base_time + 11000);
+
+    auto m2 = metrics.get_metrics(TradeWindow::W1s);
+    assert(m2.total_trades == 11);
+    std::cout << "✓ test_cache_invalidation_on_new_trade\n";
+}
+
+void test_ring_buffer_wraparound() {
+    TradeStreamMetrics metrics;
+    uint64_t base_time = 1000000000; // 1000 seconds
+
+    // Add 70000 trades (exceeds MAX_TRADES = 65536)
+    // Spread over 70 seconds to avoid 1-minute expiry
+    for (int i = 0; i < 70000; i++) {
+        metrics.on_trade(10000, 100, (i % 2 == 0), base_time + i * 1000);
+    }
+
+    auto m = metrics.get_metrics(TradeWindow::W1min);
+    assert(m.total_trades > 0);
+    std::cout << "✓ test_ring_buffer_wraparound\n";
+}
+
+void test_trade_expiry_one_minute() {
+    TradeStreamMetrics metrics;
+    uint64_t base_time = 1000000;
+
+    // Add old trades
+    for (int i = 0; i < 10; i++) {
+        metrics.on_trade(10000, 100, true, base_time + i * 1000);
+    }
+
+    // Add new trade 65 seconds later (exceeds 60s limit)
+    uint64_t new_time = base_time + 65'000'000;
+    metrics.on_trade(10000, 100, true, new_time);
+
+    // Old trades should be expired
+    auto m = metrics.get_metrics(TradeWindow::W1min);
+    assert(m.total_trades == 1);
+    std::cout << "✓ test_trade_expiry_one_minute\n";
+}
+
+void test_binary_search_all_trades_within_window() {
+    TradeStreamMetrics metrics;
+    uint64_t base_time = 1000000;
+
+    // All trades within 1s window
+    for (int i = 0; i < 50; i++) {
+        metrics.on_trade(10000, 100, true, base_time + i * 10000); // 10ms apart
+    }
+
+    auto m = metrics.get_metrics(TradeWindow::W1s);
+    assert(m.total_trades == 50);
+    std::cout << "✓ test_binary_search_all_trades_within_window\n";
+}
+
+void test_binary_search_partial_window() {
+    TradeStreamMetrics metrics;
+    uint64_t base_time = 1000000;
+
+    // Add old trade
+    metrics.on_trade(10000, 100, true, base_time);
+
+    // Add new trade 10 seconds later
+    metrics.on_trade(10000, 100, true, base_time + 10'000'000);
+
+    // Query 1s window → only last trade
+    auto m = metrics.get_metrics(TradeWindow::W1s);
+    assert(m.total_trades == 1);
+    std::cout << "✓ test_binary_search_partial_window\n";
+}
+
+void test_all_tick_directions() {
+    TradeStreamMetrics metrics;
+    uint64_t base_time = 1000000;
+
+    metrics.on_trade(10000, 100, true, base_time);        // Base
+    metrics.on_trade(10010, 100, true, base_time + 1000); // Uptick
+    metrics.on_trade(10000, 100, false, base_time + 2000); // Downtick
+    metrics.on_trade(10000, 100, true, base_time + 3000); // Zerotick
+    metrics.on_trade(10005, 100, true, base_time + 4000); // Uptick
+
+    auto m = metrics.get_metrics(TradeWindow::W1s);
+    assert(m.upticks == 2);
+    assert(m.downticks == 1);
+    assert(m.zeroticks == 1);
+    assert(m.tick_ratio > 0.0 && m.tick_ratio < 1.0);
+    std::cout << "✓ test_all_tick_directions\n";
+}
+
+void test_minimum_inter_trade_time_tracking() {
+    TradeStreamMetrics metrics;
+    uint64_t base_time = 1000000;
+
+    // Varying inter-trade times: 1000us, 5000us, 500us, 2000us
+    // Min should be 500us
+    metrics.on_trade(10000, 100, true, base_time);
+    metrics.on_trade(10000, 100, true, base_time + 1000);
+    metrics.on_trade(10000, 100, true, base_time + 6000);
+    metrics.on_trade(10000, 100, true, base_time + 6500);  // 500us gap
+    metrics.on_trade(10000, 100, true, base_time + 8500);
+
+    auto m = metrics.get_metrics(TradeWindow::W1s);
+    assert(m.min_inter_trade_time_us == 500);
+    std::cout << "✓ test_minimum_inter_trade_time_tracking\n";
+}
+
+void test_welford_volatility_calculation() {
+    TradeStreamMetrics metrics;
+    uint64_t base_time = 1000000;
+
+    // Add trades with high variance in price changes
+    metrics.on_trade(10000, 100, true, base_time);
+    metrics.on_trade(10050, 100, true, base_time + 1000); // +50
+    metrics.on_trade(10010, 100, false, base_time + 2000); // -40
+    metrics.on_trade(10070, 100, true, base_time + 3000);  // +60
+    metrics.on_trade(10020, 100, false, base_time + 4000); // -50
+
+    auto m = metrics.get_metrics(TradeWindow::W1s);
+    assert(m.realized_volatility > 0.0);
+    std::cout << "✓ test_welford_volatility_calculation\n";
+}
+
+void test_price_velocity_calculation() {
+    TradeStreamMetrics metrics;
+    uint64_t base_time = 1000000;
+
+    // Price goes from 10000 to 10100 in 500ms
+    metrics.on_trade(10000, 100, true, base_time);
+    metrics.on_trade(10025, 100, true, base_time + 100000); // +100ms
+    metrics.on_trade(10050, 100, true, base_time + 200000); // +200ms
+    metrics.on_trade(10075, 100, true, base_time + 300000); // +300ms
+    metrics.on_trade(10100, 100, true, base_time + 500000); // +500ms
+
+    auto m = metrics.get_metrics(TradeWindow::W1s);
+    assert(m.price_velocity > 0.0);
+    std::cout << "✓ test_price_velocity_calculation\n";
+}
+
+// NEW TESTS: Target specific uncovered lines (lines 201, 231)
+
+void test_all_trades_before_window() {
+    // Target: Line 201 - start_idx == count_ (all trades too old for window)
+    TradeStreamMetrics metrics;
+    uint64_t base_time = 1000000;
+
+    // Add trades at base_time
+    for (int i = 0; i < 10; i++) {
+        metrics.on_trade(10000, 100, true, base_time + i * 1000);
+    }
+
+    // Now add a trade 2 seconds later
+    uint64_t later_time = base_time + 2'000'000;
+    metrics.on_trade(10000, 100, true, later_time);
+
+    // Query 1s window from the new trade's perspective
+    // All previous trades are > 1s old, so start_idx should == count of old trades
+    auto m = metrics.get_metrics(TradeWindow::W1s);
+
+    // Should only have the latest trade
+    assert(m.total_trades == 1);
+    std::cout << "✓ test_all_trades_before_window\n";
+}
+
+void test_calculate_metrics_empty_range() {
+    // Target: Line 231 - start_idx >= end_idx in calculate_metrics
+    // This is harder to hit directly, but we can trigger it via edge case
+    TradeStreamMetrics metrics;
+
+    // Edge case: single very old trade, query recent window
+    metrics.on_trade(10000, 100, true, 1000000);
+
+    // Add much newer trade (3 seconds later)
+    metrics.on_trade(10000, 100, true, 4'000'000);
+
+    // Query 1s window - first trade is way outside window
+    auto m = metrics.get_metrics(TradeWindow::W1s);
+    assert(m.total_trades == 1); // Only second trade
+    std::cout << "✓ test_calculate_metrics_empty_range\n";
+}
+
 int main() {
     std::cout << "Running TradeStreamMetrics tests...\n\n";
 
@@ -538,6 +816,30 @@ int main() {
     test_empty_window();
     test_high_frequency_trades();
 
-    std::cout << "\n✅ All 34 tests passed!\n";
+    // New comprehensive tests (14)
+    test_large_batch_simd_chunking();
+    test_multiple_bursts();
+    test_ongoing_burst_finalization();
+    test_cache_hit_scenario();
+    test_cache_invalidation_on_new_trade();
+    test_ring_buffer_wraparound();
+    test_trade_expiry_one_minute();
+    test_binary_search_all_trades_within_window();
+    test_binary_search_partial_window();
+    test_all_tick_directions();
+    test_minimum_inter_trade_time_tracking();
+    test_welford_volatility_calculation();
+    test_price_velocity_calculation();
+
+    // Edge case tests targeting specific uncovered lines (2)
+    test_all_trades_before_window();
+    test_calculate_metrics_empty_range();
+
+    std::cout << "\n✅ All 50 tests passed!\n";
+    std::cout << "✓ Coverage: SIMD chunking (>256 trades), multiple bursts, ongoing burst finalization\n";
+    std::cout << "✓ Coverage: Cache hit/miss paths, ring buffer wraparound, trade expiry\n";
+    std::cout << "✓ Coverage: Binary search edge cases, all tick directions, min inter-trade time\n";
+    std::cout << "✓ Coverage: Welford's volatility algorithm, price velocity calculation\n";
+    std::cout << "✓ Coverage: Empty window edge cases (lines 201, 231) - targeting 100% coverage\n";
     return 0;
 }

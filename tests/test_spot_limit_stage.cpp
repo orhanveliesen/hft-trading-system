@@ -387,6 +387,76 @@ void test_limit_price_passive_for_high_score() {
     std::cout << "[PASS] test_limit_price_passive_for_high_score\n";
 }
 
+// Test 13: Non-actionable signal returns empty (line 71)
+void test_non_actionable_signal_returns_empty() {
+    MockExchange exchange;
+    ExecutionEngine engine;
+    engine.set_exchange(&exchange);
+
+    SpotLimitStage stage(&engine);
+
+    // Signal::none() is not actionable
+    Signal signal = Signal::none();
+    ExecutionContext ctx;
+    ctx.symbol = 1;
+    ctx.market.bid = 100000;
+    ctx.market.ask = 100100;
+    ctx.metrics = nullptr;
+
+    auto requests = stage.process(signal, ctx);
+    assert(requests.empty()); // Should return empty for non-actionable signal
+    std::cout << "[PASS] test_non_actionable_signal_returns_empty\n";
+}
+
+// Test 14: Stuck order on direction change returns empty (line 94)
+void test_stuck_order_on_direction_change() {
+    MockExchange exchange;
+    exchange.cancel_result = CancelResult::NetworkError; // Cancel fails
+
+    ExecutionEngine engine;
+    engine.set_exchange(&exchange);
+
+    SpotLimitStage stage(&engine);
+
+    ExecutionContext ctx;
+    ctx.symbol = 1;
+    ctx.market.bid = 100000;
+    ctx.market.ask = 100100;
+    ctx.metrics = nullptr;
+
+    // Place Buy order
+    Signal signal = Signal::buy(SignalStrength::Weak, 10.0, "test");
+    auto requests = stage.process(signal, ctx);
+    assert(requests.size() == 1);
+
+    // Track the pending order
+    uint64_t order_id = 1000;
+    stage.track_pending(ctx.symbol, order_id, Side::Buy, requests[0].limit_price, requests[0].qty, util::now_ns());
+    engine.track_pending_order_for_test(order_id, ctx.symbol, Side::Buy, requests[0].qty, requests[0].limit_price, util::now_ns());
+
+    // Try to place Sell order (direction change)
+    signal = Signal::sell(SignalStrength::Weak, 10.0, "test");
+    requests = stage.process(signal, ctx);
+
+    // Should return empty because cancel failed (stuck order)
+    assert(requests.empty());
+    std::cout << "[PASS] test_stuck_order_on_direction_change\n";
+}
+
+// Test 16: name() method returns "SpotLimit" (line 132)
+void test_stage_name() {
+    MockExchange exchange;
+    ExecutionEngine engine;
+    engine.set_exchange(&exchange);
+
+    SpotLimitStage stage(&engine);
+
+    // Test name() method
+    std::string_view name = stage.name();
+    assert(name == "SpotLimit");
+    std::cout << "[PASS] test_stage_name\n";
+}
+
 int main() {
     std::cout << "Running SpotLimitStage tests...\n\n";
 
@@ -402,7 +472,10 @@ int main() {
     test_on_fill_clears_pending();
     test_no_metrics_returns_empty();
     test_limit_price_passive_for_high_score();
+    test_non_actionable_signal_returns_empty();
+    test_stuck_order_on_direction_change();
+    test_stage_name();
 
-    std::cout << "\n✓ All 12 tests passed!\n";
+    std::cout << "\n✓ All 15 tests passed!\n";
     return 0;
 }
