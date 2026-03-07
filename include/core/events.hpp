@@ -3,13 +3,11 @@
 #include "types.hpp"
 
 #include <cstdint>
-#include <string>
 
-namespace core {
+namespace hft::core {
 
 using hft::OrderId;
 using hft::Price;
-using hft::Quantity;
 using hft::Side;
 using hft::Symbol;
 
@@ -32,9 +30,9 @@ using hft::Symbol;
  */
 struct SpotBuyEvent {
     Symbol symbol;
-    Quantity qty;
+    double qty;         // Quantity (double for crypto fractional amounts)
     double strength;    // Signal strength (0.0 - 1.0)
-    std::string reason; // Human-readable reason for debugging
+    const char* reason; // Human-readable reason for debugging (no heap allocation)
     uint64_t timestamp_ns;
 };
 
@@ -43,9 +41,9 @@ struct SpotBuyEvent {
  */
 struct SpotSellEvent {
     Symbol symbol;
-    Quantity qty;
+    double qty;
     double strength;
-    std::string reason;
+    const char* reason;
     uint64_t timestamp_ns;
 };
 
@@ -54,11 +52,11 @@ struct SpotSellEvent {
  */
 struct SpotLimitBuyEvent {
     Symbol symbol;
-    Quantity qty;
+    double qty;
     Price limit_price;
     double strength;   // Signal strength
     double exec_score; // Execution score (higher = prefer limit over market)
-    std::string reason;
+    const char* reason;
     uint64_t timestamp_ns;
 };
 
@@ -67,11 +65,11 @@ struct SpotLimitBuyEvent {
  */
 struct SpotLimitSellEvent {
     Symbol symbol;
-    Quantity qty;
+    double qty;
     Price limit_price;
     double strength;
     double exec_score;
-    std::string reason;
+    const char* reason;
     uint64_t timestamp_ns;
 };
 
@@ -81,7 +79,7 @@ struct SpotLimitSellEvent {
 struct LimitCancelEvent {
     Symbol symbol;
     OrderId order_id;   // 0 = cancel all orders for symbol
-    std::string reason; // "timeout", "signal_reversal", etc.
+    const char* reason; // "timeout", "signal_reversal", etc.
     uint64_t timestamp_ns;
 };
 
@@ -94,9 +92,9 @@ struct LimitCancelEvent {
  */
 struct FuturesBuyEvent {
     Symbol symbol;
-    Quantity qty;
+    double qty;
     double strength;
-    std::string reason;
+    const char* reason;
     uint64_t timestamp_ns;
 };
 
@@ -105,9 +103,9 @@ struct FuturesBuyEvent {
  */
 struct FuturesSellEvent {
     Symbol symbol;
-    Quantity qty;
+    double qty;
     double strength;
-    std::string reason;
+    const char* reason;
     uint64_t timestamp_ns;
 };
 
@@ -116,8 +114,8 @@ struct FuturesSellEvent {
  */
 struct FuturesCloseLongEvent {
     Symbol symbol;
-    Quantity qty; // 0 = close full position
-    std::string reason;
+    double qty; // 0 = close full position
+    const char* reason;
     uint64_t timestamp_ns;
 };
 
@@ -126,9 +124,9 @@ struct FuturesCloseLongEvent {
  */
 struct FuturesCloseShortEvent {
     Symbol symbol;
-    Quantity qty; // 0 = close full position
-    std::string reason;
+    double qty; // 0 = close full position
+    const char* reason;
     uint64_t timestamp_ns;
 };
 
-} // namespace core
+} // namespace hft::core

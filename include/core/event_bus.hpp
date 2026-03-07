@@ -5,7 +5,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace core {
+namespace hft::core {
 
 /**
  * @brief Type-erased synchronous event bus for action events
@@ -96,4 +96,4 @@ private:
     std::unordered_map<std::type_index, std::vector<ErasedHandler>> handlers_;
 };
 
-} // namespace core
+} // namespace hft::core

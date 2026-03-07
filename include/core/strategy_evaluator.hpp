@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../execution/execution_scorer.hpp"
+#include "../execution/limit_manager.hpp"
 #include "../strategy/istrategy.hpp"
 #include "../strategy/strategy_selector.hpp"
 #include "../types.hpp"
@@ -10,14 +11,11 @@
 
 #include <cmath>
 
-namespace core {
+namespace hft::core {
 
 using namespace hft;
 using namespace hft::strategy;
 using namespace hft::execution;
-
-// Forward declaration
-class LimitManager;
 
 /**
  * @brief Evaluates strategy signals and publishes action events
@@ -34,14 +32,20 @@ class LimitManager;
  */
 class StrategyEvaluator {
 public:
+    static constexpr uint64_t DEFAULT_COOLDOWN_NS = 2'000'000'000; // 2000ms
+
     /**
      * @param bus EventBus for publishing action events
      * @param metrics MetricsManager for getting metrics context
      * @param limit_mgr LimitManager for checking timeouts
      * @param selector StrategySelector for getting active strategy
+     * @param cooldown_ns Minimum time between signals per symbol (default 2000ms)
      */
-    StrategyEvaluator(EventBus* bus, MetricsManager* metrics, LimitManager* limit_mgr, StrategySelector* selector)
-        : bus_(bus), metrics_(metrics), limit_mgr_(limit_mgr), selector_(selector) {}
+    StrategyEvaluator(EventBus* bus, MetricsManager* metrics, LimitManager* limit_mgr, StrategySelector* selector,
+                      uint64_t cooldown_ns = DEFAULT_COOLDOWN_NS)
+        : bus_(bus), metrics_(metrics), limit_mgr_(limit_mgr), selector_(selector), cooldown_ns_(cooldown_ns) {
+        last_signal_time_.fill(0);
+    }
 
     /**
      * @brief Evaluate strategy and publish events
@@ -51,6 +55,12 @@ public:
      * @param position Current position
      */
     void evaluate(Symbol symbol, const MarketSnapshot& market, const StrategyPosition& position) {
+        // Check cooldown
+        uint64_t now = util::now_ns();
+        if (now - last_signal_time_[symbol] < cooldown_ns_) {
+            return; // Still in cooldown period
+        }
+
         // Get metrics context
         auto ctx = metrics_->context_for(symbol);
 
@@ -88,13 +98,13 @@ public:
         double strength_val = signal_strength_to_double(signal.strength);
 
         // Get timestamp
-        uint64_t timestamp_ns = util::now_ns();
+        uint64_t timestamp_ns = now;
+        double qty = signal.suggested_qty; // Use double directly (crypto fractional amounts)
 
         // Publish event based on execution score
         if (score.prefer_limit()) {
             // Limit order preferred
             Price limit_price = calculate_limit_price(signal, market, side);
-            Quantity qty = static_cast<Quantity>(signal.suggested_qty);
 
             if (signal.is_buy()) {
                 bus_->publish(SpotLimitBuyEvent{.symbol = symbol,
@@ -115,8 +125,6 @@ public:
             }
         } else {
             // Market order preferred
-            Quantity qty = static_cast<Quantity>(signal.suggested_qty);
-
             if (signal.is_buy()) {
                 bus_->publish(SpotBuyEvent{.symbol = symbol,
                                            .qty = qty,
@@ -131,6 +139,9 @@ public:
                                             .timestamp_ns = timestamp_ns});
             }
         }
+
+        // Update cooldown timestamp
+        last_signal_time_[symbol] = timestamp_ns;
     }
 
 private:
@@ -138,6 +149,10 @@ private:
     MetricsManager* metrics_;
     LimitManager* limit_mgr_;
     StrategySelector* selector_;
+
+    // Per-symbol cooldown tracking
+    std::array<uint64_t, 64> last_signal_time_;
+    uint64_t cooldown_ns_;
 
     /**
      * @brief Convert SignalStrength to double
@@ -182,7 +197,11 @@ private:
     /**
      * @brief Check pending limits for timeout (forward to LimitManager)
      */
-    void check_limit_timeouts();
+    void check_limit_timeouts() {
+        if (limit_mgr_) {
+            limit_mgr_->check_timeouts();
+        }
+    }
 
     /**
      * @brief Get current timestamp in nanoseconds
@@ -196,4 +215,4 @@ private:
     };
 };
 
-} // namespace core
+} // namespace hft::core

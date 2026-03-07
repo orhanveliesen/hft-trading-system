@@ -339,11 +339,16 @@ add_test(NAME OrderTypeStrTests COMMAND test_order_type_str)
 
 # Phase 5.0: Event-Driven Architecture Tests
 add_executable(test_event_bus tests/test_event_bus.cpp)
+target_link_libraries(test_event_bus trader_core)
 add_test(NAME EventBusTests COMMAND test_event_bus)
 
 add_executable(test_shared_metrics_snapshot tests/test_shared_metrics_snapshot.cpp)
 target_link_libraries(test_shared_metrics_snapshot rt)
 add_test(NAME SharedMetricsSnapshotTests COMMAND test_shared_metrics_snapshot)
+
+add_executable(test_metrics_manager tests/test_metrics_manager.cpp)
+target_link_libraries(test_metrics_manager trader_core rt)
+add_test(NAME MetricsManagerTests COMMAND test_metrics_manager)
 
 add_executable(test_trading_engine_template tests/test_trading_engine_template.cpp)
 target_link_libraries(test_trading_engine_template trader_core)
@@ -352,6 +357,14 @@ add_test(NAME TradingEngineTemplateTests COMMAND test_trading_engine_template)
 add_executable(test_limit_manager tests/test_limit_manager.cpp)
 target_link_libraries(test_limit_manager trader_core)
 add_test(NAME LimitManagerTests COMMAND test_limit_manager)
+
+add_executable(test_action_event_wiring tests/test_action_event_wiring.cpp)
+target_link_libraries(test_action_event_wiring trader_core)
+add_test(NAME ActionEventWiringTests COMMAND test_action_event_wiring)
+
+add_executable(test_end_to_end_integration tests/test_end_to_end_integration.cpp)
+target_link_libraries(test_end_to_end_integration trader_core rt)
+add_test(NAME EndToEndIntegrationTests COMMAND test_end_to_end_integration)
 
 # TODO: Fix test_strategy_evaluator.cpp type mismatches (MockMetricsManager vs core::MetricsManager)
 # add_executable(test_strategy_evaluator tests/test_strategy_evaluator.cpp)

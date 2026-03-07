@@ -4,8 +4,10 @@
 #include <cassert>
 #include <iostream>
 #include <vector>
+#include <cstring>
 
-using namespace core;
+using namespace hft;
+using namespace hft::core;
 
 #define TEST(name) void name()
 #define RUN_TEST(name)                                                                                                 \
@@ -190,7 +192,7 @@ TEST(test_event_data_integrity) {
     assert(received_event.limit_price == 12345);
     assert(received_event.strength == 0.95);
     assert(received_event.exec_score == 0.75);
-    assert(received_event.reason == "high_conviction");
+    assert(std::strcmp(received_event.reason, "high_conviction") == 0);
     assert(received_event.timestamp_ns == 9876543210);
 }
 

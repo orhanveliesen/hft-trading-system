@@ -75,6 +75,15 @@
 #include "../include/util/cli.hpp"
 #include "../include/util/system.hpp"
 
+// Phase 5.0: Event-Driven Architecture
+#include "../include/core/event_bus.hpp"
+#include "../include/core/events.hpp"
+#include "../include/core/metrics_manager.hpp"
+#include "../include/core/strategy_evaluator.hpp"
+#include "../include/execution/limit_manager.hpp"
+#include "../include/execution/trading_engine.hpp"
+#include "../include/ipc/shared_metrics_snapshot.hpp"
+
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -452,6 +461,68 @@ public:
 
     std::optional<Symbol> lookup_symbol(const std::string& ticker) const { return engine_.lookup_symbol(ticker); }
 
+    // Phase 5.0: Public accessors for event-driven architecture
+    PaperExchangeAdapter* get_paper_adapter() { return paper_adapter_.get(); }
+
+    StrategySelector& strategy_selector() { return strategy_selector_; }
+
+    Portfolio& get_portfolio() { return portfolio_; }
+
+    execution::ExecutionEngine& execution_engine() { return execution_engine_; }
+
+    bool can_evaluate_symbol(Symbol id) const {
+        if (id >= MAX_SYMBOLS)
+            return false;
+        auto* world = engine_.get_symbol_world(id);
+        if (!world)
+            return false;
+        if (!engine_.can_trade() || world->is_halted())
+            return false;
+        if (!strategies_[id].active)
+            return false;
+        // Check regime - don't evaluate if dangerous
+        if (strategies_[id].regime.is_dangerous())
+            return false;
+        // Check market health - don't evaluate during cooldown
+        if (market_health_.in_cooldown())
+            return false;
+        return true;
+    }
+
+    MarketSnapshot get_market_snapshot(Symbol id) const {
+        MarketSnapshot snap{};
+        if (id >= MAX_SYMBOLS)
+            return snap;
+
+        auto* world = engine_.get_symbol_world(id);
+        if (!world)
+            return snap;
+
+        // Get current L1 data from world
+        // Note: SymbolWorld stores L1 via apply_snapshot()
+        // For now, construct from strategies_ data (mid price approximation)
+        // This will be updated when we have proper L1 accessor
+        Price mid = static_cast<Price>(strategies_[id].last_mid);
+        snap.bid = mid > 0 ? mid - 1 : 0; // Approximate
+        snap.ask = mid > 0 ? mid + 1 : 0; // Approximate
+        snap.timestamp_ns = std::chrono::steady_clock::now().time_since_epoch().count();
+
+        return snap;
+    }
+
+    StrategyPosition get_strategy_position(Symbol id) const {
+        StrategyPosition pos{};
+        if (id >= MAX_SYMBOLS)
+            return pos;
+
+        auto& portfolio_pos = portfolio_.positions[id];
+        pos.quantity = portfolio_pos.total_quantity();
+        pos.avg_entry = portfolio_pos.avg_entry();
+        pos.unrealized_pnl = 0.0; // Calculate if needed
+
+        return pos;
+    }
+
     void set_metrics_arrays(std::array<TradeStreamMetrics, MAX_SYMBOLS>* trade,
                             std::array<OrderBookMetrics, MAX_SYMBOLS>* book,
                             std::array<OrderFlowMetrics<20>, MAX_SYMBOLS>* flow,
@@ -623,13 +694,11 @@ public:
             }
         }
 
-        // Generate buy signals
-        // Skip trading if market is dangerous (spike or high volatility) or in cooldown after crash
-        // Note: Strategies run autonomously - they don't depend on tuner connection
-        if (engine_.can_trade() && !world->is_halted() && !strat.regime.is_dangerous() &&
-            !market_health_.in_cooldown()) {
-            check_signal(id, world, &strat, bid, ask);
-        }
+        // Phase 5.0: Signal generation moved to event-driven architecture
+        // MetricsManager → threshold crossed → callback → StrategyEvaluator → EventBus → SpotEngine
+        // Legacy check_signal() is NO LONGER CALLED in Phase 5.0
+        // This ensures clean separation: on_quote() handles L1 updates and paper fills only
+        // Strategy evaluation happens via MetricsManager callback (triggered by WS depth/trade streams)
 
         // Check target/stop-loss for this symbol - O(n), no allocation
         // IMPORTANT: Skip when tuner_mode is ON - unified system handles exits via exchange
@@ -2121,6 +2190,33 @@ int run(const CLIArgs& args) {
 
     TradingApp<OrderSender> app(args);
 
+    // ========================================================================
+    // Phase 5.0: Event-Driven Architecture Components
+    // ========================================================================
+
+    hft::core::EventBus event_bus;
+    hft::core::MetricsManager metrics_manager;
+
+    // Initialize SpotEngine with paper adapter (production TBD)
+    execution::SpotEngine spot_engine(nullptr); // Will be wired after app.paper_adapter_ is ready
+
+    // Initialize LimitManager
+    execution::LimitManager limit_manager(&event_bus, &spot_engine);
+
+    // StrategyEvaluator will be created after app.strategy_selector() is available
+
+    // Initialize SharedMetricsSnapshot for tuner/ML
+    ipc::SharedMetricsSnapshot* metrics_snapshot = nullptr;
+    if constexpr (std::is_same_v<OrderSender, PaperOrderSender>) {
+        metrics_snapshot = ipc::SharedMetricsSnapshot::create();
+        if (metrics_snapshot) {
+            metrics_manager.set_shared_snapshot(metrics_snapshot);
+            std::cout << "[IPC] SharedMetricsSnapshot initialized for tuner/ML\n";
+        }
+    }
+
+    std::cout << "[PHASE 5.0] Event-driven architecture initialized\n";
+
     auto symbols = args.symbols.empty() ? fetch_default_symbols() : args.symbols;
     std::cout << "Registering " << symbols.size() << " symbols...\n";
 
@@ -2155,6 +2251,38 @@ int run(const CLIArgs& args) {
     // Inject metrics arrays into TradingApp
     app.set_metrics_arrays(&trade_metrics_array, &order_book_metrics_array, &order_flow_metrics_array,
                            &combined_metrics_array, &futures_metrics_array);
+
+    // ========================================================================
+    // Phase 5.0: Wire Event-Driven Architecture (Part 1)
+    // ========================================================================
+
+    // NOTE: Full wiring happens after app.paper_adapter_ is initialized
+    // This section sets up components that don't depend on paper_adapter_
+
+    // 1. Set ticker names in SharedMetricsSnapshot
+    if (metrics_snapshot) {
+        for (auto& s : symbols) {
+            auto opt = app.lookup_symbol(s);
+            if (opt && *opt < MAX_SYMBOLS) {
+                metrics_manager.set_ticker(*opt, s.c_str());
+            }
+        }
+    }
+
+    // 2. Create StrategyEvaluator (will be wired after app is fully initialized)
+    std::unique_ptr<hft::core::StrategyEvaluator> strategy_evaluator_ptr;
+
+    // 3. Set near-zero thresholds (trigger on almost every real change)
+    hft::core::MetricsThresholds thresholds;
+    thresholds.spread_bps = 0.1;         // Very sensitive
+    thresholds.buy_ratio = 0.01;         // 1% change triggers
+    thresholds.basis_bps = 0.5;          // 5 bps change
+    thresholds.funding_rate = 0.00001;   // 0.001% change
+    thresholds.volatility = 0.001;       // 0.1% change
+    thresholds.top_imbalance = 0.02;     // 2% imbalance change
+    metrics_manager.set_thresholds(thresholds);
+
+    std::cout << "[PHASE 5.0] Event-driven architecture components created (wiring pending)\n";
 
     ws.set_connect_callback([](bool c) {
         if (c) {
@@ -2224,7 +2352,7 @@ int run(const CLIArgs& args) {
         bool is_buy = !t.is_buyer_maker; // Taker side determines direction
         uint64_t ts_us = t.time * 1000;  // ms → us
 
-        // Feed to metrics
+        // Feed to legacy metrics arrays
         trade_metrics_array[id].on_trade(t.price, qty, is_buy, ts_us);
         order_flow_metrics_array[id].on_trade(t.price, qty, ts_us);
 
@@ -2232,6 +2360,9 @@ int run(const CLIArgs& args) {
         if (combined_metrics_array[id]) {
             combined_metrics_array[id]->update(ts_us);
         }
+
+        // Phase 5.0: Feed to MetricsManager (triggers threshold checks + callback)
+        metrics_manager.on_trade(id, static_cast<double>(t.price) / risk::PRICE_SCALE, qty, is_buy, ts_us);
     });
 
     // Spot depth stream callback
@@ -2247,7 +2378,7 @@ int run(const CLIArgs& args) {
             std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now().time_since_epoch())
                 .count();
 
-        // Feed to metrics
+        // Feed to legacy metrics arrays
         order_book_metrics_array[id].on_depth_snapshot(snapshot, ts_us);
         order_flow_metrics_array[id].on_depth_snapshot(snapshot, ts_us);
 
@@ -2255,6 +2386,9 @@ int run(const CLIArgs& args) {
         if (combined_metrics_array[id]) {
             combined_metrics_array[id]->update(ts_us);
         }
+
+        // Phase 5.0: Feed to MetricsManager (triggers threshold checks + callback)
+        metrics_manager.on_depth(id, snapshot, ts_us);
     });
 
     // Futures callbacks
@@ -2273,15 +2407,28 @@ int run(const CLIArgs& args) {
         auto opt = app.lookup_symbol(mp.symbol);
         if (!opt || *opt >= MAX_SYMBOLS)
             return;
-        futures_metrics_array[*opt].on_mark_price(mp.mark_price, mp.index_price, mp.funding_rate, mp.next_funding_time,
-                                                  mp.event_time * 1000); // ms to us
+        Symbol id = *opt;
+
+        // Feed to legacy futures metrics array
+        futures_metrics_array[id].on_mark_price(mp.mark_price, mp.index_price, mp.funding_rate, mp.next_funding_time,
+                                                mp.event_time * 1000); // ms to us
+
+        // Phase 5.0: Feed to MetricsManager
+        metrics_manager.on_mark_price(id, mp.mark_price, mp.index_price, mp.funding_rate, mp.next_funding_time,
+                                      mp.event_time * 1000);
     });
 
     futures_ws.set_liquidation_callback([&](const exchange::LiquidationOrder& lo) {
         auto opt = app.lookup_symbol(lo.symbol);
         if (!opt || *opt >= MAX_SYMBOLS)
             return;
-        futures_metrics_array[*opt].on_liquidation(lo.side, lo.price, lo.quantity, lo.event_time * 1000);
+        Symbol id = *opt;
+
+        // Feed to legacy futures metrics array
+        futures_metrics_array[id].on_liquidation(lo.side, lo.price, lo.quantity, lo.event_time * 1000);
+
+        // Phase 5.0: Feed to MetricsManager
+        metrics_manager.on_liquidation(id, lo.side, lo.price, lo.quantity, lo.event_time * 1000);
     });
 
     futures_ws.set_book_ticker_callback([&](const exchange::FuturesBookTicker& fbt) {
@@ -2334,6 +2481,141 @@ int run(const CLIArgs& args) {
         g_shared_config->update_heartbeat();
     }
 
+    // ========================================================================
+    // Phase 5.0: Complete Event-Driven Architecture Wiring (Part 2)
+    // ========================================================================
+
+    // Now that app is fully initialized (paper_adapter_ ready), complete wiring
+
+    // 1. Wire SpotEngine with paper_adapter
+    if constexpr (std::is_same_v<OrderSender, PaperOrderSender>) {
+        spot_engine.set_exchange(app.get_paper_adapter());
+        spot_engine.set_position_callback(
+            [&app](Symbol symbol) -> double { return app.get_portfolio().positions[symbol].total_quantity(); });
+        std::cout << "[PHASE 5.0] SpotEngine wired with PaperExchangeAdapter\n";
+    }
+
+    // 2. Create StrategyEvaluator with cooldown (default 2000ms)
+    strategy_evaluator_ptr = std::make_unique<hft::core::StrategyEvaluator>(
+        &event_bus, &metrics_manager, &limit_manager, &app.strategy_selector(),
+        hft::core::StrategyEvaluator::DEFAULT_COOLDOWN_NS);
+
+    // 3. Set MetricsManager change callback → StrategyEvaluator
+    metrics_manager.set_change_callback([&](Symbol id) {
+        // Check if symbol is active and can trade
+        if (!app.can_evaluate_symbol(id))
+            return;
+
+        // Get market snapshot from MetricsManager (has latest book data)
+        auto book_metrics = metrics_manager.book(id);
+        if (!book_metrics)
+            return;
+        auto book_m = book_metrics->get_metrics();
+
+        MarketSnapshot market{};
+        market.bid = static_cast<Price>(book_m.best_bid * risk::PRICE_SCALE);
+        market.ask = static_cast<Price>(book_m.best_ask * risk::PRICE_SCALE);
+        market.timestamp_ns = std::chrono::steady_clock::now().time_since_epoch().count();
+
+        // Get position from portfolio
+        StrategyPosition position = app.get_strategy_position(id);
+
+        // Evaluate strategy
+        strategy_evaluator_ptr->evaluate(id, market, position);
+    });
+
+    // 4. Set up EventBus subscribers for action events
+    event_bus.subscribe<hft::core::SpotBuyEvent>([&](const hft::core::SpotBuyEvent& e) {
+        execution::OrderRequest req;
+        req.symbol = e.symbol;
+        req.side = Side::Buy;
+        req.type = OrderType::Market;
+        req.qty = e.qty;
+        req.venue = execution::Venue::Spot;
+        req.reason = e.reason;
+
+        // Get current market snapshot
+        auto book_metrics = metrics_manager.book(e.symbol);
+        if (!book_metrics)
+            return;
+        auto book_m = book_metrics->get_metrics();
+        MarketSnapshot market{static_cast<Price>(book_m.best_bid * risk::PRICE_SCALE),
+                              static_cast<Price>(book_m.best_ask * risk::PRICE_SCALE)};
+
+        spot_engine.execute(req, market);
+    });
+
+    event_bus.subscribe<hft::core::SpotSellEvent>([&](const hft::core::SpotSellEvent& e) {
+        execution::OrderRequest req;
+        req.symbol = e.symbol;
+        req.side = Side::Sell;
+        req.type = OrderType::Market;
+        req.qty = e.qty;
+        req.venue = execution::Venue::Spot;
+        req.reason = e.reason;
+
+        auto book_metrics = metrics_manager.book(e.symbol);
+        if (!book_metrics)
+            return;
+        auto book_m = book_metrics->get_metrics();
+        MarketSnapshot market{static_cast<Price>(book_m.best_bid * risk::PRICE_SCALE),
+                              static_cast<Price>(book_m.best_ask * risk::PRICE_SCALE)};
+
+        spot_engine.execute(req, market);
+    });
+
+    event_bus.subscribe<hft::core::SpotLimitBuyEvent>([&](const hft::core::SpotLimitBuyEvent& e) {
+        execution::OrderRequest req;
+        req.symbol = e.symbol;
+        req.side = Side::Buy;
+        req.type = OrderType::Limit;
+        req.qty = e.qty;
+        req.limit_price = e.limit_price;
+        req.venue = execution::Venue::Spot;
+        req.reason = e.reason;
+
+        auto book_metrics = metrics_manager.book(e.symbol);
+        if (!book_metrics)
+            return;
+        auto book_m = book_metrics->get_metrics();
+        MarketSnapshot market{static_cast<Price>(book_m.best_bid * risk::PRICE_SCALE),
+                              static_cast<Price>(book_m.best_ask * risk::PRICE_SCALE)};
+
+        uint64_t order_id = spot_engine.execute(req, market);
+        if (order_id > 0) {
+            limit_manager.track(e.symbol, order_id, Side::Buy, e.limit_price, e.qty);
+        }
+    });
+
+    event_bus.subscribe<hft::core::SpotLimitSellEvent>([&](const hft::core::SpotLimitSellEvent& e) {
+        execution::OrderRequest req;
+        req.symbol = e.symbol;
+        req.side = Side::Sell;
+        req.type = OrderType::Limit;
+        req.qty = e.qty;
+        req.limit_price = e.limit_price;
+        req.venue = execution::Venue::Spot;
+        req.reason = e.reason;
+
+        auto book_metrics = metrics_manager.book(e.symbol);
+        if (!book_metrics)
+            return;
+        auto book_m = book_metrics->get_metrics();
+        MarketSnapshot market{static_cast<Price>(book_m.best_bid * risk::PRICE_SCALE),
+                              static_cast<Price>(book_m.best_ask * risk::PRICE_SCALE)};
+
+        uint64_t order_id = spot_engine.execute(req, market);
+        if (order_id > 0) {
+            limit_manager.track(e.symbol, order_id, Side::Sell, e.limit_price, e.qty);
+        }
+    });
+
+    // LimitCancelEvent handled by LimitManager constructor subscription
+
+    std::cout << "[PHASE 5.0] EventBus subscribers wired\n";
+    std::cout << "[PHASE 5.0] Event-driven architecture FULLY WIRED AND ACTIVE\n";
+    std::cout << "[PHASE 5.0] WS → MetricsManager → Callback → StrategyEvaluator → EventBus → SpotEngine\n";
+
     auto start = std::chrono::steady_clock::now();
     auto last_heartbeat = start;
 
@@ -2355,11 +2637,18 @@ int run(const CLIArgs& args) {
             if (g_shared_config) {
                 g_shared_config->update_heartbeat();
 
-                // Recover stuck cancel orders (every second)
+                // Legacy: Recover stuck cancel orders (every second)
                 app.recover_stuck_orders();
 
-                // Cancel stale limit orders (every second)
+                // Legacy: Cancel stale limit orders (every second)
                 app.execution_engine().cancel_stale_orders(util::now_ns());
+
+                // Phase 5.0: SpotEngine maintenance tasks
+                if constexpr (std::is_same_v<OrderSender, PaperOrderSender>) {
+                    spot_engine.recover_stuck_orders();
+                    spot_engine.cancel_stale_orders(util::now_ns());
+                    limit_manager.check_timeouts();
+                }
 
                 // Connection health monitoring with auto-recovery
                 static int unhealthy_count = 0;
@@ -2395,6 +2684,12 @@ int run(const CLIArgs& args) {
     }
 
     ws.disconnect();
+
+    // Phase 5.0: Cleanup SharedMetricsSnapshot
+    if (metrics_snapshot) {
+        ipc::SharedMetricsSnapshot::destroy(metrics_snapshot);
+        std::cout << "[PHASE 5.0] SharedMetricsSnapshot cleaned up\n";
+    }
 
     // Final summary
     auto stats = app.get_stats();
