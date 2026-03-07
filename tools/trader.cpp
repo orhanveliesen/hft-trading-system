@@ -1998,17 +1998,12 @@ private:
         // BUY LOGIC: Buy based on regime + indicators
         // =====================================================================
 
-        // Option 1: Use unified strategy architecture (--unified flag OR tuner_mode ON)
-        // When tuner_mode is ON, we use the unified architecture with AI-tuned parameters
-        bool use_unified = args_.unified_strategy ||
-                           (shared_config_ && (shared_config_->is_tuner_on() || shared_config_->is_tuner_paused()));
+        // Phase 5.0: Strategy evaluation now handled by StrategyEvaluator via MetricsManager callback
+        // Old execute_unified_signal() path DISABLED - all evaluation goes through event-driven architecture
+        // (WS → MetricsManager → threshold → callback → StrategyEvaluator → EventBus → SpotEngine)
 
-        if (use_unified) {
-            if (execute_unified_signal(id, world, strat, bid, ask)) {
-                strat->last_signal_time = now;
-            }
-            return; // Skip legacy logic when unified mode is enabled
-        }
+        // Skip strategy evaluation here - it's handled by Phase 5.0 architecture
+        return;
 
         // Option 2: Legacy direct indicator logic (default)
         bool should_buy = false;
@@ -2324,7 +2319,7 @@ int run(const CLIArgs& args) {
         Quantity ask_size = static_cast<Quantity>(bt.ask_qty * config::scaling::QUANTITY_SCALE);
         app.on_quote(bt.symbol, bt.bid_price, bt.ask_price, bid_size, ask_size);
 
-        // Feed spot BBO to futures metrics for basis calculation
+        // Phase 5.0: Feed spot BBO to MetricsManager for futures basis calculation
         auto opt = app.lookup_symbol(bt.symbol);
         if (!opt || *opt >= MAX_SYMBOLS)
             return;
@@ -2334,10 +2329,10 @@ int run(const CLIArgs& args) {
         // Therefore: divide by 10000.0 to get actual price for basis calculation
         double spot_bid = static_cast<double>(bt.bid_price) / 10000.0;
         double spot_ask = static_cast<double>(bt.ask_price) / 10000.0;
-        futures_metrics_array[*opt].on_spot_bbo(
-            spot_bid, spot_ask,
+        uint64_t ts_us =
             std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now().time_since_epoch())
-                .count());
+                .count();
+        metrics_manager.on_spot_bbo(*opt, spot_bid, spot_ask, ts_us);
     });
 
     // Spot trade stream callback
@@ -2352,16 +2347,8 @@ int run(const CLIArgs& args) {
         bool is_buy = !t.is_buyer_maker; // Taker side determines direction
         uint64_t ts_us = t.time * 1000;  // ms → us
 
-        // Feed to legacy metrics arrays
-        trade_metrics_array[id].on_trade(t.price, qty, is_buy, ts_us);
-        order_flow_metrics_array[id].on_trade(t.price, qty, ts_us);
-
-        // Update combined metrics
-        if (combined_metrics_array[id]) {
-            combined_metrics_array[id]->update(ts_us);
-        }
-
         // Phase 5.0: Feed to MetricsManager (triggers threshold checks + callback)
+        // Legacy arrays REMOVED - MetricsManager handles all metrics now
         metrics_manager.on_trade(id, static_cast<double>(t.price) / risk::PRICE_SCALE, qty, is_buy, ts_us);
     });
 
@@ -2378,16 +2365,8 @@ int run(const CLIArgs& args) {
             std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now().time_since_epoch())
                 .count();
 
-        // Feed to legacy metrics arrays
-        order_book_metrics_array[id].on_depth_snapshot(snapshot, ts_us);
-        order_flow_metrics_array[id].on_depth_snapshot(snapshot, ts_us);
-
-        // Update combined metrics
-        if (combined_metrics_array[id]) {
-            combined_metrics_array[id]->update(ts_us);
-        }
-
         // Phase 5.0: Feed to MetricsManager (triggers threshold checks + callback)
+        // Legacy arrays REMOVED - MetricsManager handles all metrics now
         metrics_manager.on_depth(id, snapshot, ts_us);
     });
 
@@ -2409,11 +2388,8 @@ int run(const CLIArgs& args) {
             return;
         Symbol id = *opt;
 
-        // Feed to legacy futures metrics array
-        futures_metrics_array[id].on_mark_price(mp.mark_price, mp.index_price, mp.funding_rate, mp.next_funding_time,
-                                                mp.event_time * 1000); // ms to us
-
-        // Phase 5.0: Feed to MetricsManager
+        // Phase 5.0: Feed to MetricsManager (triggers threshold checks + callback)
+        // Legacy array REMOVED - MetricsManager handles all metrics now
         metrics_manager.on_mark_price(id, mp.mark_price, mp.index_price, mp.funding_rate, mp.next_funding_time,
                                       mp.event_time * 1000);
     });
@@ -2424,10 +2400,8 @@ int run(const CLIArgs& args) {
             return;
         Symbol id = *opt;
 
-        // Feed to legacy futures metrics array
-        futures_metrics_array[id].on_liquidation(lo.side, lo.price, lo.quantity, lo.event_time * 1000);
-
-        // Phase 5.0: Feed to MetricsManager
+        // Phase 5.0: Feed to MetricsManager (triggers threshold checks + callback)
+        // Legacy array REMOVED - MetricsManager handles all metrics now
         metrics_manager.on_liquidation(id, lo.side, lo.price, lo.quantity, lo.event_time * 1000);
     });
 
@@ -2435,8 +2409,10 @@ int run(const CLIArgs& args) {
         auto opt = app.lookup_symbol(fbt.symbol);
         if (!opt || *opt >= MAX_SYMBOLS)
             return;
+        // Phase 5.0: Feed to MetricsManager (triggers threshold checks + callback)
+        // Legacy array REMOVED - MetricsManager handles all metrics now
         // FuturesBookTicker uses double for prices (PR #48 fix for BTC overflow)
-        futures_metrics_array[*opt].on_futures_bbo(fbt.bid_price, fbt.ask_price, fbt.event_time * 1000);
+        metrics_manager.on_futures_bbo(*opt, fbt.bid_price, fbt.ask_price, fbt.event_time * 1000);
     });
 
     for (auto& s : symbols) {

@@ -106,6 +106,23 @@ public:
             // Limit order preferred
             Price limit_price = calculate_limit_price(signal, market, side);
 
+            // Check if there's already a pending limit for this symbol
+            const auto* pending = limit_mgr_ ? limit_mgr_->get_pending(symbol) : nullptr;
+            if (pending) {
+                // Decide whether to replace the pending limit
+                bool should_replace = should_replace_limit(pending, side, limit_price);
+
+                if (should_replace) {
+                    // Publish LimitCancelEvent to cancel the old limit (order_id=0 cancels all for symbol)
+                    bus_->publish(LimitCancelEvent{
+                        .symbol = symbol, .order_id = 0, .reason = "replace_with_new_signal", .timestamp_ns = timestamp_ns});
+                } else {
+                    // Keep existing limit, don't place new one
+                    return;
+                }
+            }
+
+            // Publish new limit order event
             if (signal.is_buy()) {
                 bus_->publish(SpotLimitBuyEvent{.symbol = symbol,
                                                 .qty = qty,
@@ -201,6 +218,43 @@ private:
         if (limit_mgr_) {
             limit_mgr_->check_timeouts();
         }
+    }
+
+    /**
+     * @brief Decide whether to replace an existing pending limit order
+     *
+     * Replace conditions:
+     * 1. Different side (buy vs sell) → always replace
+     * 2. Same side but price difference > 0.1% → replace (significant price change)
+     * 3. Otherwise → keep existing limit
+     *
+     * @param pending Existing pending limit
+     * @param new_side New signal's side
+     * @param new_price New signal's limit price
+     * @return true if should replace, false if should keep existing
+     */
+    static bool should_replace_limit(const execution::LimitManager::PendingLimit* pending, Side new_side,
+                                      Price new_price) {
+        if (!pending)
+            return true; // No existing limit, always place new one
+
+        // Condition 1: Different side → always replace
+        if (pending->side != new_side)
+            return true;
+
+        // Condition 2: Price difference > 0.1% → replace
+        Price old_price = pending->limit_price;
+        if (old_price == 0)
+            return true; // Invalid old price, replace
+
+        double price_diff_pct = std::abs(static_cast<double>(new_price - old_price)) / old_price;
+        constexpr double REPLACE_THRESHOLD = 0.001; // 0.1%
+
+        if (price_diff_pct > REPLACE_THRESHOLD)
+            return true;
+
+        // Condition 3: Otherwise, keep existing limit
+        return false;
     }
 
     /**

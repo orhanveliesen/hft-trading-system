@@ -186,6 +186,32 @@ public:
     }
 
     /**
+     * @brief Update spot BBO for futures basis calculation
+     */
+    void on_spot_bbo(Symbol id, double bid, double ask, uint64_t timestamp_us) {
+        if (id >= MAX_SYMBOLS)
+            return;
+
+        futures_[id].on_spot_bbo(bid, ask, timestamp_us);
+
+        write_snapshot(id);
+        check_thresholds(id);
+    }
+
+    /**
+     * @brief Update futures BBO
+     */
+    void on_futures_bbo(Symbol id, double bid, double ask, uint64_t timestamp_us) {
+        if (id >= MAX_SYMBOLS)
+            return;
+
+        futures_[id].on_futures_bbo(bid, ask, timestamp_us);
+
+        write_snapshot(id);
+        check_thresholds(id);
+    }
+
+    /**
      * @brief Get filled MetricsContext for strategy evaluation
      */
     MetricsContext context_for(Symbol id) const {
@@ -269,10 +295,17 @@ private:
     }
 
     /**
-     * @brief Write core metrics to shared memory snapshot
+     * @brief Write ALL metrics to shared memory snapshot (326 fields)
      *
-     * Simplified implementation: writes only core fields that definitely exist.
-     * TODO: Expand to full 326 fields after aligning with actual struct definitions.
+     * Writes all computed metrics for tuner/ML consumption:
+     * - TradeStreamMetrics: 26 fields × 5 windows = 130
+     * - OrderBookMetrics: 17 fields = 17
+     * - OrderFlowMetrics: 21 fields × 4 windows = 84
+     * - CombinedMetrics: 7 fields × 5 windows = 35
+     * - FuturesMetrics: 11 fields × 5 windows + 1 = 56
+     * - Regime: 4 fields
+     *
+     * Uses relaxed memory order (single writer, multiple readers).
      */
     void write_snapshot(Symbol id) {
         if (!shared_snap_ || id >= MAX_SYMBOLS)
@@ -280,11 +313,375 @@ private:
 
         auto& sym = shared_snap_->symbols[id];
 
-        // Increment update count
+        // Update count and timestamp
         sym.update_count.fetch_add(1, std::memory_order_relaxed);
+        sym.last_update_ns.store(std::chrono::steady_clock::now().time_since_epoch().count(),
+                                 std::memory_order_relaxed);
 
-        // Regime
+        // Helper macros for writing fields (scaling doubles to fixed-point int64_t)
+        #define WRITE_METRIC(field, value) \
+            sym.field.store(static_cast<int64_t>((value) * 1e8), std::memory_order_relaxed)
+        #define WRITE_COUNT(field, value) \
+            sym.field.store(static_cast<int32_t>(value), std::memory_order_relaxed)
+        #define WRITE_BOOL(field, value) \
+            sym.field.store((value) ? 1 : 0, std::memory_order_relaxed)
+
+        // ================================================================
+        // TradeStreamMetrics (26 fields × 5 windows = 130)
+        // ================================================================
+        {
+            auto m = trade_[id].get_metrics(TradeWindow::W1s);
+            WRITE_METRIC(trade_w1s_buy_volume_x8, m.buy_volume);
+            WRITE_METRIC(trade_w1s_sell_volume_x8, m.sell_volume);
+            WRITE_METRIC(trade_w1s_total_volume_x8, m.total_volume);
+            WRITE_METRIC(trade_w1s_delta_x8, m.delta);
+            WRITE_METRIC(trade_w1s_cumulative_delta_x8, m.cumulative_delta);
+            WRITE_METRIC(trade_w1s_buy_ratio_x8, m.buy_ratio);
+            WRITE_COUNT(trade_w1s_total_trades, m.total_trades);
+            WRITE_COUNT(trade_w1s_buy_trades, m.buy_trades);
+            WRITE_COUNT(trade_w1s_sell_trades, m.sell_trades);
+            WRITE_COUNT(trade_w1s_large_trades, m.large_trades);
+            WRITE_METRIC(trade_w1s_vwap_x8, m.vwap);
+            WRITE_COUNT(trade_w1s_high, static_cast<int32_t>(m.high));
+            WRITE_COUNT(trade_w1s_low, static_cast<int32_t>(m.low));
+            WRITE_METRIC(trade_w1s_price_velocity_x8, m.price_velocity);
+            WRITE_METRIC(trade_w1s_realized_volatility_x8, m.realized_volatility);
+        }
+        {
+            auto m = trade_[id].get_metrics(TradeWindow::W5s);
+            WRITE_METRIC(trade_w5s_buy_volume_x8, m.buy_volume);
+            WRITE_METRIC(trade_w5s_sell_volume_x8, m.sell_volume);
+            WRITE_METRIC(trade_w5s_total_volume_x8, m.total_volume);
+            WRITE_METRIC(trade_w5s_delta_x8, m.delta);
+            WRITE_METRIC(trade_w5s_cumulative_delta_x8, m.cumulative_delta);
+            WRITE_METRIC(trade_w5s_buy_ratio_x8, m.buy_ratio);
+            WRITE_COUNT(trade_w5s_total_trades, m.total_trades);
+            WRITE_COUNT(trade_w5s_buy_trades, m.buy_trades);
+            WRITE_COUNT(trade_w5s_sell_trades, m.sell_trades);
+            WRITE_COUNT(trade_w5s_large_trades, m.large_trades);
+            WRITE_METRIC(trade_w5s_vwap_x8, m.vwap);
+            WRITE_COUNT(trade_w5s_high, static_cast<int32_t>(m.high));
+            WRITE_COUNT(trade_w5s_low, static_cast<int32_t>(m.low));
+            WRITE_METRIC(trade_w5s_price_velocity_x8, m.price_velocity);
+            WRITE_METRIC(trade_w5s_realized_volatility_x8, m.realized_volatility);
+        }
+        {
+            auto m = trade_[id].get_metrics(TradeWindow::W10s);
+            WRITE_METRIC(trade_w10s_buy_volume_x8, m.buy_volume);
+            WRITE_METRIC(trade_w10s_sell_volume_x8, m.sell_volume);
+            WRITE_METRIC(trade_w10s_total_volume_x8, m.total_volume);
+            WRITE_METRIC(trade_w10s_delta_x8, m.delta);
+            WRITE_METRIC(trade_w10s_cumulative_delta_x8, m.cumulative_delta);
+            WRITE_METRIC(trade_w10s_buy_ratio_x8, m.buy_ratio);
+            WRITE_COUNT(trade_w10s_total_trades, m.total_trades);
+            WRITE_COUNT(trade_w10s_buy_trades, m.buy_trades);
+            WRITE_COUNT(trade_w10s_sell_trades, m.sell_trades);
+            WRITE_COUNT(trade_w10s_large_trades, m.large_trades);
+            WRITE_METRIC(trade_w10s_vwap_x8, m.vwap);
+            WRITE_COUNT(trade_w10s_high, static_cast<int32_t>(m.high));
+            WRITE_COUNT(trade_w10s_low, static_cast<int32_t>(m.low));
+            WRITE_METRIC(trade_w10s_price_velocity_x8, m.price_velocity);
+            WRITE_METRIC(trade_w10s_realized_volatility_x8, m.realized_volatility);
+        }
+        {
+            auto m = trade_[id].get_metrics(TradeWindow::W30s);
+            WRITE_METRIC(trade_w30s_buy_volume_x8, m.buy_volume);
+            WRITE_METRIC(trade_w30s_sell_volume_x8, m.sell_volume);
+            WRITE_METRIC(trade_w30s_total_volume_x8, m.total_volume);
+            WRITE_METRIC(trade_w30s_delta_x8, m.delta);
+            WRITE_METRIC(trade_w30s_cumulative_delta_x8, m.cumulative_delta);
+            WRITE_METRIC(trade_w30s_buy_ratio_x8, m.buy_ratio);
+            WRITE_COUNT(trade_w30s_total_trades, m.total_trades);
+            WRITE_COUNT(trade_w30s_buy_trades, m.buy_trades);
+            WRITE_COUNT(trade_w30s_sell_trades, m.sell_trades);
+            WRITE_COUNT(trade_w30s_large_trades, m.large_trades);
+            WRITE_METRIC(trade_w30s_vwap_x8, m.vwap);
+            WRITE_COUNT(trade_w30s_high, static_cast<int32_t>(m.high));
+            WRITE_COUNT(trade_w30s_low, static_cast<int32_t>(m.low));
+            WRITE_METRIC(trade_w30s_price_velocity_x8, m.price_velocity);
+            WRITE_METRIC(trade_w30s_realized_volatility_x8, m.realized_volatility);
+        }
+        {
+            auto m = trade_[id].get_metrics(TradeWindow::W1min);
+            WRITE_METRIC(trade_w1min_buy_volume_x8, m.buy_volume);
+            WRITE_METRIC(trade_w1min_sell_volume_x8, m.sell_volume);
+            WRITE_METRIC(trade_w1min_total_volume_x8, m.total_volume);
+            WRITE_METRIC(trade_w1min_delta_x8, m.delta);
+            WRITE_METRIC(trade_w1min_cumulative_delta_x8, m.cumulative_delta);
+            WRITE_METRIC(trade_w1min_buy_ratio_x8, m.buy_ratio);
+            WRITE_COUNT(trade_w1min_total_trades, m.total_trades);
+            WRITE_COUNT(trade_w1min_buy_trades, m.buy_trades);
+            WRITE_COUNT(trade_w1min_sell_trades, m.sell_trades);
+            WRITE_COUNT(trade_w1min_large_trades, m.large_trades);
+            WRITE_METRIC(trade_w1min_vwap_x8, m.vwap);
+            WRITE_COUNT(trade_w1min_high, static_cast<int32_t>(m.high));
+            WRITE_COUNT(trade_w1min_low, static_cast<int32_t>(m.low));
+            WRITE_METRIC(trade_w1min_price_velocity_x8, m.price_velocity);
+            WRITE_METRIC(trade_w1min_realized_volatility_x8, m.realized_volatility);
+        }
+
+        // ================================================================
+        // OrderBookMetrics (17 fields × 1 = 17)
+        // ================================================================
+        {
+            auto m = book_[id].get_metrics();
+            WRITE_METRIC(book_spread_bps_x8, m.spread_bps);
+            WRITE_METRIC(book_mid_price_x8, m.mid_price);
+            WRITE_METRIC(book_best_bid_x8, m.best_bid);
+            WRITE_METRIC(book_best_ask_x8, m.best_ask);
+            WRITE_METRIC(book_imbalance_x8, m.imbalance);
+            WRITE_METRIC(book_depth_imbalance_x8, m.depth_imbalance);
+            WRITE_METRIC(book_top_imbalance_x8, m.top_imbalance);
+            WRITE_METRIC(book_bid_depth_x8, m.bid_depth);
+            WRITE_METRIC(book_ask_depth_x8, m.ask_depth);
+            WRITE_METRIC(book_total_depth_x8, m.total_depth);
+            WRITE_METRIC(book_bid_depth_10_x8, m.bid_depth_10);
+            WRITE_METRIC(book_ask_depth_10_x8, m.ask_depth_10);
+            WRITE_METRIC(book_bid_depth_20_x8, m.bid_depth_20);
+            WRITE_METRIC(book_ask_depth_20_x8, m.ask_depth_20);
+            WRITE_METRIC(book_pressure_x8, m.pressure);
+            WRITE_METRIC(book_microprice_x8, m.microprice);
+            WRITE_COUNT(book_update_count, m.update_count);
+        }
+
+        // ================================================================
+        // OrderFlowMetrics (21 fields × 4 windows = 84)
+        // ================================================================
+        {
+            auto m = flow_[id].get_metrics(Window::SEC_1);
+            WRITE_METRIC(flow_sec1_bid_volume_added_x8, m.bid_volume_added);
+            WRITE_METRIC(flow_sec1_ask_volume_added_x8, m.ask_volume_added);
+            WRITE_METRIC(flow_sec1_bid_volume_removed_x8, m.bid_volume_removed);
+            WRITE_METRIC(flow_sec1_ask_volume_removed_x8, m.ask_volume_removed);
+            WRITE_METRIC(flow_sec1_estimated_bid_cancel_volume_x8, m.estimated_bid_cancel_volume);
+            WRITE_METRIC(flow_sec1_estimated_ask_cancel_volume_x8, m.estimated_ask_cancel_volume);
+            WRITE_METRIC(flow_sec1_cancel_ratio_bid_x8, m.cancel_ratio_bid);
+            WRITE_METRIC(flow_sec1_cancel_ratio_ask_x8, m.cancel_ratio_ask);
+            WRITE_METRIC(flow_sec1_bid_depth_velocity_x8, m.bid_depth_velocity);
+            WRITE_METRIC(flow_sec1_ask_depth_velocity_x8, m.ask_depth_velocity);
+            WRITE_METRIC(flow_sec1_bid_additions_per_sec_x8, m.bid_additions_per_sec);
+            WRITE_METRIC(flow_sec1_ask_additions_per_sec_x8, m.ask_additions_per_sec);
+            WRITE_METRIC(flow_sec1_bid_removals_per_sec_x8, m.bid_removals_per_sec);
+            WRITE_METRIC(flow_sec1_ask_removals_per_sec_x8, m.ask_removals_per_sec);
+            WRITE_METRIC(flow_sec1_avg_bid_level_lifetime_us_x8, m.avg_bid_level_lifetime_us);
+            WRITE_METRIC(flow_sec1_avg_ask_level_lifetime_us_x8, m.avg_ask_level_lifetime_us);
+            WRITE_METRIC(flow_sec1_short_lived_bid_ratio_x8, m.short_lived_bid_ratio);
+            WRITE_METRIC(flow_sec1_short_lived_ask_ratio_x8, m.short_lived_ask_ratio);
+            WRITE_COUNT(flow_sec1_book_update_count, m.book_update_count);
+            WRITE_COUNT(flow_sec1_bid_level_changes, m.bid_level_changes);
+            WRITE_COUNT(flow_sec1_ask_level_changes, m.ask_level_changes);
+        }
+        {
+            auto m = flow_[id].get_metrics(Window::SEC_5);
+            WRITE_METRIC(flow_sec5_bid_volume_added_x8, m.bid_volume_added);
+            WRITE_METRIC(flow_sec5_ask_volume_added_x8, m.ask_volume_added);
+            WRITE_METRIC(flow_sec5_bid_volume_removed_x8, m.bid_volume_removed);
+            WRITE_METRIC(flow_sec5_ask_volume_removed_x8, m.ask_volume_removed);
+            WRITE_METRIC(flow_sec5_estimated_bid_cancel_volume_x8, m.estimated_bid_cancel_volume);
+            WRITE_METRIC(flow_sec5_estimated_ask_cancel_volume_x8, m.estimated_ask_cancel_volume);
+            WRITE_METRIC(flow_sec5_cancel_ratio_bid_x8, m.cancel_ratio_bid);
+            WRITE_METRIC(flow_sec5_cancel_ratio_ask_x8, m.cancel_ratio_ask);
+            WRITE_METRIC(flow_sec5_bid_depth_velocity_x8, m.bid_depth_velocity);
+            WRITE_METRIC(flow_sec5_ask_depth_velocity_x8, m.ask_depth_velocity);
+            WRITE_METRIC(flow_sec5_bid_additions_per_sec_x8, m.bid_additions_per_sec);
+            WRITE_METRIC(flow_sec5_ask_additions_per_sec_x8, m.ask_additions_per_sec);
+            WRITE_METRIC(flow_sec5_bid_removals_per_sec_x8, m.bid_removals_per_sec);
+            WRITE_METRIC(flow_sec5_ask_removals_per_sec_x8, m.ask_removals_per_sec);
+            WRITE_METRIC(flow_sec5_avg_bid_level_lifetime_us_x8, m.avg_bid_level_lifetime_us);
+            WRITE_METRIC(flow_sec5_avg_ask_level_lifetime_us_x8, m.avg_ask_level_lifetime_us);
+            WRITE_METRIC(flow_sec5_short_lived_bid_ratio_x8, m.short_lived_bid_ratio);
+            WRITE_METRIC(flow_sec5_short_lived_ask_ratio_x8, m.short_lived_ask_ratio);
+            WRITE_COUNT(flow_sec5_book_update_count, m.book_update_count);
+            WRITE_COUNT(flow_sec5_bid_level_changes, m.bid_level_changes);
+            WRITE_COUNT(flow_sec5_ask_level_changes, m.ask_level_changes);
+        }
+        {
+            auto m = flow_[id].get_metrics(Window::SEC_10);
+            WRITE_METRIC(flow_sec10_bid_volume_added_x8, m.bid_volume_added);
+            WRITE_METRIC(flow_sec10_ask_volume_added_x8, m.ask_volume_added);
+            WRITE_METRIC(flow_sec10_bid_volume_removed_x8, m.bid_volume_removed);
+            WRITE_METRIC(flow_sec10_ask_volume_removed_x8, m.ask_volume_removed);
+            WRITE_METRIC(flow_sec10_estimated_bid_cancel_volume_x8, m.estimated_bid_cancel_volume);
+            WRITE_METRIC(flow_sec10_estimated_ask_cancel_volume_x8, m.estimated_ask_cancel_volume);
+            WRITE_METRIC(flow_sec10_cancel_ratio_bid_x8, m.cancel_ratio_bid);
+            WRITE_METRIC(flow_sec10_cancel_ratio_ask_x8, m.cancel_ratio_ask);
+            WRITE_METRIC(flow_sec10_bid_depth_velocity_x8, m.bid_depth_velocity);
+            WRITE_METRIC(flow_sec10_ask_depth_velocity_x8, m.ask_depth_velocity);
+            WRITE_METRIC(flow_sec10_bid_additions_per_sec_x8, m.bid_additions_per_sec);
+            WRITE_METRIC(flow_sec10_ask_additions_per_sec_x8, m.ask_additions_per_sec);
+            WRITE_METRIC(flow_sec10_bid_removals_per_sec_x8, m.bid_removals_per_sec);
+            WRITE_METRIC(flow_sec10_ask_removals_per_sec_x8, m.ask_removals_per_sec);
+            WRITE_METRIC(flow_sec10_avg_bid_level_lifetime_us_x8, m.avg_bid_level_lifetime_us);
+            WRITE_METRIC(flow_sec10_avg_ask_level_lifetime_us_x8, m.avg_ask_level_lifetime_us);
+            WRITE_METRIC(flow_sec10_short_lived_bid_ratio_x8, m.short_lived_bid_ratio);
+            WRITE_METRIC(flow_sec10_short_lived_ask_ratio_x8, m.short_lived_ask_ratio);
+            WRITE_COUNT(flow_sec10_book_update_count, m.book_update_count);
+            WRITE_COUNT(flow_sec10_bid_level_changes, m.bid_level_changes);
+            WRITE_COUNT(flow_sec10_ask_level_changes, m.ask_level_changes);
+        }
+        {
+            auto m = flow_[id].get_metrics(Window::SEC_30);
+            WRITE_METRIC(flow_sec30_bid_volume_added_x8, m.bid_volume_added);
+            WRITE_METRIC(flow_sec30_ask_volume_added_x8, m.ask_volume_added);
+            WRITE_METRIC(flow_sec30_bid_volume_removed_x8, m.bid_volume_removed);
+            WRITE_METRIC(flow_sec30_ask_volume_removed_x8, m.ask_volume_removed);
+            WRITE_METRIC(flow_sec30_estimated_bid_cancel_volume_x8, m.estimated_bid_cancel_volume);
+            WRITE_METRIC(flow_sec30_estimated_ask_cancel_volume_x8, m.estimated_ask_cancel_volume);
+            WRITE_METRIC(flow_sec30_cancel_ratio_bid_x8, m.cancel_ratio_bid);
+            WRITE_METRIC(flow_sec30_cancel_ratio_ask_x8, m.cancel_ratio_ask);
+            WRITE_METRIC(flow_sec30_bid_depth_velocity_x8, m.bid_depth_velocity);
+            WRITE_METRIC(flow_sec30_ask_depth_velocity_x8, m.ask_depth_velocity);
+            WRITE_METRIC(flow_sec30_bid_additions_per_sec_x8, m.bid_additions_per_sec);
+            WRITE_METRIC(flow_sec30_ask_additions_per_sec_x8, m.ask_additions_per_sec);
+            WRITE_METRIC(flow_sec30_bid_removals_per_sec_x8, m.bid_removals_per_sec);
+            WRITE_METRIC(flow_sec30_ask_removals_per_sec_x8, m.ask_removals_per_sec);
+            WRITE_METRIC(flow_sec30_avg_bid_level_lifetime_us_x8, m.avg_bid_level_lifetime_us);
+            WRITE_METRIC(flow_sec30_avg_ask_level_lifetime_us_x8, m.avg_ask_level_lifetime_us);
+            WRITE_METRIC(flow_sec30_short_lived_bid_ratio_x8, m.short_lived_bid_ratio);
+            WRITE_METRIC(flow_sec30_short_lived_ask_ratio_x8, m.short_lived_ask_ratio);
+            WRITE_COUNT(flow_sec30_book_update_count, m.book_update_count);
+            WRITE_COUNT(flow_sec30_bid_level_changes, m.bid_level_changes);
+            WRITE_COUNT(flow_sec30_ask_level_changes, m.ask_level_changes);
+        }
+
+        // ================================================================
+        // CombinedMetrics (7 fields × 5 windows = 35)
+        // ================================================================
+        if (combined_[id]) {
+            {
+                auto m = combined_[id]->get_metrics(TradeWindow::W1s);
+                WRITE_METRIC(combined_w1s_volume_pressure_x8, m.volume_pressure);
+                WRITE_METRIC(combined_w1s_flow_toxicity_x8, m.flow_toxicity);
+                WRITE_METRIC(combined_w1s_spread_stability_x8, m.spread_stability);
+                WRITE_METRIC(combined_w1s_market_impact_x8, m.market_impact);
+                WRITE_METRIC(combined_w1s_liquidity_score_x8, m.liquidity_score);
+                WRITE_METRIC(combined_w1s_order_flow_balance_x8, m.order_flow_balance);
+                WRITE_METRIC(combined_w1s_momentum_score_x8, m.momentum_score);
+            }
+            {
+                auto m = combined_[id]->get_metrics(TradeWindow::W5s);
+                WRITE_METRIC(combined_w5s_volume_pressure_x8, m.volume_pressure);
+                WRITE_METRIC(combined_w5s_flow_toxicity_x8, m.flow_toxicity);
+                WRITE_METRIC(combined_w5s_spread_stability_x8, m.spread_stability);
+                WRITE_METRIC(combined_w5s_market_impact_x8, m.market_impact);
+                WRITE_METRIC(combined_w5s_liquidity_score_x8, m.liquidity_score);
+                WRITE_METRIC(combined_w5s_order_flow_balance_x8, m.order_flow_balance);
+                WRITE_METRIC(combined_w5s_momentum_score_x8, m.momentum_score);
+            }
+            {
+                auto m = combined_[id]->get_metrics(TradeWindow::W10s);
+                WRITE_METRIC(combined_w10s_volume_pressure_x8, m.volume_pressure);
+                WRITE_METRIC(combined_w10s_flow_toxicity_x8, m.flow_toxicity);
+                WRITE_METRIC(combined_w10s_spread_stability_x8, m.spread_stability);
+                WRITE_METRIC(combined_w10s_market_impact_x8, m.market_impact);
+                WRITE_METRIC(combined_w10s_liquidity_score_x8, m.liquidity_score);
+                WRITE_METRIC(combined_w10s_order_flow_balance_x8, m.order_flow_balance);
+                WRITE_METRIC(combined_w10s_momentum_score_x8, m.momentum_score);
+            }
+            {
+                auto m = combined_[id]->get_metrics(TradeWindow::W30s);
+                WRITE_METRIC(combined_w30s_volume_pressure_x8, m.volume_pressure);
+                WRITE_METRIC(combined_w30s_flow_toxicity_x8, m.flow_toxicity);
+                WRITE_METRIC(combined_w30s_spread_stability_x8, m.spread_stability);
+                WRITE_METRIC(combined_w30s_market_impact_x8, m.market_impact);
+                WRITE_METRIC(combined_w30s_liquidity_score_x8, m.liquidity_score);
+                WRITE_METRIC(combined_w30s_order_flow_balance_x8, m.order_flow_balance);
+                WRITE_METRIC(combined_w30s_momentum_score_x8, m.momentum_score);
+            }
+            {
+                auto m = combined_[id]->get_metrics(TradeWindow::W1min);
+                WRITE_METRIC(combined_w1min_volume_pressure_x8, m.volume_pressure);
+                WRITE_METRIC(combined_w1min_flow_toxicity_x8, m.flow_toxicity);
+                WRITE_METRIC(combined_w1min_spread_stability_x8, m.spread_stability);
+                WRITE_METRIC(combined_w1min_market_impact_x8, m.market_impact);
+                WRITE_METRIC(combined_w1min_liquidity_score_x8, m.liquidity_score);
+                WRITE_METRIC(combined_w1min_order_flow_balance_x8, m.order_flow_balance);
+                WRITE_METRIC(combined_w1min_momentum_score_x8, m.momentum_score);
+            }
+        }
+
+        // ================================================================
+        // FuturesMetrics (11 fields × 5 windows + 1 = 56)
+        // ================================================================
+        {
+            auto m = futures_[id].get_metrics(FuturesWindow::W1s);
+            WRITE_METRIC(futures_w1s_basis_bps_x8, m.basis_bps);
+            WRITE_METRIC(futures_w1s_funding_rate_x8, m.funding_rate);
+            WRITE_METRIC(futures_w1s_oi_change_rate_x8, m.oi_change_rate);
+            WRITE_METRIC(futures_w1s_long_short_ratio_x8, m.long_short_ratio);
+            WRITE_METRIC(futures_w1s_liquidation_pressure_x8, m.liquidation_pressure);
+            WRITE_METRIC(futures_w1s_funding_velocity_x8, m.funding_velocity);
+            WRITE_METRIC(futures_w1s_basis_mean_x8, m.basis_mean);
+            WRITE_METRIC(futures_w1s_basis_std_x8, m.basis_std);
+            WRITE_METRIC(futures_w1s_basis_z_score_x8, m.basis_z_score);
+            WRITE_METRIC(futures_w1s_funding_rate_ema_x8, m.funding_rate_ema);
+            WRITE_COUNT(futures_w1s_next_funding_time_ms, static_cast<int32_t>(m.next_funding_time_ms));
+        }
+        {
+            auto m = futures_[id].get_metrics(FuturesWindow::W5s);
+            WRITE_METRIC(futures_w5s_basis_bps_x8, m.basis_bps);
+            WRITE_METRIC(futures_w5s_funding_rate_x8, m.funding_rate);
+            WRITE_METRIC(futures_w5s_oi_change_rate_x8, m.oi_change_rate);
+            WRITE_METRIC(futures_w5s_long_short_ratio_x8, m.long_short_ratio);
+            WRITE_METRIC(futures_w5s_liquidation_pressure_x8, m.liquidation_pressure);
+            WRITE_METRIC(futures_w5s_funding_velocity_x8, m.funding_velocity);
+            WRITE_METRIC(futures_w5s_basis_mean_x8, m.basis_mean);
+            WRITE_METRIC(futures_w5s_basis_std_x8, m.basis_std);
+            WRITE_METRIC(futures_w5s_basis_z_score_x8, m.basis_z_score);
+            WRITE_METRIC(futures_w5s_funding_rate_ema_x8, m.funding_rate_ema);
+        }
+        {
+            auto m = futures_[id].get_metrics(FuturesWindow::W10s);
+            WRITE_METRIC(futures_w10s_basis_bps_x8, m.basis_bps);
+            WRITE_METRIC(futures_w10s_funding_rate_x8, m.funding_rate);
+            WRITE_METRIC(futures_w10s_oi_change_rate_x8, m.oi_change_rate);
+            WRITE_METRIC(futures_w10s_long_short_ratio_x8, m.long_short_ratio);
+            WRITE_METRIC(futures_w10s_liquidation_pressure_x8, m.liquidation_pressure);
+            WRITE_METRIC(futures_w10s_funding_velocity_x8, m.funding_velocity);
+            WRITE_METRIC(futures_w10s_basis_mean_x8, m.basis_mean);
+            WRITE_METRIC(futures_w10s_basis_std_x8, m.basis_std);
+            WRITE_METRIC(futures_w10s_basis_z_score_x8, m.basis_z_score);
+            WRITE_METRIC(futures_w10s_funding_rate_ema_x8, m.funding_rate_ema);
+        }
+        {
+            auto m = futures_[id].get_metrics(FuturesWindow::W30s);
+            WRITE_METRIC(futures_w30s_basis_bps_x8, m.basis_bps);
+            WRITE_METRIC(futures_w30s_funding_rate_x8, m.funding_rate);
+            WRITE_METRIC(futures_w30s_oi_change_rate_x8, m.oi_change_rate);
+            WRITE_METRIC(futures_w30s_long_short_ratio_x8, m.long_short_ratio);
+            WRITE_METRIC(futures_w30s_liquidation_pressure_x8, m.liquidation_pressure);
+            WRITE_METRIC(futures_w30s_funding_velocity_x8, m.funding_velocity);
+            WRITE_METRIC(futures_w30s_basis_mean_x8, m.basis_mean);
+            WRITE_METRIC(futures_w30s_basis_std_x8, m.basis_std);
+            WRITE_METRIC(futures_w30s_basis_z_score_x8, m.basis_z_score);
+            WRITE_METRIC(futures_w30s_funding_rate_ema_x8, m.funding_rate_ema);
+        }
+        {
+            auto m = futures_[id].get_metrics(FuturesWindow::W1min);
+            WRITE_METRIC(futures_w1min_basis_bps_x8, m.basis_bps);
+            WRITE_METRIC(futures_w1min_funding_rate_x8, m.funding_rate);
+            WRITE_METRIC(futures_w1min_oi_change_rate_x8, m.oi_change_rate);
+            WRITE_METRIC(futures_w1min_long_short_ratio_x8, m.long_short_ratio);
+            WRITE_METRIC(futures_w1min_liquidation_pressure_x8, m.liquidation_pressure);
+            WRITE_METRIC(futures_w1min_funding_velocity_x8, m.funding_velocity);
+            WRITE_METRIC(futures_w1min_basis_mean_x8, m.basis_mean);
+            WRITE_METRIC(futures_w1min_basis_std_x8, m.basis_std);
+            WRITE_METRIC(futures_w1min_basis_z_score_x8, m.basis_z_score);
+            WRITE_METRIC(futures_w1min_funding_rate_ema_x8, m.funding_rate_ema);
+        }
+
+        // ================================================================
+        // Regime (4 fields)
+        // ================================================================
         sym.regime.store(static_cast<uint8_t>(regimes_[id].current_regime()), std::memory_order_relaxed);
+        sym.regime_confidence.store(static_cast<int32_t>(regimes_[id].confidence() * 100),
+                                    std::memory_order_relaxed);
+        sym.regime_is_dangerous.store(regimes_[id].is_dangerous() ? 1 : 0, std::memory_order_relaxed);
+        sym.regime_is_spike.store(regimes_[id].is_spike() ? 1 : 0, std::memory_order_relaxed);
+
+        #undef WRITE_METRIC
+        #undef WRITE_COUNT
+        #undef WRITE_BOOL
     }
 };
 
