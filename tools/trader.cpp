@@ -2500,7 +2500,7 @@ int run(const CLIArgs& args) {
         execution::OrderRequest req;
         req.symbol = e.symbol;
         req.side = Side::Buy;
-        req.type = execution::OrderType::Market;
+        req.type = OrderType::Market;
         req.qty = e.qty;
         req.venue = execution::Venue::Spot;
         req.reason = e.reason;
@@ -2520,7 +2520,7 @@ int run(const CLIArgs& args) {
         execution::OrderRequest req;
         req.symbol = e.symbol;
         req.side = Side::Sell;
-        req.type = execution::OrderType::Market;
+        req.type = OrderType::Market;
         req.qty = e.qty;
         req.venue = execution::Venue::Spot;
         req.reason = e.reason;
@@ -2539,7 +2539,7 @@ int run(const CLIArgs& args) {
         execution::OrderRequest req;
         req.symbol = e.symbol;
         req.side = Side::Buy;
-        req.type = execution::OrderType::Limit;
+        req.type = OrderType::Limit;
         req.qty = e.qty;
         req.limit_price = e.limit_price;
         req.venue = execution::Venue::Spot;
@@ -2562,7 +2562,7 @@ int run(const CLIArgs& args) {
         execution::OrderRequest req;
         req.symbol = e.symbol;
         req.side = Side::Sell;
-        req.type = execution::OrderType::Limit;
+        req.type = OrderType::Limit;
         req.qty = e.qty;
         req.limit_price = e.limit_price;
         req.venue = execution::Venue::Spot;
@@ -2607,12 +2607,6 @@ int run(const CLIArgs& args) {
         if (std::chrono::duration_cast<std::chrono::seconds>(now - last_heartbeat).count() >= 1) {
             if (g_shared_config) {
                 g_shared_config->update_heartbeat();
-
-                // Legacy: Recover stuck cancel orders (every second)
-                app.recover_stuck_orders();
-
-                // Legacy: Cancel stale limit orders (every second)
-                app.execution_engine().cancel_stale_orders(util::now_ns());
 
                 // Phase 5.0: SpotEngine maintenance tasks
                 if constexpr (std::is_same_v<OrderSender, PaperOrderSender>) {
