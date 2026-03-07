@@ -2,9 +2,9 @@
 #include "../include/core/events.hpp"
 
 #include <cassert>
+#include <cstring>
 #include <iostream>
 #include <vector>
-#include <cstring>
 
 using namespace hft;
 using namespace hft::core;
