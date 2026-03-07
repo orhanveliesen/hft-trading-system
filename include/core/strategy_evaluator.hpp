@@ -70,6 +70,10 @@ public:
             strategy = selector_->select_for_regime(ctx.regime);
         }
         if (!strategy) {
+            // No regime-specific strategy → fall back to default
+            strategy = selector_->get_default();
+        }
+        if (!strategy) {
             return; // No strategy available
         }
 

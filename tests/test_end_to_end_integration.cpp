@@ -85,8 +85,8 @@ void test_end_to_end_full_chain() {
     auto metrics = std::make_unique<hft::core::MetricsManager>();
     StrategySelector selector;
 
-    // Setup strategy (register as unique_ptr)
-    selector.register_strategy(std::make_unique<AlwaysBuyStrategy>());
+    // Setup strategy (register as default since no regime will be detected with only 2 depth updates)
+    selector.register_default(std::make_unique<AlwaysBuyStrategy>());
 
     StrategyEvaluator evaluator(&bus, metrics.get(), &limit_mgr, &selector, 0); // No cooldown for testing
 
