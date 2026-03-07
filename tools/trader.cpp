@@ -2269,12 +2269,12 @@ int run(const CLIArgs& args) {
 
     // 3. Set near-zero thresholds (trigger on almost every real change)
     hft::core::MetricsThresholds thresholds;
-    thresholds.spread_bps = 0.1;         // Very sensitive
-    thresholds.buy_ratio = 0.01;         // 1% change triggers
-    thresholds.basis_bps = 0.5;          // 5 bps change
-    thresholds.funding_rate = 0.00001;   // 0.001% change
-    thresholds.volatility = 0.001;       // 0.1% change
-    thresholds.top_imbalance = 0.02;     // 2% imbalance change
+    thresholds.spread_bps = 0.1;       // Very sensitive
+    thresholds.buy_ratio = 0.01;       // 1% change triggers
+    thresholds.basis_bps = 0.5;        // 5 bps change
+    thresholds.funding_rate = 0.00001; // 0.001% change
+    thresholds.volatility = 0.001;     // 0.1% change
+    thresholds.top_imbalance = 0.02;   // 2% imbalance change
     metrics_manager.set_thresholds(thresholds);
 
     std::cout << "[PHASE 5.0] Event-driven architecture components created (wiring pending)\n";

@@ -114,8 +114,10 @@ public:
 
                 if (should_replace) {
                     // Publish LimitCancelEvent to cancel the old limit (order_id=0 cancels all for symbol)
-                    bus_->publish(LimitCancelEvent{
-                        .symbol = symbol, .order_id = 0, .reason = "replace_with_new_signal", .timestamp_ns = timestamp_ns});
+                    bus_->publish(LimitCancelEvent{.symbol = symbol,
+                                                   .order_id = 0,
+                                                   .reason = "replace_with_new_signal",
+                                                   .timestamp_ns = timestamp_ns});
                 } else {
                     // Keep existing limit, don't place new one
                     return;
@@ -234,7 +236,7 @@ private:
      * @return true if should replace, false if should keep existing
      */
     static bool should_replace_limit(const execution::LimitManager::PendingLimit* pending, Side new_side,
-                                      Price new_price) {
+                                     Price new_price) {
         if (!pending)
             return true; // No existing limit, always place new one
 

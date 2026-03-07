@@ -318,13 +318,10 @@ private:
         sym.last_update_ns.store(std::chrono::steady_clock::now().time_since_epoch().count(),
                                  std::memory_order_relaxed);
 
-        // Helper macros for writing fields (scaling doubles to fixed-point int64_t)
-        #define WRITE_METRIC(field, value) \
-            sym.field.store(static_cast<int64_t>((value) * 1e8), std::memory_order_relaxed)
-        #define WRITE_COUNT(field, value) \
-            sym.field.store(static_cast<int32_t>(value), std::memory_order_relaxed)
-        #define WRITE_BOOL(field, value) \
-            sym.field.store((value) ? 1 : 0, std::memory_order_relaxed)
+// Helper macros for writing fields (scaling doubles to fixed-point int64_t)
+#define WRITE_METRIC(field, value) sym.field.store(static_cast<int64_t>((value)*1e8), std::memory_order_relaxed)
+#define WRITE_COUNT(field, value) sym.field.store(static_cast<int32_t>(value), std::memory_order_relaxed)
+#define WRITE_BOOL(field, value) sym.field.store((value) ? 1 : 0, std::memory_order_relaxed)
 
         // ================================================================
         // TradeStreamMetrics (26 fields × 5 windows = 130)
@@ -674,14 +671,13 @@ private:
         // Regime (4 fields)
         // ================================================================
         sym.regime.store(static_cast<uint8_t>(regimes_[id].current_regime()), std::memory_order_relaxed);
-        sym.regime_confidence.store(static_cast<int32_t>(regimes_[id].confidence() * 100),
-                                    std::memory_order_relaxed);
+        sym.regime_confidence.store(static_cast<int32_t>(regimes_[id].confidence() * 100), std::memory_order_relaxed);
         sym.regime_is_dangerous.store(regimes_[id].is_dangerous() ? 1 : 0, std::memory_order_relaxed);
         sym.regime_is_spike.store(regimes_[id].is_spike() ? 1 : 0, std::memory_order_relaxed);
 
-        #undef WRITE_METRIC
-        #undef WRITE_COUNT
-        #undef WRITE_BOOL
+#undef WRITE_METRIC
+#undef WRITE_COUNT
+#undef WRITE_BOOL
     }
 };
 

@@ -122,8 +122,13 @@ void test_spot_limit_buy_event_executes() {
         }
     });
 
-    bus.publish(SpotLimitBuyEvent{
-        .symbol = 3, .qty = 1.5, .limit_price = 99500, .strength = 0.5, .exec_score = 10.0, .reason = "test", .timestamp_ns = 345678});
+    bus.publish(SpotLimitBuyEvent{.symbol = 3,
+                                  .qty = 1.5,
+                                  .limit_price = 99500,
+                                  .strength = 0.5,
+                                  .exec_score = 10.0,
+                                  .reason = "test",
+                                  .timestamp_ns = 345678});
 
     assert(exchange.orders.size() == 1);
     assert(exchange.orders[0].type == OrderType::Limit);
@@ -155,12 +160,12 @@ void test_spot_limit_sell_event_executes() {
     });
 
     bus.publish(SpotLimitSellEvent{.symbol = 4,
-                                    .qty = 2.75,
-                                    .limit_price = 100500,
-                                    .strength = 0.7,
-                                    .exec_score = 12.0,
-                                    .reason = "test",
-                                    .timestamp_ns = 456789});
+                                   .qty = 2.75,
+                                   .limit_price = 100500,
+                                   .strength = 0.7,
+                                   .exec_score = 12.0,
+                                   .reason = "test",
+                                   .timestamp_ns = 456789});
 
     assert(exchange.orders.size() == 1);
     assert(exchange.orders[0].type == OrderType::Limit);
