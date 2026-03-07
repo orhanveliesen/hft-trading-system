@@ -40,6 +40,7 @@ public:
 
     explicit TradingEngine(IExchangeAdapter* exchange) : exchange_(exchange) { pending_orders_.resize(64); }
 
+    void set_exchange(IExchangeAdapter* exchange) { exchange_ = exchange; }
     void set_position_callback(PositionCallback cb) { get_position_ = std::move(cb); }
     void set_order_callback(OrderCallback cb) { on_order_ = std::move(cb); }
 

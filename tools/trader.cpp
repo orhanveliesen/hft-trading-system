@@ -103,7 +103,7 @@
 using namespace hft;
 using namespace hft::exchange;
 using namespace hft::strategy;
-using namespace hft::execution;
+// Note: NOT using namespace hft::execution to avoid TradingEngine name conflict with root hft::TradingEngine
 
 // Use Portfolio constants from trading namespace
 using hft::trading::MAX_POSITIONS_PER_SYMBOL;
@@ -468,8 +468,6 @@ public:
 
     Portfolio& get_portfolio() { return portfolio_; }
 
-    execution::ExecutionEngine& execution_engine() { return execution_engine_; }
-
     bool can_evaluate_symbol(Symbol id) const {
         if (id >= MAX_SYMBOLS)
             return false;
@@ -517,7 +515,7 @@ public:
 
         auto& portfolio_pos = portfolio_.positions[id];
         pos.quantity = portfolio_pos.total_quantity();
-        pos.avg_entry = portfolio_pos.avg_entry();
+        pos.avg_entry_price = portfolio_pos.avg_entry();
         pos.unrealized_pnl = 0.0; // Calculate if needed
 
         return pos;
@@ -926,9 +924,6 @@ public:
 
     // Recover stuck cancel orders (called from heartbeat loop)
     void recover_stuck_orders() { execution_engine_.recover_stuck_orders(); }
-
-    // Get execution engine reference for periodic maintenance
-    execution::ExecutionEngine& execution_engine() { return execution_engine_; }
 
 private:
     CLIArgs args_;
@@ -2505,7 +2500,7 @@ int run(const CLIArgs& args) {
         execution::OrderRequest req;
         req.symbol = e.symbol;
         req.side = Side::Buy;
-        req.type = OrderType::Market;
+        req.type = execution::OrderType::Market;
         req.qty = e.qty;
         req.venue = execution::Venue::Spot;
         req.reason = e.reason;
@@ -2525,7 +2520,7 @@ int run(const CLIArgs& args) {
         execution::OrderRequest req;
         req.symbol = e.symbol;
         req.side = Side::Sell;
-        req.type = OrderType::Market;
+        req.type = execution::OrderType::Market;
         req.qty = e.qty;
         req.venue = execution::Venue::Spot;
         req.reason = e.reason;
@@ -2544,7 +2539,7 @@ int run(const CLIArgs& args) {
         execution::OrderRequest req;
         req.symbol = e.symbol;
         req.side = Side::Buy;
-        req.type = OrderType::Limit;
+        req.type = execution::OrderType::Limit;
         req.qty = e.qty;
         req.limit_price = e.limit_price;
         req.venue = execution::Venue::Spot;
@@ -2567,7 +2562,7 @@ int run(const CLIArgs& args) {
         execution::OrderRequest req;
         req.symbol = e.symbol;
         req.side = Side::Sell;
-        req.type = OrderType::Limit;
+        req.type = execution::OrderType::Limit;
         req.qty = e.qty;
         req.limit_price = e.limit_price;
         req.venue = execution::Venue::Spot;
