@@ -18,7 +18,7 @@ void test_compilation() {
 
     // Test mark_price callback integration
     ws.set_mark_price_callback([&](const MarkPriceUpdate& mp) {
-        fm.on_mark_price(mp.mark_price, mp.index_price, mp.funding_rate, mp.event_time * 1000);
+        fm.on_mark_price(mp.mark_price, mp.index_price, mp.funding_rate, mp.next_funding_time, mp.event_time * 1000);
     });
 
     // Test liquidation callback integration

@@ -541,7 +541,7 @@ private:
             return result;
         }
 
-        return CancelResult::NetworkError; // Unreachable, compiler happy
+        return CancelResult::NetworkError; // LCOV_EXCL_LINE - Unreachable, compiler happy
     }
 };
 

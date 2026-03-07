@@ -360,15 +360,16 @@ TEST(test_order_callback_invoked) {
     Price callback_price = 0;
     OrderType callback_type = OrderType::Market;
 
-    engine.set_order_callback([&](uint64_t order_id, Symbol symbol, Side side, double qty, Price price, OrderType type) {
-        callback_invoked = true;
-        callback_order_id = order_id;
-        callback_symbol = symbol;
-        callback_side = side;
-        callback_qty = qty;
-        callback_price = price;
-        callback_type = type;
-    });
+    engine.set_order_callback(
+        [&](uint64_t order_id, Symbol symbol, Side side, double qty, Price price, OrderType type) {
+            callback_invoked = true;
+            callback_order_id = order_id;
+            callback_symbol = symbol;
+            callback_side = side;
+            callback_qty = qty;
+            callback_price = price;
+            callback_type = type;
+        });
 
     MarketSnapshot market;
     market.bid = 100'000'000;

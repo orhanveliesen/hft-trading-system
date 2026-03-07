@@ -660,11 +660,11 @@ void test_all_tick_directions() {
     TradeStreamMetrics metrics;
     uint64_t base_time = 1000000;
 
-    metrics.on_trade(10000, 100, true, base_time);        // Base
-    metrics.on_trade(10010, 100, true, base_time + 1000); // Uptick
+    metrics.on_trade(10000, 100, true, base_time);         // Base
+    metrics.on_trade(10010, 100, true, base_time + 1000);  // Uptick
     metrics.on_trade(10000, 100, false, base_time + 2000); // Downtick
-    metrics.on_trade(10000, 100, true, base_time + 3000); // Zerotick
-    metrics.on_trade(10005, 100, true, base_time + 4000); // Uptick
+    metrics.on_trade(10000, 100, true, base_time + 3000);  // Zerotick
+    metrics.on_trade(10005, 100, true, base_time + 4000);  // Uptick
 
     auto m = metrics.get_metrics(TradeWindow::W1s);
     assert(m.upticks == 2);
@@ -683,7 +683,7 @@ void test_minimum_inter_trade_time_tracking() {
     metrics.on_trade(10000, 100, true, base_time);
     metrics.on_trade(10000, 100, true, base_time + 1000);
     metrics.on_trade(10000, 100, true, base_time + 6000);
-    metrics.on_trade(10000, 100, true, base_time + 6500);  // 500us gap
+    metrics.on_trade(10000, 100, true, base_time + 6500); // 500us gap
     metrics.on_trade(10000, 100, true, base_time + 8500);
 
     auto m = metrics.get_metrics(TradeWindow::W1s);
@@ -697,7 +697,7 @@ void test_welford_volatility_calculation() {
 
     // Add trades with high variance in price changes
     metrics.on_trade(10000, 100, true, base_time);
-    metrics.on_trade(10050, 100, true, base_time + 1000); // +50
+    metrics.on_trade(10050, 100, true, base_time + 1000);  // +50
     metrics.on_trade(10010, 100, false, base_time + 2000); // -40
     metrics.on_trade(10070, 100, true, base_time + 3000);  // +60
     metrics.on_trade(10020, 100, false, base_time + 4000); // -50
