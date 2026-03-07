@@ -199,7 +199,7 @@ void test_cooldown_prevents_rapid_fire() {
     auto metrics = std::make_unique<hft::core::MetricsManager>();
     StrategySelector selector;
 
-    selector.register_strategy(std::make_unique<AlwaysBuyStrategy>());
+    selector.register_default(std::make_unique<AlwaysBuyStrategy>());
 
     // Set 10 second cooldown
     StrategyEvaluator evaluator(&bus, metrics.get(), &limit_mgr, &selector, 10'000'000'000);
@@ -213,6 +213,21 @@ void test_cooldown_prevents_rapid_fire() {
         req.venue = Venue::Spot;
         MarketSnapshot market{100000, 100100};
         engine.execute(req, market);
+    });
+
+    bus.subscribe<SpotLimitBuyEvent>([&](const SpotLimitBuyEvent& e) {
+        OrderRequest req;
+        req.symbol = e.symbol;
+        req.side = Side::Buy;
+        req.type = OrderType::Limit;
+        req.qty = e.qty;
+        req.limit_price = e.limit_price;
+        req.venue = Venue::Spot;
+        MarketSnapshot market{100000, 100100};
+        auto id = engine.execute(req, market);
+        if (id > 0) {
+            limit_mgr.track(e.symbol, id, Side::Buy, e.limit_price, e.qty);
+        }
     });
 
     Symbol test_symbol = 2;
@@ -239,7 +254,7 @@ void test_dangerous_regime_blocks_trading() {
     auto metrics = std::make_unique<hft::core::MetricsManager>();
     StrategySelector selector;
 
-    selector.register_strategy(std::make_unique<AlwaysBuyStrategy>());
+    selector.register_default(std::make_unique<AlwaysBuyStrategy>());
 
     StrategyEvaluator evaluator(&bus, metrics.get(), &limit_mgr, &selector, 0);
 
@@ -252,6 +267,21 @@ void test_dangerous_regime_blocks_trading() {
         req.venue = Venue::Spot;
         MarketSnapshot market{100000, 100100};
         engine.execute(req, market);
+    });
+
+    bus.subscribe<SpotLimitBuyEvent>([&](const SpotLimitBuyEvent& e) {
+        OrderRequest req;
+        req.symbol = e.symbol;
+        req.side = Side::Buy;
+        req.type = OrderType::Limit;
+        req.qty = e.qty;
+        req.limit_price = e.limit_price;
+        req.venue = Venue::Spot;
+        MarketSnapshot market{100000, 100100};
+        auto id = engine.execute(req, market);
+        if (id > 0) {
+            limit_mgr.track(e.symbol, id, Side::Buy, e.limit_price, e.qty);
+        }
     });
 
     Symbol test_symbol = 3;
