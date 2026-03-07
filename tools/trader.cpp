@@ -2500,7 +2500,7 @@ int run(const CLIArgs& args) {
         execution::OrderRequest req;
         req.symbol = e.symbol;
         req.side = Side::Buy;
-        req.type = OrderType::Market;
+        req.type = hft::OrderType::Market;
         req.qty = e.qty;
         req.venue = execution::Venue::Spot;
         req.reason = e.reason;
@@ -2520,7 +2520,7 @@ int run(const CLIArgs& args) {
         execution::OrderRequest req;
         req.symbol = e.symbol;
         req.side = Side::Sell;
-        req.type = OrderType::Market;
+        req.type = hft::OrderType::Market;
         req.qty = e.qty;
         req.venue = execution::Venue::Spot;
         req.reason = e.reason;
@@ -2539,7 +2539,7 @@ int run(const CLIArgs& args) {
         execution::OrderRequest req;
         req.symbol = e.symbol;
         req.side = Side::Buy;
-        req.type = OrderType::Limit;
+        req.type = hft::OrderType::Limit;
         req.qty = e.qty;
         req.limit_price = e.limit_price;
         req.venue = execution::Venue::Spot;
@@ -2562,7 +2562,7 @@ int run(const CLIArgs& args) {
         execution::OrderRequest req;
         req.symbol = e.symbol;
         req.side = Side::Sell;
-        req.type = OrderType::Limit;
+        req.type = hft::OrderType::Limit;
         req.qty = e.qty;
         req.limit_price = e.limit_price;
         req.venue = execution::Venue::Spot;
