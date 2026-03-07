@@ -343,6 +343,20 @@ private:
             WRITE_COUNT(trade_w1s_low, static_cast<int32_t>(m.low));
             WRITE_METRIC(trade_w1s_price_velocity_x8, m.price_velocity);
             WRITE_METRIC(trade_w1s_realized_volatility_x8, m.realized_volatility);
+            // Streak metrics
+            WRITE_COUNT(trade_w1s_buy_streak, m.buy_streak);
+            WRITE_COUNT(trade_w1s_sell_streak, m.sell_streak);
+            WRITE_COUNT(trade_w1s_max_buy_streak, m.max_buy_streak);
+            WRITE_COUNT(trade_w1s_max_sell_streak, m.max_sell_streak);
+            // Timing metrics
+            WRITE_METRIC(trade_w1s_avg_inter_trade_time_us_x8, m.avg_inter_trade_time_us);
+            sym.trade_w1s_min_inter_trade_time_us.store(m.min_inter_trade_time_us, std::memory_order_relaxed);
+            WRITE_COUNT(trade_w1s_burst_count, m.burst_count);
+            // Tick metrics
+            WRITE_COUNT(trade_w1s_upticks, m.upticks);
+            WRITE_COUNT(trade_w1s_downticks, m.downticks);
+            WRITE_COUNT(trade_w1s_zeroticks, m.zeroticks);
+            WRITE_METRIC(trade_w1s_tick_ratio_x8, m.tick_ratio);
         }
         {
             auto m = trade_[id].get_metrics(TradeWindow::W5s);
@@ -361,6 +375,20 @@ private:
             WRITE_COUNT(trade_w5s_low, static_cast<int32_t>(m.low));
             WRITE_METRIC(trade_w5s_price_velocity_x8, m.price_velocity);
             WRITE_METRIC(trade_w5s_realized_volatility_x8, m.realized_volatility);
+            // Streak metrics
+            WRITE_COUNT(trade_w5s_buy_streak, m.buy_streak);
+            WRITE_COUNT(trade_w5s_sell_streak, m.sell_streak);
+            WRITE_COUNT(trade_w5s_max_buy_streak, m.max_buy_streak);
+            WRITE_COUNT(trade_w5s_max_sell_streak, m.max_sell_streak);
+            // Timing metrics
+            WRITE_METRIC(trade_w5s_avg_inter_trade_time_us_x8, m.avg_inter_trade_time_us);
+            sym.trade_w5s_min_inter_trade_time_us.store(m.min_inter_trade_time_us, std::memory_order_relaxed);
+            WRITE_COUNT(trade_w5s_burst_count, m.burst_count);
+            // Tick metrics
+            WRITE_COUNT(trade_w5s_upticks, m.upticks);
+            WRITE_COUNT(trade_w5s_downticks, m.downticks);
+            WRITE_COUNT(trade_w5s_zeroticks, m.zeroticks);
+            WRITE_METRIC(trade_w5s_tick_ratio_x8, m.tick_ratio);
         }
         {
             auto m = trade_[id].get_metrics(TradeWindow::W10s);
@@ -379,6 +407,20 @@ private:
             WRITE_COUNT(trade_w10s_low, static_cast<int32_t>(m.low));
             WRITE_METRIC(trade_w10s_price_velocity_x8, m.price_velocity);
             WRITE_METRIC(trade_w10s_realized_volatility_x8, m.realized_volatility);
+            // Streak metrics
+            WRITE_COUNT(trade_w10s_buy_streak, m.buy_streak);
+            WRITE_COUNT(trade_w10s_sell_streak, m.sell_streak);
+            WRITE_COUNT(trade_w10s_max_buy_streak, m.max_buy_streak);
+            WRITE_COUNT(trade_w10s_max_sell_streak, m.max_sell_streak);
+            // Timing metrics
+            WRITE_METRIC(trade_w10s_avg_inter_trade_time_us_x8, m.avg_inter_trade_time_us);
+            sym.trade_w10s_min_inter_trade_time_us.store(m.min_inter_trade_time_us, std::memory_order_relaxed);
+            WRITE_COUNT(trade_w10s_burst_count, m.burst_count);
+            // Tick metrics
+            WRITE_COUNT(trade_w10s_upticks, m.upticks);
+            WRITE_COUNT(trade_w10s_downticks, m.downticks);
+            WRITE_COUNT(trade_w10s_zeroticks, m.zeroticks);
+            WRITE_METRIC(trade_w10s_tick_ratio_x8, m.tick_ratio);
         }
         {
             auto m = trade_[id].get_metrics(TradeWindow::W30s);
@@ -397,6 +439,20 @@ private:
             WRITE_COUNT(trade_w30s_low, static_cast<int32_t>(m.low));
             WRITE_METRIC(trade_w30s_price_velocity_x8, m.price_velocity);
             WRITE_METRIC(trade_w30s_realized_volatility_x8, m.realized_volatility);
+            // Streak metrics
+            WRITE_COUNT(trade_w30s_buy_streak, m.buy_streak);
+            WRITE_COUNT(trade_w30s_sell_streak, m.sell_streak);
+            WRITE_COUNT(trade_w30s_max_buy_streak, m.max_buy_streak);
+            WRITE_COUNT(trade_w30s_max_sell_streak, m.max_sell_streak);
+            // Timing metrics
+            WRITE_METRIC(trade_w30s_avg_inter_trade_time_us_x8, m.avg_inter_trade_time_us);
+            sym.trade_w30s_min_inter_trade_time_us.store(m.min_inter_trade_time_us, std::memory_order_relaxed);
+            WRITE_COUNT(trade_w30s_burst_count, m.burst_count);
+            // Tick metrics
+            WRITE_COUNT(trade_w30s_upticks, m.upticks);
+            WRITE_COUNT(trade_w30s_downticks, m.downticks);
+            WRITE_COUNT(trade_w30s_zeroticks, m.zeroticks);
+            WRITE_METRIC(trade_w30s_tick_ratio_x8, m.tick_ratio);
         }
         {
             auto m = trade_[id].get_metrics(TradeWindow::W1min);
@@ -415,6 +471,20 @@ private:
             WRITE_COUNT(trade_w1min_low, static_cast<int32_t>(m.low));
             WRITE_METRIC(trade_w1min_price_velocity_x8, m.price_velocity);
             WRITE_METRIC(trade_w1min_realized_volatility_x8, m.realized_volatility);
+            // Streak metrics
+            WRITE_COUNT(trade_w1min_buy_streak, m.buy_streak);
+            WRITE_COUNT(trade_w1min_sell_streak, m.sell_streak);
+            WRITE_COUNT(trade_w1min_max_buy_streak, m.max_buy_streak);
+            WRITE_COUNT(trade_w1min_max_sell_streak, m.max_sell_streak);
+            // Timing metrics
+            WRITE_METRIC(trade_w1min_avg_inter_trade_time_us_x8, m.avg_inter_trade_time_us);
+            sym.trade_w1min_min_inter_trade_time_us.store(m.min_inter_trade_time_us, std::memory_order_relaxed);
+            WRITE_COUNT(trade_w1min_burst_count, m.burst_count);
+            // Tick metrics
+            WRITE_COUNT(trade_w1min_upticks, m.upticks);
+            WRITE_COUNT(trade_w1min_downticks, m.downticks);
+            WRITE_COUNT(trade_w1min_zeroticks, m.zeroticks);
+            WRITE_METRIC(trade_w1min_tick_ratio_x8, m.tick_ratio);
         }
 
         // ================================================================
