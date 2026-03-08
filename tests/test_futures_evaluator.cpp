@@ -1,226 +1,429 @@
 /**
  * Test suite for FuturesEvaluator
  *
- * Tests exit logic components and infrastructure.
- * Full integration with MetricsManager tested in trader.cpp runtime.
+ * Tests FuturesEvaluator class with real MetricsManager + EventBus:
+ * - Hedge mode publishes FuturesSellEvent when basis > threshold
+ * - Farming mode publishes FuturesBuyEvent/FuturesSellEvent based on funding
+ * - Exit logic publishes FuturesCloseLongEvent/FuturesCloseShortEvent
+ * - Cooldown prevents rapid evaluations
  */
 
+#include "../include/core/event_bus.hpp"
+#include "../include/core/events.hpp"
+#include "../include/core/futures_evaluator.hpp"
+#include "../include/core/metrics_manager.hpp"
 #include "../include/execution/funding_scheduler.hpp"
 #include "../include/execution/futures_position.hpp"
 
 #include <cassert>
-#include <cmath>
 #include <iostream>
+#include <memory>
 
 using namespace hft;
+using namespace hft::core;
 using namespace hft::execution;
 
-// Helper: Convert minutes to milliseconds
-constexpr uint64_t minutes_to_ms(int minutes) {
-    return static_cast<uint64_t>(minutes) * 60 * 1000;
-}
-
-// Helper: Convert minutes to nanoseconds
-constexpr uint64_t minutes_to_ns(int minutes) {
-    return static_cast<uint64_t>(minutes) * 60 * 1'000'000'000;
-}
-
-void test_exit_logic_hedge_backwardation() {
-    std::cout << "Test: Hedge exit logic on backwardation..." << std::endl;
-
-    // Hedge exit condition: basis < -20 bps (backwardation)
-    double basis_threshold = 20.0;
-    double current_basis = -25.0; // Backwardation
-
-    bool should_exit = current_basis < -basis_threshold;
-    assert(should_exit == true);
-
-    std::cout << "  ✓ Hedge exits when basis < -20 bps" << std::endl;
-}
-
-void test_exit_logic_hedge_spot_closed() {
-    std::cout << "Test: Hedge exit logic when spot position closed..." << std::endl;
-
-    FuturesPosition positions;
+// Event capture for testing
+struct CapturedEvent {
+    enum Type { None, FuturesBuy, FuturesSell, CloseLong, CloseShort };
+    Type type = None;
     Symbol symbol = 0;
+    double qty = 0.0;
+    std::string reason;
+};
 
-    // Open hedge short
-    positions.open_position(symbol, PositionSource::Hedge, Side::Sell, 1.5, 50000 * 10000, 1000000000);
+void test_hedge_mode_publishes_sell_event() {
+    std::cout << "Test: Hedge mode publishes FuturesSellEvent...";
 
-    // Spot position no longer exists
-    bool spot_has_position = false;
+    // Setup (heap-allocate to avoid stack overflow)
+    EventBus bus;
+    auto metrics = std::make_unique<MetricsManager>();
+    FuturesPosition positions;
+    FuturesEvaluator evaluator(&bus, metrics.get(), &positions);
 
-    // Hedge should exit
-    bool should_exit = !spot_has_position;
-    assert(should_exit == true);
+    // Subscribe to FuturesSellEvent
+    CapturedEvent captured;
+    bus.subscribe<FuturesSellEvent>([&](const FuturesSellEvent& e) {
+        captured.type = CapturedEvent::FuturesSell;
+        captured.symbol = e.symbol;
+        captured.qty = e.qty;
+        captured.reason = e.reason;
+    });
 
-    std::cout << "  ✓ Hedge exits when spot position closed" << std::endl;
+    // Setup futures metrics: basis = 25 bps (> 20 threshold)
+    // mark=50010, index=50000 → basis = 10 → basis_bps = 10 / 50000 * 10000 = 2 bps (too low)
+    // Need: 20 bps → basis = 50000 * 0.002 = 100 → mark = 50100
+    double index_price = 50000.0;
+    double mark_price = 50100.0; // 100 basis = 20 bps
+    double funding_rate = 0.0001;
+    uint64_t next_funding_ms = 10000000;
+    metrics->on_mark_price(0, mark_price, index_price, funding_rate, next_funding_ms, 1000000);
+
+    // Setup spot position (has position to hedge)
+    StrategyPosition spot_position;
+    spot_position.quantity = 1.5;
+    spot_position.avg_entry_price = 50000 * 10000;
+
+    // Setup market snapshot
+    MarketSnapshot market;
+    market.bid = 50000 * 10000;
+    market.ask = 50010 * 10000;
+
+    // Execute
+    evaluator.evaluate(0, market, spot_position);
+
+    // Verify
+    assert(captured.type == CapturedEvent::FuturesSell);
+    assert(captured.symbol == 0);
+    assert(captured.qty == 1.5); // Matches spot position size
+    assert(captured.reason == std::string("hedge_cash_carry"));
+
+    std::cout << " ✓" << std::endl;
 }
 
-void test_exit_logic_farming_postfunding() {
-    std::cout << "Test: Farming exit logic during PostFunding..." << std::endl;
+void test_farming_mode_publishes_buy_event_on_negative_funding() {
+    std::cout << "Test: Farming mode publishes FuturesBuyEvent on negative funding...";
 
+    // Setup
+    EventBus bus;
+    auto metrics = std::make_unique<MetricsManager>();
     FuturesPosition positions;
-    Symbol symbol = 1;
+    FuturesEvaluator evaluator(&bus, metrics.get(), &positions);
 
-    // Open farming long position
-    positions.open_position(symbol, PositionSource::Farming, Side::Buy, 1.0, 50000 * 10000, 1000000000);
+    // Subscribe to FuturesBuyEvent
+    CapturedEvent captured;
+    bus.subscribe<FuturesBuyEvent>([&](const FuturesBuyEvent& e) {
+        captured.type = CapturedEvent::FuturesBuy;
+        captured.symbol = e.symbol;
+        captured.qty = e.qty;
+        captured.reason = e.reason;
+    });
 
-    // Check if in PostFunding phase
-    uint64_t next_funding_ms = 1000000 - (5 * 60 * 1000); // 5 min ago
-    uint64_t current_ns = 1000000ULL * 1'000'000;
-    auto phase = FundingScheduler::get_phase(next_funding_ms, current_ns);
+    // Setup futures metrics: funding = -0.06% (negative, extreme)
+    double index_price = 50000.0;
+    double mark_price = 50005.0;                            // Small basis (5 bps, below hedge threshold)
+    double funding_rate = -0.0006;                          // -0.06%
+    uint64_t next_funding_ms = 10000000 + (60 * 60 * 1000); // 1 hour away (Normal phase)
+    metrics->on_mark_price(1, mark_price, index_price, funding_rate, next_funding_ms, 1000000);
 
-    bool should_exit = (phase == FundingPhase::PostFunding);
-    assert(should_exit == true);
+    // No spot position
+    StrategyPosition spot_position;
 
-    std::cout << "  ✓ Farming exits during PostFunding" << std::endl;
+    // Setup market snapshot
+    MarketSnapshot market;
+    market.bid = 50000 * 10000;
+    market.ask = 50010 * 10000;
+
+    // Execute
+    evaluator.evaluate(1, market, spot_position);
+
+    // Verify
+    assert(captured.type == CapturedEvent::FuturesBuy);
+    assert(captured.symbol == 1);
+    assert(captured.qty == 1.0); // Fixed size
+    assert(captured.reason == std::string("funding_farming_negative"));
+
+    std::cout << " ✓" << std::endl;
 }
 
-void test_exit_logic_farming_reversal() {
-    std::cout << "Test: Farming exit logic on funding reversal..." << std::endl;
+void test_farming_mode_publishes_sell_event_on_positive_funding() {
+    std::cout << "Test: Farming mode publishes FuturesSellEvent on positive funding...";
 
+    // Setup
+    EventBus bus;
+    auto metrics = std::make_unique<MetricsManager>();
     FuturesPosition positions;
-    Symbol symbol = 2;
+    FuturesEvaluator evaluator(&bus, metrics.get(), &positions);
 
-    // Open farming short (when funding was positive)
-    positions.open_position(symbol, PositionSource::Farming, Side::Sell, 1.0, 50000 * 10000, 1000000000);
-    auto* pos = positions.get_position(symbol, PositionSource::Farming, Side::Sell);
-    assert(pos != nullptr);
+    // Subscribe to FuturesSellEvent
+    CapturedEvent captured;
+    bus.subscribe<FuturesSellEvent>([&](const FuturesSellEvent& e) {
+        captured.type = CapturedEvent::FuturesSell;
+        captured.symbol = e.symbol;
+        captured.qty = e.qty;
+        captured.reason = e.reason;
+    });
 
-    // Funding reversed to negative
-    double current_funding = -0.0005; // Was positive, now negative
+    // Setup futures metrics: funding = +0.06% (positive, extreme)
+    double index_price = 50000.0;
+    double mark_price = 50005.0;
+    double funding_rate = 0.0006; // +0.06%
+    uint64_t next_funding_ms = 10000000 + (60 * 60 * 1000);
+    metrics->on_mark_price(2, mark_price, index_price, funding_rate, next_funding_ms, 1000000);
 
-    // Exit logic: SHORT position, funding < 0 → reversed
-    bool should_exit = (pos->side == Side::Sell && current_funding < 0);
-    assert(should_exit == true);
+    // No spot position
+    StrategyPosition spot_position;
 
-    // Verify opposite case: LONG position, funding > 0 → reversed
-    positions.open_position(symbol, PositionSource::Farming, Side::Buy, 1.0, 50000 * 10000, 2000000000);
-    auto* long_pos = positions.get_position(symbol, PositionSource::Farming, Side::Buy);
+    // Setup market snapshot
+    MarketSnapshot market;
+    market.bid = 50000 * 10000;
+    market.ask = 50010 * 10000;
 
-    double positive_funding = 0.0008;
-    should_exit = (long_pos->side == Side::Buy && positive_funding > 0);
-    assert(should_exit == true);
+    // Execute
+    evaluator.evaluate(2, market, spot_position);
 
-    std::cout << "  ✓ Farming exits on funding reversal" << std::endl;
+    // Verify
+    assert(captured.type == CapturedEvent::FuturesSell);
+    assert(captured.symbol == 2);
+    assert(captured.qty == 1.0);
+    assert(captured.reason == std::string("funding_farming_positive"));
+
+    std::cout << " ✓" << std::endl;
 }
 
-void test_get_by_slot_for_exit_iteration() {
-    std::cout << "Test: get_by_slot() enables exit iteration..." << std::endl;
+void test_exit_logic_publishes_close_short_on_backwardation() {
+    std::cout << "Test: Exit logic publishes FuturesCloseShortEvent on backwardation...";
 
+    // Setup
+    EventBus bus;
+    auto metrics = std::make_unique<MetricsManager>();
     FuturesPosition positions;
-    Symbol symbol = 3;
+    FuturesEvaluator evaluator(&bus, metrics.get(), &positions);
 
-    // Open 3 positions in different slots
-    int slot1 = positions.open_position(symbol, PositionSource::Hedge, Side::Sell, 1.0, 50000 * 10000, 1000000000);
-    int slot2 = positions.open_position(symbol, PositionSource::Farming, Side::Buy, 1.0, 50000 * 10000, 2000000000);
-    int slot3 = positions.open_position(symbol, PositionSource::Farming, Side::Sell, 1.0, 50000 * 10000, 3000000000);
+    // Subscribe to FuturesCloseShortEvent
+    CapturedEvent captured;
+    bus.subscribe<FuturesCloseShortEvent>([&](const FuturesCloseShortEvent& e) {
+        captured.type = CapturedEvent::CloseShort;
+        captured.symbol = e.symbol;
+        captured.qty = e.qty;
+        captured.reason = e.reason;
+    });
 
-    assert(slot1 >= 0);
-    assert(slot2 >= 0);
-    assert(slot3 >= 0);
+    // Open hedge short position manually
+    positions.open_position(3, PositionSource::Hedge, Side::Sell, 1.5, 50000 * 10000, 1000000000);
 
-    // Iterate through all 4 slots
-    int active_count = 0;
-    for (size_t slot = 0; slot < FuturesPosition::MAX_POSITIONS_PER_SYMBOL; ++slot) {
-        auto* pos = positions.get_by_slot(symbol, slot);
-        if (pos && pos->is_active()) {
-            active_count++;
+    // Setup futures metrics: basis = -25 bps (backwardation)
+    // mark < index → negative basis → backwardation
+    double index_price = 50000.0;
+    double mark_price = 49900.0; // -100 basis = -20 bps
+    double funding_rate = 0.0001;
+    uint64_t next_funding_ms = 10000000;
+    metrics->on_mark_price(3, mark_price, index_price, funding_rate, next_funding_ms, 1000000);
 
-            // Verify we can check exit conditions for each position
-            assert(pos->source != PositionSource::None);
-            assert(pos->quantity > 0);
-        }
-    }
+    // Spot position still exists
+    StrategyPosition spot_position;
+    spot_position.quantity = 1.5;
+    spot_position.avg_entry_price = 50000 * 10000;
 
-    assert(active_count == 3);
+    // Setup market snapshot
+    MarketSnapshot market;
+    market.bid = 50000 * 10000;
+    market.ask = 50010 * 10000;
 
-    std::cout << "  ✓ get_by_slot() enables exit iteration" << std::endl;
-}
+    // Execute
+    evaluator.evaluate(3, market, spot_position);
 
-void test_position_close_during_exit() {
-    std::cout << "Test: Position tracker updated during exit..." << std::endl;
+    // Verify
+    assert(captured.type == CapturedEvent::CloseShort);
+    assert(captured.symbol == 3);
+    assert(captured.qty == 1.5);
+    assert(captured.reason == std::string("hedge_backwardation"));
 
-    FuturesPosition positions;
-    Symbol symbol = 4;
-
-    // Open position
-    int slot = positions.open_position(symbol, PositionSource::Farming, Side::Buy, 1.0, 50000 * 10000, 1000000000);
-    assert(slot >= 0);
-
-    // Verify exists
-    auto* pos = positions.get_position(symbol, PositionSource::Farming, Side::Buy);
-    assert(pos != nullptr);
-
-    // Simulate exit: close position
-    bool closed = positions.close_position(symbol, slot);
-    assert(closed == true);
-
-    // Verify removed
-    pos = positions.get_position(symbol, PositionSource::Farming, Side::Buy);
+    // Verify position removed
+    auto* pos = positions.get_position(3, PositionSource::Hedge, Side::Sell);
     assert(pos == nullptr);
 
-    // Verify slot is free for new position
-    assert(positions.can_open_position(symbol) == true);
+    std::cout << " ✓" << std::endl;
+}
 
-    std::cout << "  ✓ Position removed from tracker on exit" << std::endl;
+void test_exit_logic_publishes_close_long_on_postfunding() {
+    std::cout << "Test: Exit logic publishes FuturesCloseLongEvent on PostFunding...";
+
+    // Setup
+    EventBus bus;
+    auto metrics = std::make_unique<MetricsManager>();
+    FuturesPosition positions;
+    FuturesEvaluator evaluator(&bus, metrics.get(), &positions);
+
+    // Subscribe to FuturesCloseLongEvent
+    CapturedEvent captured;
+    bus.subscribe<FuturesCloseLongEvent>([&](const FuturesCloseLongEvent& e) {
+        captured.type = CapturedEvent::CloseLong;
+        captured.symbol = e.symbol;
+        captured.qty = e.qty;
+        captured.reason = e.reason;
+    });
+
+    // Open farming long position manually
+    positions.open_position(4, PositionSource::Farming, Side::Buy, 1.0, 50000 * 10000, 1000000000);
+
+    // Setup futures metrics: PostFunding phase (5 min after funding)
+    double index_price = 50000.0;
+    double mark_price = 50005.0;
+    double funding_rate = -0.0006;
+    uint64_t next_funding_ms = 1000000 - (5 * 60 * 1000); // 5 min ago (PostFunding)
+    metrics->on_mark_price(4, mark_price, index_price, funding_rate, next_funding_ms, 1000000);
+
+    // No spot position
+    StrategyPosition spot_position;
+
+    // Setup market snapshot
+    MarketSnapshot market;
+    market.bid = 50000 * 10000;
+    market.ask = 50010 * 10000;
+
+    // Execute
+    evaluator.evaluate(4, market, spot_position);
+
+    // Verify
+    assert(captured.type == CapturedEvent::CloseLong);
+    assert(captured.symbol == 4);
+    assert(captured.qty == 1.0);
+    assert(captured.reason == std::string("farming_postfunding"));
+
+    std::cout << " ✓" << std::endl;
 }
 
 void test_cooldown_prevents_rapid_evaluation() {
-    std::cout << "Test: Cooldown prevents rapid evaluation..." << std::endl;
+    std::cout << "Test: Cooldown prevents rapid evaluation...";
 
-    constexpr uint64_t COOLDOWN_NS = 5'000'000'000; // 5 seconds
+    // Setup
+    EventBus bus;
+    auto metrics = std::make_unique<MetricsManager>();
+    FuturesPosition positions;
+    FuturesEvaluator evaluator(&bus, metrics.get(), &positions);
 
-    uint64_t first_eval = 1000000000;
-    uint64_t second_eval = first_eval + 1'000'000'000; // 1 second later
+    // Subscribe to FuturesSellEvent (count events)
+    int event_count = 0;
+    bus.subscribe<FuturesSellEvent>([&](const FuturesSellEvent& e) {
+        (void)e;
+        event_count++;
+    });
 
-    bool should_skip = (second_eval - first_eval) < COOLDOWN_NS;
-    assert(should_skip == true);
+    // Setup futures metrics: high funding (should trigger farming)
+    double index_price = 50000.0;
+    double mark_price = 50005.0;
+    double funding_rate = 0.0006;
+    uint64_t next_funding_ms = 10000000 + (60 * 60 * 1000);
+    metrics->on_mark_price(5, mark_price, index_price, funding_rate, next_funding_ms, 1000000);
 
-    uint64_t third_eval = first_eval + 6'000'000'000; // 6 seconds later
-    should_skip = (third_eval - first_eval) < COOLDOWN_NS;
-    assert(should_skip == false);
+    // No spot position
+    StrategyPosition spot_position;
 
-    std::cout << "  ✓ Cooldown logic works" << std::endl;
+    // Setup market snapshot
+    MarketSnapshot market;
+    market.bid = 50000 * 10000;
+    market.ask = 50010 * 10000;
+
+    // First evaluate - should publish event
+    evaluator.evaluate(5, market, spot_position);
+    assert(event_count == 1);
+
+    // Second evaluate immediately - should be ignored (cooldown = 5s)
+    evaluator.evaluate(5, market, spot_position);
+    assert(event_count == 1); // Still 1, second ignored
+
+    std::cout << " ✓" << std::endl;
 }
 
-void test_exit_called_before_entry() {
-    std::cout << "Test: Exit logic called before entry logic..." << std::endl;
+void test_no_action_when_thresholds_not_met() {
+    std::cout << "Test: No action when thresholds not met...";
 
-    // In evaluate(), exits are checked FIRST to ensure positions are closed
-    // before attempting to open new ones
-    //
-    // Correct order:
-    // 1. evaluate_exits()    ← Close positions that meet exit conditions
-    // 2. evaluate_hedge()    ← Open new hedge if conditions met
-    // 3. evaluate_farming()  ← Open new farming if conditions met
-    //
-    // This prevents:
-    // - Opening duplicate positions
-    // - Exceeding max 4 positions per symbol
-    // - Keeping stale positions open
+    // Setup
+    EventBus bus;
+    auto metrics = std::make_unique<MetricsManager>();
+    FuturesPosition positions;
+    FuturesEvaluator evaluator(&bus, metrics.get(), &positions);
 
-    std::cout << "  ✓ Exit-before-entry pattern verified in code" << std::endl;
+    // Subscribe to all events
+    int event_count = 0;
+    bus.subscribe<FuturesBuyEvent>([&](const FuturesBuyEvent& e) {
+        (void)e;
+        event_count++;
+    });
+    bus.subscribe<FuturesSellEvent>([&](const FuturesSellEvent& e) {
+        (void)e;
+        event_count++;
+    });
+
+    // Setup futures metrics: below all thresholds
+    double index_price = 50000.0;
+    double mark_price = 50010.0;  // 10 basis = 2 bps (below 20 bps threshold)
+    double funding_rate = 0.0003; // 0.03% (below 0.05% threshold)
+    uint64_t next_funding_ms = 10000000 + (60 * 60 * 1000);
+    metrics->on_mark_price(6, mark_price, index_price, funding_rate, next_funding_ms, 1000000);
+
+    // Has spot position but basis too low for hedge
+    StrategyPosition spot_position;
+    spot_position.quantity = 1.5;
+    spot_position.avg_entry_price = 50000 * 10000;
+
+    // Setup market snapshot
+    MarketSnapshot market;
+    market.bid = 50000 * 10000;
+    market.ask = 50010 * 10000;
+
+    // Execute
+    evaluator.evaluate(6, market, spot_position);
+
+    // Verify no events published
+    assert(event_count == 0);
+
+    std::cout << " ✓" << std::endl;
+}
+
+void test_no_duplicate_hedge_position() {
+    std::cout << "Test: No duplicate hedge position...";
+
+    // Setup
+    EventBus bus;
+    auto metrics = std::make_unique<MetricsManager>();
+    FuturesPosition positions;
+    FuturesEvaluator evaluator(&bus, metrics.get(), &positions);
+
+    // Subscribe to FuturesSellEvent
+    int event_count = 0;
+    bus.subscribe<FuturesSellEvent>([&](const FuturesSellEvent& e) {
+        (void)e;
+        event_count++;
+    });
+
+    // Open hedge position manually (already hedged)
+    positions.open_position(7, PositionSource::Hedge, Side::Sell, 1.5, 50000 * 10000, 1000000000);
+
+    // Setup futures metrics: high basis (would normally trigger hedge)
+    double index_price = 50000.0;
+    double mark_price = 50100.0; // 100 basis = 20 bps
+    double funding_rate = 0.0001;
+    uint64_t next_funding_ms = 10000000;
+    metrics->on_mark_price(7, mark_price, index_price, funding_rate, next_funding_ms, 1000000);
+
+    // Has spot position
+    StrategyPosition spot_position;
+    spot_position.quantity = 1.5;
+    spot_position.avg_entry_price = 50000 * 10000;
+
+    // Setup market snapshot
+    MarketSnapshot market;
+    market.bid = 50000 * 10000;
+    market.ask = 50010 * 10000;
+
+    // Execute - should NOT open duplicate hedge
+    evaluator.evaluate(7, market, spot_position);
+
+    // Verify no new event (already hedged)
+    assert(event_count == 0);
+
+    std::cout << " ✓" << std::endl;
 }
 
 int main() {
-    std::cout << "\n=== FuturesEvaluator Exit Logic Tests ===" << std::endl;
-    std::cout << "(Full integration with MetricsManager tested in trader.cpp)" << std::endl;
+    std::cout << "\n=== FuturesEvaluator Integration Tests ===" << std::endl;
+
+    // Entry logic tests
+    test_hedge_mode_publishes_sell_event();
+    test_farming_mode_publishes_buy_event_on_negative_funding();
+    test_farming_mode_publishes_sell_event_on_positive_funding();
 
     // Exit logic tests
-    test_exit_logic_hedge_backwardation();
-    test_exit_logic_hedge_spot_closed();
-    test_exit_logic_farming_postfunding();
-    test_exit_logic_farming_reversal();
+    test_exit_logic_publishes_close_short_on_backwardation();
+    test_exit_logic_publishes_close_long_on_postfunding();
 
     // Infrastructure tests
-    test_get_by_slot_for_exit_iteration();
-    test_position_close_during_exit();
     test_cooldown_prevents_rapid_evaluation();
-    test_exit_called_before_entry();
+    test_no_action_when_thresholds_not_met();
+    test_no_duplicate_hedge_position();
 
-    std::cout << "\n✓ All 8 exit logic tests passed!" << std::endl;
-    std::cout << "Combined with funding_scheduler (8) + futures_position (8) = 24/24 tests passed" << std::endl;
+    std::cout << "\n✓ All 8 FuturesEvaluator integration tests passed!" << std::endl;
     return 0;
 }

@@ -270,7 +270,7 @@ private:
 
             const auto& pos = *pos_ptr;
             bool should_exit = false;
-            std::string exit_reason;
+            const char* exit_reason = nullptr;
 
             // Hedge exit logic
             if (pos.source == PositionSource::Hedge) {
@@ -309,11 +309,11 @@ private:
                 if (pos.side == Side::Buy) {
                     // Close long = Market sell
                     bus_->publish(FuturesCloseLongEvent{
-                        .symbol = symbol, .qty = pos.quantity, .reason = exit_reason.c_str(), .timestamp_ns = now_ns});
+                        .symbol = symbol, .qty = pos.quantity, .reason = exit_reason, .timestamp_ns = now_ns});
                 } else {
                     // Close short = Market buy
                     bus_->publish(FuturesCloseShortEvent{
-                        .symbol = symbol, .qty = pos.quantity, .reason = exit_reason.c_str(), .timestamp_ns = now_ns});
+                        .symbol = symbol, .qty = pos.quantity, .reason = exit_reason, .timestamp_ns = now_ns});
                 }
 
                 // Remove from position tracker
