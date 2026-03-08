@@ -366,6 +366,19 @@ add_executable(test_end_to_end_integration tests/test_end_to_end_integration.cpp
 target_link_libraries(test_end_to_end_integration trader_core rt)
 add_test(NAME EndToEndIntegrationTests COMMAND test_end_to_end_integration)
 
+# Phase 5.1: Futures trading tests
+add_executable(test_funding_scheduler tests/test_funding_scheduler.cpp)
+target_link_libraries(test_funding_scheduler trader_core)
+add_test(NAME FundingSchedulerTests COMMAND test_funding_scheduler)
+
+add_executable(test_futures_position tests/test_futures_position.cpp)
+target_link_libraries(test_futures_position trader_core)
+add_test(NAME FuturesPositionTests COMMAND test_futures_position)
+
+add_executable(test_futures_evaluator tests/test_futures_evaluator.cpp)
+target_link_libraries(test_futures_evaluator trader_core)
+add_test(NAME FuturesEvaluatorTests COMMAND test_futures_evaluator)
+
 # TODO: Fix test_strategy_evaluator.cpp type mismatches (MockMetricsManager vs core::MetricsManager)
 # add_executable(test_strategy_evaluator tests/test_strategy_evaluator.cpp)
 # target_link_libraries(test_strategy_evaluator trader_core)
