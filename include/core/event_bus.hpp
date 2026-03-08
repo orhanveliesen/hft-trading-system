@@ -1,8 +1,9 @@
 #pragma once
 
+#include "events.hpp"
+
+#include <array>
 #include <functional>
-#include <typeindex>
-#include <unordered_map>
 #include <vector>
 
 namespace hft::core {
@@ -30,15 +31,12 @@ public:
      */
     template <typename Event>
     void subscribe(std::function<void(const Event&)> handler) {
-        auto type = std::type_index(typeid(Event));
+        auto idx = static_cast<size_t>(Event::type_id);
 
-        // Wrap the typed handler in a type-erased wrapper
-        ErasedHandler erased;
-        erased.invoke = [handler = std::move(handler)](const void* event) {
-            handler(*static_cast<const Event*>(event));
-        };
+        // Wrap typed handler in type-erased lambda
+        auto erased = [handler = std::move(handler)](const void* event) { handler(*static_cast<const Event*>(event)); };
 
-        handlers_[type].push_back(std::move(erased));
+        handlers_[idx].push_back(std::move(erased));
     }
 
     /**
@@ -51,16 +49,11 @@ public:
      */
     template <typename Event>
     void publish(const Event& event) {
-        auto type = std::type_index(typeid(Event));
-
-        auto it = handlers_.find(type);
-        if (it == handlers_.end()) {
-            return; // No subscribers for this event type
-        }
+        auto idx = static_cast<size_t>(Event::type_id);
 
         // Invoke all handlers synchronously
-        for (auto& handler : it->second) {
-            handler.invoke(&event);
+        for (auto& handler : handlers_[idx]) {
+            handler(&event);
         }
     }
 
@@ -71,29 +64,23 @@ public:
      */
     template <typename Event>
     size_t subscriber_count() const {
-        auto type = std::type_index(typeid(Event));
-        auto it = handlers_.find(type);
-        return (it != handlers_.end()) ? it->second.size() : 0;
+        auto idx = static_cast<size_t>(Event::type_id);
+        return handlers_[idx].size();
     }
 
     /**
      * @brief Clear all subscribers (useful for testing)
      */
-    void clear() { handlers_.clear(); }
+    void clear() {
+        for (auto& vec : handlers_) {
+            vec.clear();
+        }
+    }
 
 private:
-    /**
-     * @brief Type-erased handler wrapper
-     *
-     * Stores a function pointer that knows how to cast void* back to the original
-     * event type and invoke the typed handler.
-     */
-    struct ErasedHandler {
-        std::function<void(const void*)> invoke;
-    };
-
-    // Map from event type -> list of handlers
-    std::unordered_map<std::type_index, std::vector<ErasedHandler>> handlers_;
+    // Array-indexed handlers for O(1) constant-time lookup
+    // Replaces hash table with direct array access using Event::type_id
+    std::array<std::vector<std::function<void(const void*)>>, static_cast<size_t>(EventType::COUNT)> handlers_;
 };
 
 } // namespace hft::core
