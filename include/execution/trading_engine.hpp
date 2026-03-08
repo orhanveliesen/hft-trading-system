@@ -4,9 +4,9 @@
 #include "execution_engine.hpp"
 #include "order_request.hpp"
 
+#include <array>
 #include <cstdint>
 #include <functional>
-#include <vector>
 
 namespace hft {
 namespace execution {
@@ -38,7 +38,7 @@ public:
     static constexpr uint8_t MAX_CANCEL_ATTEMPTS = 3;
     static constexpr uint64_t CANCEL_RETRY_INTERVAL_NS = 1'000'000'000; // 1 second
 
-    explicit TradingEngine(IExchangeAdapter* exchange) : exchange_(exchange) { pending_orders_.resize(64); }
+    explicit TradingEngine(IExchangeAdapter* exchange) : exchange_(exchange) {}
 
     void set_exchange(IExchangeAdapter* exchange) { exchange_ = exchange; }
     void set_position_callback(PositionCallback cb) { get_position_ = std::move(cb); }
@@ -224,7 +224,7 @@ public:
 
 private:
     IExchangeAdapter* exchange_;
-    std::vector<PendingOrder> pending_orders_;
+    std::array<PendingOrder, 64> pending_orders_;
     PositionCallback get_position_;
     OrderCallback on_order_;
 
