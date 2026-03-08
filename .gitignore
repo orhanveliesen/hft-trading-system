@@ -4,6 +4,8 @@ build-*/
 build_*/
 cmake-build-*/
 out/
+_deps/
+.cmake/
 
 # IDE
 .idea/
@@ -24,6 +26,16 @@ out/
 *.exe
 *.out
 
+# Binary executables (root directory, no extension)
+/test_*
+/trader
+/trader_*
+/bench_*
+/optimize_*
+/run_*
+/dump_*
+/fetch_*
+
 # Binary files (no extension, explicitly named)
 benchmarks/bench_orderbook
 examples/backtest_demo
@@ -39,6 +51,9 @@ CMakeFiles/
 cmake_install.cmake
 Makefile
 compile_commands.json
+CTestTestfile.cmake
+*.cmake
+!CMakeLists.txt
 
 # Rust
 rust/target/
@@ -78,6 +93,9 @@ coverage/
 *.gcov
 *.gcda
 *.gcno
+*.info
+cov_*.info
+coverage.info
 
 # External dependencies (clone separately, except header-only libs)
 external/*

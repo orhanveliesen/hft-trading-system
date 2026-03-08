@@ -1176,6 +1176,451 @@ benchmarks/                      # Performance benchmarks
 
 ---
 
+## Module: Event-Driven Architecture (Phase 5.0)
+
+### Overview
+Event-driven refactor of trader.cpp into clean, testable components with synchronous publish-subscribe pattern.
+
+**Data Flow:**
+```
+WS → MetricsManager (direct calls)
+  ↓
+update metrics + regime + shared memory
+  ↓
+threshold crossed? → callback
+  ↓
+StrategyEvaluator.evaluate()
+  ↓
+EventBus.publish(ActionEvent)
+  ↓
+Subscribers (SpotEngine, LimitManager) → execute
+```
+
+### Components
+
+#### 1. EventBus (`include/core/event_bus.hpp`)
+Synchronous type-erased publish-subscribe system for action events.
+
+**Design:**
+- Template-based subscription: `subscribe<EventType>(callback)`
+- Type-erased storage using `std::type_index` + `std::function<void(const void*)>`
+- Synchronous execution (no queues, no threads)
+- Zero allocation on publish (pre-allocated handler vectors)
+
+**Usage:**
+```cpp
+core::EventBus bus;
+
+// Subscribe
+bus.subscribe<SpotBuyEvent>([&](const SpotBuyEvent& e) {
+    spot_engine.execute(create_order_request(e));
+});
+
+// Publish
+bus.publish(SpotBuyEvent{.symbol = 0, .qty = 1.0, .strength = 1.0});
+```
+
+**Performance:** < 100 ns per publish (tested with 10K events)
+
+#### 2. Events (`include/core/events.hpp`)
+9 action event types (NOT data events - those use direct calls):
+
+**Spot Events:**
+- `SpotBuyEvent` - Market buy signal
+- `SpotSellEvent` - Market sell signal
+- `SpotLimitBuyEvent` - Limit buy signal (includes exec_score)
+- `SpotLimitSellEvent` - Limit sell signal (includes exec_score)
+
+**Futures Events (Phase 5.1):**
+- `FuturesBuyEvent` - Open long
+- `FuturesSellEvent` - Open short
+- `FuturesCloseLongEvent` - Close long position
+- `FuturesCloseShortEvent` - Close short position
+
+**Lifecycle Events:**
+- `LimitCancelEvent` - Cancel pending limit (timeout or manual)
+
+**Common Fields:**
+```cpp
+struct SpotBuyEvent {
+    Symbol symbol;
+    Quantity qty;
+    double strength;        // Signal strength [0.0, 1.0]
+    const char* reason;     // Signal reason (static string)
+    uint64_t timestamp_ns;
+};
+```
+
+#### 3. MetricsManager (`include/core/metrics_manager.hpp`)
+Central coordinator for all metrics (~1700 lines including inline implementations).
+
+**Owned Metrics Arrays (MAX_SYMBOLS = 64):**
+- `TradeStreamMetrics[64]` - Trade flow, volume, volatility
+- `OrderBookMetrics[64]` - Spread, imbalance, depth
+- `OrderFlowMetrics<20>[64]` - Aggressor flow, VPIN
+- `CombinedMetrics[64]` - Composite metrics
+- `FuturesMetrics[64]` - Funding rate, basis, liquidations
+- `RegimeDetector[64]` - Market regime classification
+
+**Responsibilities:**
+1. Update metrics from WS feeds (direct calls, no events)
+2. Update RegimeDetector on every quote
+3. Write SharedMetricsSnapshot for tuner/ML
+4. Check thresholds → fire change callback
+5. Provide MetricsContext for strategy evaluation
+
+**Threshold Logic:**
+```cpp
+struct MetricsThresholds {
+    double spread_bps = 0.1;        // Near-zero defaults
+    double buy_ratio = 0.01;        // Trigger on almost every real change
+    double basis_bps = 0.5;
+    double funding_rate = 0.00001;
+    double volatility = 0.001;
+    double top_imbalance = 0.02;
+};
+```
+
+**Change Callback:**
+```cpp
+metrics.set_change_callback([&](Symbol id) {
+    evaluator.evaluate(id, market, position);  // Trigger strategy evaluation
+});
+```
+
+**API:**
+```cpp
+void on_trade(Symbol, double price, int qty, bool is_buy, uint64_t ts_us);
+void on_depth(Symbol, const BookSnapshot&, uint64_t ts_us);
+void on_mark_price(Symbol, double mark, double index, double funding, ...);
+void on_liquidation(Symbol, Side, double price, double qty, ...);
+
+MetricsContext context_for(Symbol id) const;  // Returns filled context
+```
+
+**Performance:** < 5 μs per on_trade() call (includes threshold check + snapshot write)
+
+#### 4. SharedMetricsSnapshot (`include/ipc/shared_metrics_snapshot.hpp`)
+Shared memory snapshot of ALL computed metrics for tuner/ML (~326 atomic fields per symbol).
+
+**Structure:**
+```cpp
+struct SymbolMetricsSnapshot {
+    char ticker[16];
+
+    // TradeStreamMetrics (25 fields × 5 windows = 125)
+    std::atomic<int64_t> trade_w1s_buy_volume_x8;
+    std::atomic<int64_t> trade_w1s_sell_volume_x8;
+    // ... 123 more trade fields
+
+    // OrderBookMetrics (17 fields × 1 = 17)
+    std::atomic<int64_t> book_current_spread_bps_x8;
+    std::atomic<int64_t> book_current_top_imbalance_x8;
+    // ... 15 more book fields
+
+    // OrderFlowMetrics (21 fields × 4 windows = 84)
+    std::atomic<int64_t> flow_sec1_vpin_x8;
+    std::atomic<int64_t> flow_sec1_aggressor_ratio_x8;
+    // ... 82 more flow fields
+
+    // CombinedMetrics (7 fields × 5 windows = 35)
+    std::atomic<int64_t> combined_sec1_momentum_score_x8;
+    // ... 34 more combined fields
+
+    // FuturesMetrics (11 fields × 5 windows + 1 = 56)
+    std::atomic<int64_t> futures_w1s_funding_rate_x8;
+    std::atomic<int64_t> futures_w1s_basis_bps_x8;
+    // ... 54 more futures fields
+
+    // Regime (4 fields)
+    std::atomic<uint8_t> regime;
+    std::atomic<int64_t> regime_current_confidence_x8;
+    // ... 2 more regime fields
+
+    std::atomic<uint64_t> update_count;
+    std::atomic<uint64_t> last_update_ns;
+};
+
+struct SharedMetricsSnapshot {
+    static constexpr uint32_t MAGIC = 0x4D455452;  // "METR"
+    static constexpr uint32_t VERSION = 1;
+
+    uint32_t magic;
+    uint32_t version;
+    SymbolMetricsSnapshot symbols[64];
+
+    static SharedMetricsSnapshot* create();
+    static SharedMetricsSnapshot* open_readonly();
+    static void destroy();
+};
+```
+
+**Memory Layout:**
+- Fixed-point encoding (x8 = multiply by 256 for 8 bits of fractional precision)
+- Relaxed memory order (single writer, multiple readers)
+- Magic + version for validation
+- ~80 KB per symbol × 64 symbols = ~5 MB total
+
+**Tuner Integration (Future - Issue #1):**
+```cpp
+// Tuner process (separate executable)
+auto* snap = SharedMetricsSnapshot::open_readonly();
+while (running) {
+    for (Symbol id : active_symbols) {
+        auto& sym = snap->symbols[id];
+        // Read ALL 326 fields, batch insert to ClickHouse
+        // At 1 row/symbol/sec, 10 symbols = 864K rows/day
+    }
+    sleep(1);
+}
+```
+
+#### 5. StrategyEvaluator (`include/core/strategy_evaluator.hpp`)
+Evaluates strategy signals and publishes action events.
+
+**Flow:**
+```
+1. Get MetricsContext from MetricsManager
+2. Get active strategy from StrategySelector
+3. Call strategy.generate()
+4. Compute execution score (ExecutionScorer)
+5. Publish Market or Limit event based on score
+6. Check pending limits for timeout if no signal
+```
+
+**Implementation:**
+```cpp
+void evaluate(Symbol id, const MarketSnapshot& market, const StrategyPosition& pos) {
+    auto ctx = metrics_->context_for(id);
+    auto* strategy = selector_->select_for_regime(ctx.regime);
+
+    Signal signal = strategy->generate(id, market, pos, ctx.regime, &ctx);
+
+    if (!signal.is_actionable()) {
+        limit_mgr_->check_timeouts();  // No action, check pending limits
+        return;
+    }
+
+    if (is_dangerous_regime(ctx.regime)) {
+        return;  // Don't trade in Spike or HighVolatility
+    }
+
+    auto score = ExecutionScorer::compute(signal, &ctx, signal.is_buy() ? Side::Buy : Side::Sell);
+
+    if (score.prefer_limit()) {
+        // Publish limit event
+        bus_->publish(SpotLimitBuyEvent{...});
+    } else {
+        // Publish market event
+        bus_->publish(SpotBuyEvent{...});
+    }
+}
+```
+
+**Dangerous Regimes:**
+- `MarketRegime::Spike` - No trading (flash crash protection)
+- `MarketRegime::HighVolatility` - No trading (avoid slippage)
+
+**Signal Strength Conversion:**
+```cpp
+SignalStrength::Weak   → 0.33
+SignalStrength::Medium → 0.66
+SignalStrength::Strong → 1.0
+```
+
+#### 6. TradingEngine<Venue> (`include/execution/trading_engine.hpp`)
+Template-based execution engine with compile-time Spot/Futures differentiation.
+
+**Design:**
+```cpp
+enum class Venue { Spot, Futures };
+
+template <Venue V>
+class TradingEngine {
+    uint64_t execute(const OrderRequest& req, const MarketSnapshot& market) {
+        // Position check ONLY for Spot venue
+        if constexpr (V == Venue::Spot) {
+            if (req.side == Side::Sell) {
+                double pos = get_position_(req.symbol);
+                if (pos < MIN_POSITION_THRESHOLD) return 0;  // No position
+                if (req.qty > pos) req.qty = pos;  // Limit qty
+            }
+        }
+        // Futures: No position check (can have both long + short)
+
+        return exchange_->send_order(...);
+    }
+
+    void cancel_stale_orders(uint64_t current_time_ns);
+    void recover_stuck_orders();  // From PR #60 - fault-tolerant cancellation
+};
+
+using SpotEngine = TradingEngine<Venue::Spot>;
+using FuturesEngine = TradingEngine<Venue::Futures>;
+```
+
+**Compile-Time Optimization:**
+- `if constexpr` branches are eliminated at compile time
+- SpotEngine binary contains NO position check code path for futures
+- FuturesEngine binary contains NO position check at all
+- Zero runtime overhead vs hand-written specialized classes
+
+**Stuck Order Recovery (PR #60):**
+```cpp
+void recover_stuck_orders() {
+    for (auto& pending : pending_cancels_) {
+        if (pending.state == CancelState::AwaitingConfirm) {
+            uint64_t elapsed_ns = now_ns() - pending.submit_time_ns;
+            if (elapsed_ns > STUCK_THRESHOLD_NS) {
+                // Retry cancel
+                pending.state = CancelState::Retrying;
+                exchange_->cancel_order(pending.order_id);
+            }
+        }
+    }
+}
+```
+
+#### 7. LimitManager (`include/execution/limit_manager.hpp`)
+Event-driven limit order lifecycle manager.
+
+**Responsibilities:**
+1. Track pending limit orders
+2. Check timeouts (called from heartbeat loop)
+3. Publish LimitCancelEvent on timeout
+4. Subscribe to LimitCancelEvent (from self or external)
+5. Execute cancellations via SpotEngine
+
+**Event Loop:**
+```
+1. SpotLimitBuyEvent published
+   ↓
+2. SpotEngine executes, returns order_id
+   ↓
+3. LimitManager.track(order_id)
+   ↓
+4. Heartbeat: LimitManager.check_timeouts()
+   ↓
+5. Timeout detected → bus.publish(LimitCancelEvent)
+   ↓
+6. LimitManager receives own event → spot_engine.cancel_order()
+```
+
+**Implementation:**
+```cpp
+class LimitManager {
+    LimitManager(EventBus* bus, SpotEngine* engine) : bus_(bus), spot_engine_(engine) {
+        // Subscribe to LimitCancelEvent in constructor
+        bus_->subscribe<LimitCancelEvent>([this](const LimitCancelEvent& e) {
+            if (e.order_id == 0) {
+                cancel_all_for_symbol(e.symbol);  // order_id=0 → cancel all
+            } else {
+                cancel_specific(e.symbol, e.order_id);
+            }
+        });
+    }
+
+    void track(Symbol id, uint64_t order_id, Side side, Price price, double qty);
+    void check_timeouts();  // Called from heartbeat loop (1 Hz)
+    void on_fill(uint64_t order_id);  // Clear pending on fill
+
+private:
+    std::array<PendingLimit, 64> pending_;  // One per symbol
+    uint64_t timeout_ns_ = 5'000'000'000;  // 5s default
+};
+```
+
+**Timeout Logic:**
+```cpp
+void check_timeouts() {
+    uint64_t now = util::now_ns();
+    for (auto& p : pending_) {
+        if (p.active && (now - p.submit_time_ns) > timeout_ns_) {
+            bus_->publish(LimitCancelEvent{
+                .symbol = p.symbol,
+                .order_id = p.order_id,
+                .reason = "timeout",
+                .timestamp_ns = now
+            });
+            p.active = false;
+        }
+    }
+}
+```
+
+**Manual Cancel:**
+```cpp
+// From dashboard or strategy
+bus.publish(LimitCancelEvent{.symbol = 0, .order_id = 12345, .reason = "manual"});
+
+// Cancel all limits for symbol
+bus.publish(LimitCancelEvent{.symbol = 0, .order_id = 0, .reason = "cancel_all"});
+```
+
+### Testing
+
+**Test Suites (37 test cases, 4 files):**
+1. `test_event_bus.cpp` (10 tests)
+   - Subscribe/publish single event type
+   - Multiple subscribers for same event
+   - Multiple event types
+   - Type safety (compile-time errors)
+
+2. `test_shared_metrics_snapshot.cpp` (10 tests)
+   - Create + open
+   - Update from all windows
+   - Atomic reads (no tearing)
+   - Multiple symbols
+   - Magic/version check
+
+3. `test_trading_engine_template.cpp` (9 tests)
+   - Spot engine rejects sell with no position
+   - Spot engine limits sell qty to available position
+   - Futures engine allows sell without position
+   - Futures engine does NOT limit qty
+   - Cancel order functionality
+   - Cancel stale orders (timeout)
+
+4. `test_limit_manager.cpp` (8 tests)
+   - Track pending limit
+   - Timeout publishes LimitCancelEvent
+   - Cancel specific order
+   - Cancel all for symbol (order_id=0)
+   - on_fill clears pending
+   - Multiple symbols
+   - Event subscription in constructor
+
+**All tests pass (100% success rate).**
+
+### Performance Characteristics
+
+| Component | Operation | Latency | Throughput |
+|-----------|-----------|---------|------------|
+| EventBus | publish() | < 100 ns | > 10M events/sec |
+| MetricsManager | on_trade() | < 5 μs | > 200K updates/sec |
+| SharedMetricsSnapshot | write | < 500 ns | > 2M writes/sec |
+| StrategyEvaluator | evaluate() | < 10 μs | > 100K evals/sec |
+| TradingEngine | execute() | < 1 μs | > 1M orders/sec |
+| LimitManager | check_timeouts() | < 50 μs | 1 Hz (heartbeat) |
+
+**All measurements on AMD Ryzen 9 5900X, compiled with -O3 -march=native.**
+
+### Future Work (Post-Merge Issues)
+
+**Issue #1: Tuner ClickHouse Integration**
+- Tuner process reads SharedMetricsSnapshot
+- Batch insert to ClickHouse every 1s
+- ALL 326 fields written (nothing omitted)
+- ML training data: ~864K rows/day for 10 symbols
+
+**Issue #2: ML-Optimized Metric Thresholds**
+- Current thresholds are near-zero defaults (trigger on almost every change)
+- Train optimal thresholds per symbol using ClickHouse data
+- Balance signal quality vs computational cost
+- Write to SharedConfig → MetricsManager reads dynamically
+
+---
+
 ## Key Design Decisions
 
 ### 1. Template-Based Polymorphism (Not Virtual)

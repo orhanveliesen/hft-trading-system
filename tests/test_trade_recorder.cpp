@@ -781,6 +781,233 @@ TEST(shared_ledger_ipc_integration) {
 }
 
 // =============================================================================
+// Callback Tests
+// =============================================================================
+
+TEST(sync_callback_invoked_on_trades) {
+    using namespace hft::trading;
+    TradeRecorder r;
+    r.init(100'000);
+
+    bool callback_called = false;
+    double captured_cash = 0;
+    double captured_pnl = 0;
+    uint32_t captured_fills = 0;
+
+    r.set_sync_callback([](double cash, double rpnl, double upnl, double comm, double vol, uint32_t fills,
+                           uint32_t wins, uint32_t losses, uint32_t targets, uint32_t stops) {
+        // Can't capture from inside C function pointer, so this won't work with lambda captures
+        // This test verifies the callback signature compiles
+        (void)cash;
+        (void)rpnl;
+    });
+
+    // Since we can't use lambda captures with C function pointers, use static variables
+    static bool s_callback_called = false;
+    static double s_captured_cash = 0;
+    static uint32_t s_captured_fills = 0;
+
+    s_callback_called = false;
+
+    r.set_sync_callback([](double cash, double rpnl, double upnl, double comm, double vol, uint32_t fills,
+                           uint32_t wins, uint32_t losses, uint32_t targets, uint32_t stops) {
+        s_callback_called = true;
+        s_captured_cash = cash;
+        s_captured_fills = fills;
+    });
+
+    TradeInput buy{0, 100.0, 1.0, 0.1, 0.0, "BTC"};
+    r.record_buy(buy);
+
+    ASSERT_TRUE(s_callback_called);
+    ASSERT_EQ(s_captured_fills, 1);
+    ASSERT_GT(s_captured_cash, 0);
+}
+
+TEST(trade_callback_invoked_on_buy) {
+    using namespace hft::trading;
+    TradeRecorder r;
+    r.init(100'000);
+
+    static bool s_trade_called = false;
+    static bool s_was_buy = false;
+    static double s_price = 0;
+
+    s_trade_called = false;
+
+    r.set_trade_callback([](const TradeEventInfo& info) {
+        s_trade_called = true;
+        s_was_buy = info.is_buy;
+        s_price = info.price;
+    });
+
+    TradeInput buy{0, 100.0, 1.0, 0.1, 0.0, "BTC"};
+    r.record_buy(buy);
+
+    ASSERT_TRUE(s_trade_called);
+    ASSERT_TRUE(s_was_buy);
+    ASSERT_EQ(s_price, 100.0);
+}
+
+TEST(trade_callback_invoked_on_sell) {
+    using namespace hft::trading;
+    TradeRecorder r;
+    r.init(100'000);
+
+    TradeInput buy{0, 100.0, 1.0, 0.1, 0.0, "BTC"};
+    r.record_buy(buy);
+
+    static bool s_trade_called = false;
+    static bool s_was_buy = true;
+    static double s_realized = 0;
+
+    s_trade_called = false;
+
+    r.set_trade_callback([](const TradeEventInfo& info) {
+        s_trade_called = true;
+        s_was_buy = info.is_buy;
+        s_realized = info.realized_pnl;
+    });
+
+    TradeInput sell{0, 110.0, 1.0, 0.11, 0.0, "BTC"};
+    r.record_sell(sell);
+
+    ASSERT_TRUE(s_trade_called);
+    ASSERT_TRUE(!s_was_buy);
+    ASSERT_GT(s_realized, 9.0); // ~10 profit - commission
+}
+
+// =============================================================================
+// Exit Reason Tests
+// =============================================================================
+
+TEST(exit_reason_pullback) {
+    using namespace hft::trading;
+    TradeRecorder r;
+    r.init(100'000);
+
+    TradeInput buy{0, 100.0, 1.0, 0.1, 0.0, "BTC"};
+    r.record_buy(buy);
+
+    TradeInput exit{0, 105.0, 1.0, 0.105, 0.0, "BTC"};
+    r.record_exit(ExitReason::PULLBACK, exit);
+
+    ASSERT_EQ(r.position_quantity(0), 0);
+    ASSERT_GT(r.realized_pnl(), 4.0); // ~5 profit - commissions
+}
+
+TEST(exit_reason_emergency) {
+    using namespace hft::trading;
+    TradeRecorder r;
+    r.init(100'000);
+
+    TradeInput buy{0, 100.0, 1.0, 0.1, 0.0, "BTC"};
+    r.record_buy(buy);
+
+    TradeInput exit{0, 95.0, 1.0, 0.095, 0.0, "BTC"};
+    r.record_exit(ExitReason::EMERGENCY, exit);
+
+    ASSERT_EQ(r.position_quantity(0), 0);
+    ASSERT_TRUE(r.realized_pnl() < 0); // Loss
+}
+
+TEST(exit_reason_signal) {
+    using namespace hft::trading;
+    TradeRecorder r;
+    r.init(100'000);
+
+    TradeInput buy{0, 100.0, 1.0, 0.1, 0.0, "BTC"};
+    r.record_buy(buy);
+
+    TradeInput exit{0, 102.0, 1.0, 0.102, 0.0, "BTC"};
+    r.record_exit(ExitReason::SIGNAL, exit);
+
+    ASSERT_EQ(r.position_quantity(0), 0);
+    ASSERT_GT(r.realized_pnl(), 1.5); // ~2 profit - commissions
+}
+
+// =============================================================================
+// Edge Case Tests
+// =============================================================================
+
+TEST(reject_zero_quantity_buy) {
+    using namespace hft::trading;
+    TradeRecorder r;
+    r.init(100'000);
+
+    double cash_before = r.cash();
+
+    TradeInput buy{0, 100.0, 0.0, 0.1, 0.0, "BTC"}; // Zero quantity
+    r.record_buy(buy);
+
+    // Should be ignored, cash unchanged
+    ASSERT_EQ(r.cash(), cash_before);
+    ASSERT_EQ(r.position_quantity(0), 0);
+}
+
+TEST(reject_zero_price_buy) {
+    using namespace hft::trading;
+    TradeRecorder r;
+    r.init(100'000);
+
+    double cash_before = r.cash();
+
+    TradeInput buy{0, 0.0, 1.0, 0.1, 0.0, "BTC"}; // Zero price
+    r.record_buy(buy);
+
+    // Should be ignored, cash unchanged
+    ASSERT_EQ(r.cash(), cash_before);
+    ASSERT_EQ(r.position_quantity(0), 0);
+}
+
+TEST(reject_invalid_symbol_index) {
+    using namespace hft::trading;
+    TradeRecorder r;
+    r.init(100'000);
+
+    double cash_before = r.cash();
+
+    TradeInput buy{999, 100.0, 1.0, 0.1, 0.0, "BTC"}; // Symbol >= MAX_RECORDER_SYMBOLS (64)
+    r.record_buy(buy);
+
+    // Should be ignored, cash unchanged
+    ASSERT_EQ(r.cash(), cash_before);
+}
+
+TEST(reject_zero_quantity_sell) {
+    using namespace hft::trading;
+    TradeRecorder r;
+    r.init(100'000);
+
+    TradeInput buy{0, 100.0, 1.0, 0.1, 0.0, "BTC"};
+    r.record_buy(buy);
+
+    double pnl_before = r.realized_pnl();
+
+    TradeInput sell{0, 110.0, 0.0, 0.11, 0.0, "BTC"}; // Zero quantity
+    r.record_sell(sell);
+
+    // Should be ignored, position and P&L unchanged
+    ASSERT_EQ(r.position_quantity(0), 1.0);
+    ASSERT_EQ(r.realized_pnl(), pnl_before);
+}
+
+TEST(reject_sell_with_no_position) {
+    using namespace hft::trading;
+    TradeRecorder r;
+    r.init(100'000);
+
+    double cash_before = r.cash();
+
+    TradeInput sell{0, 110.0, 1.0, 0.11, 0.0, "BTC"}; // No position to sell
+    r.record_sell(sell);
+
+    // Should be ignored, cash unchanged
+    ASSERT_EQ(r.cash(), cash_before);
+    ASSERT_EQ(r.realized_pnl(), 0);
+}
+
+// =============================================================================
 // MAIN
 // =============================================================================
 int main() {
@@ -811,6 +1038,23 @@ int main() {
 
     std::cout << "\n--- SharedLedger IPC Tests ---\n";
     RUN_TEST(shared_ledger_ipc_integration);
+
+    std::cout << "\n--- Callback Tests ---\n";
+    RUN_TEST(sync_callback_invoked_on_trades);
+    RUN_TEST(trade_callback_invoked_on_buy);
+    RUN_TEST(trade_callback_invoked_on_sell);
+
+    std::cout << "\n--- Exit Reason Tests ---\n";
+    RUN_TEST(exit_reason_pullback);
+    RUN_TEST(exit_reason_emergency);
+    RUN_TEST(exit_reason_signal);
+
+    std::cout << "\n--- Edge Case Tests ---\n";
+    RUN_TEST(reject_zero_quantity_buy);
+    RUN_TEST(reject_zero_price_buy);
+    RUN_TEST(reject_invalid_symbol_index);
+    RUN_TEST(reject_zero_quantity_sell);
+    RUN_TEST(reject_sell_with_no_position);
 
     std::cout << "\n=== All tests passed! ===\n\n";
     return 0;

@@ -17,7 +17,7 @@ bool approx_equal(double a, double b, double epsilon = 1e-6) {
 
 void test_funding_rate_storage() {
     FuturesMetrics fm;
-    fm.on_mark_price(42000.0, 41950.0, 0.0005, 1000000);
+    fm.on_mark_price(42000.0, 41950.0, 0.0005, 0, 1000000);
 
     auto m = fm.get_metrics(FuturesWindow::W1s);
     assert(approx_equal(m.funding_rate, 0.0005));
@@ -29,7 +29,7 @@ void test_funding_rate_ema_convergence() {
 
     // Feed 60 identical rates
     for (int i = 0; i < 60; i++) {
-        fm.on_mark_price(42000.0, 41950.0, 0.0005, 1000000 + i * 1000000);
+        fm.on_mark_price(42000.0, 41950.0, 0.0005, 0, 1000000 + i * 1000000);
         fm.update(1000000 + i * 1000000);
     }
 
@@ -46,12 +46,12 @@ void test_funding_rate_extreme_threshold() {
     FuturesMetrics fm;
 
     // Test extreme = true
-    fm.on_mark_price(42000.0, 41950.0, 0.0015, 1000000);
+    fm.on_mark_price(42000.0, 41950.0, 0.0015, 0, 1000000);
     auto m1 = fm.get_metrics(FuturesWindow::W1s);
     assert(m1.funding_rate_extreme == true);
 
     // Test extreme = false
-    fm.on_mark_price(42000.0, 41950.0, 0.0001, 2000000);
+    fm.on_mark_price(42000.0, 41950.0, 0.0001, 0, 2000000);
     auto m2 = fm.get_metrics(FuturesWindow::W1s);
     assert(m2.funding_rate_extreme == false);
 
@@ -60,7 +60,7 @@ void test_funding_rate_extreme_threshold() {
 
 void test_negative_funding_rate() {
     FuturesMetrics fm;
-    fm.on_mark_price(42000.0, 41950.0, -0.0008, 1000000);
+    fm.on_mark_price(42000.0, 41950.0, -0.0008, 0, 1000000);
 
     auto m = fm.get_metrics(FuturesWindow::W1s);
     assert(approx_equal(m.funding_rate, -0.0008));

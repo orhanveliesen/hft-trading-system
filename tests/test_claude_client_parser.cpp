@@ -41,6 +41,14 @@
         }                                                                                                              \
     } while (0)
 
+#define ASSERT_FALSE(expr)                                                                                             \
+    do {                                                                                                               \
+        if ((expr)) {                                                                                                  \
+            std::cerr << "\nFAIL: " << #expr << " is true\n";                                                          \
+            assert(false);                                                                                             \
+        }                                                                                                              \
+    } while (0)
+
 #define ASSERT_NEAR(a, b, eps)                                                                                         \
     do {                                                                                                               \
         double _a = (a), _b = (b), _eps = (eps);                                                                       \
@@ -53,7 +61,10 @@
 /**
  * Test wrapper that exposes private parsing methods for testing
  */
-class TestableClaudeClient : public hft::tuner::ClaudeClient {
+namespace hft {
+namespace tuner {
+
+class TestableClaudeClient : public ClaudeClient {
 public:
     // Expose private parsing methods for testing
     bool test_parse_tuner_command(const std::string& text, hft::ipc::TunerCommand& cmd) {
@@ -63,7 +74,17 @@ public:
     std::string test_extract_string(const std::string& json, const char* key) { return extract_string(json, key); }
 
     double test_extract_number(const std::string& json, const char* key) { return extract_number(json, key); }
+
+    bool test_parse_response(const std::string& body, ClaudeResponse& response) {
+        return parse_response(body, response);
+    }
 };
+
+} // namespace tuner
+} // namespace hft
+
+// Bring TestableClaudeClient into global scope for test functions
+using hft::tuner::TestableClaudeClient;
 
 // =============================================================================
 // TEST 1: Parse basic UPDATE_CONFIG action
@@ -333,6 +354,68 @@ This should improve performance.
 }
 
 // =============================================================================
+// ERROR PATH TESTS: Remove LCOV_EXCL_LINE markers
+// =============================================================================
+
+// Test extract_string with missing key
+TEST(extract_string_missing_key) {
+    TestableClaudeClient client;
+    std::string json = R"({"action": "UPDATE_CONFIG"})";
+    std::string result = client.test_extract_string(json, "symbol");
+    ASSERT_EQ(result, ""); // Should return empty string
+}
+
+// Test extract_string with missing colon
+TEST(extract_string_missing_colon) {
+    TestableClaudeClient client;
+    std::string json = R"({"symbol" "BTCUSDT"})"; // Invalid JSON - missing colon
+    std::string result = client.test_extract_string(json, "symbol");
+    ASSERT_EQ(result, ""); // Should return empty string
+}
+
+// Test extract_string with missing quote
+TEST(extract_string_missing_quote) {
+    TestableClaudeClient client;
+    std::string json = R"({"symbol": BTCUSDT})"; // Invalid JSON - missing quotes around value
+    std::string result = client.test_extract_string(json, "symbol");
+    ASSERT_EQ(result, ""); // Should return empty string
+}
+
+// Test extract_number with missing key
+TEST(extract_number_missing_key) {
+    TestableClaudeClient client;
+    std::string json = R"({"confidence": 85})";
+    double result = client.test_extract_number(json, "urgency");
+    ASSERT_EQ(result, 0); // Should return 0
+}
+
+// Test extract_number with missing colon
+TEST(extract_number_missing_colon) {
+    TestableClaudeClient client;
+    std::string json = R"({"confidence" 85})"; // Invalid JSON - missing colon
+    double result = client.test_extract_number(json, "confidence");
+    ASSERT_EQ(result, 0); // Should return 0
+}
+
+// Test parse_response with missing "content" field
+TEST(parse_response_missing_content) {
+    TestableClaudeClient client;
+    hft::tuner::ClaudeResponse response;
+    std::string body = R"({"id": "msg_123", "type": "message"})"; // Missing "content" field
+    bool result = client.test_parse_response(body, response);
+    ASSERT_FALSE(result); // Should fail
+}
+
+// Test parse_response with missing "text" field
+TEST(parse_response_missing_text) {
+    TestableClaudeClient client;
+    hft::tuner::ClaudeResponse response;
+    std::string body = R"({"content": [{"type": "text"}]})"; // Has "content" but missing "text:"
+    bool result = client.test_parse_response(body, response);
+    ASSERT_FALSE(result); // Should fail
+}
+
+// =============================================================================
 // MAIN
 // =============================================================================
 int main() {
@@ -346,6 +429,15 @@ int main() {
     RUN_TEST(parse_all_config_parameters);
     RUN_TEST(parse_with_markdown_blocks);
 
-    std::cout << "\nAll tests passed!\n";
+    // Error path tests
+    RUN_TEST(extract_string_missing_key);
+    RUN_TEST(extract_string_missing_colon);
+    RUN_TEST(extract_string_missing_quote);
+    RUN_TEST(extract_number_missing_key);
+    RUN_TEST(extract_number_missing_colon);
+    RUN_TEST(parse_response_missing_content);
+    RUN_TEST(parse_response_missing_text);
+
+    std::cout << "\nAll 14 tests passed!\n";
     return 0;
 }

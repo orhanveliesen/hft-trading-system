@@ -5,6 +5,7 @@
 #include "../metrics/order_book_metrics.hpp"
 #include "../metrics/order_flow_metrics.hpp"
 #include "../metrics/trade_stream_metrics.hpp"
+#include "regime_detector.hpp"
 
 namespace hft {
 namespace strategy {
@@ -23,6 +24,10 @@ struct MetricsContext {
     const CombinedMetrics* combined = nullptr;
     const FuturesMetrics* futures = nullptr;
 
+    // Regime detection (Phase 5.0)
+    MarketRegime regime = MarketRegime::Unknown;
+    double regime_confidence = 0.0;
+
     /// Check if any metrics are available
     bool has_any() const { return trade || book || flow || combined || futures; }
 
@@ -31,6 +36,9 @@ struct MetricsContext {
 
     /// Check if futures metrics are available
     bool has_futures() const { return futures != nullptr; }
+
+    /// Check if regime information is available
+    bool has_regime() const { return regime != MarketRegime::Unknown; }
 };
 
 } // namespace strategy

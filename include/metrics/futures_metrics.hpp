@@ -58,6 +58,9 @@ public:
         double long_liquidation_volume = 0.0;  // Sell-side liquidations (longs getting rekt)
         double short_liquidation_volume = 0.0; // Buy-side liquidations (shorts getting rekt)
         double liquidation_imbalance = 0.0;    // (long - short) / (long + short), range [-1, 1]
+
+        // Funding Schedule (1) - Phase 5.0
+        uint64_t next_funding_time_ms = 0; // Next funding time in milliseconds since epoch
     };
 
     /**
@@ -66,9 +69,11 @@ public:
      * @param mark_price Futures mark price
      * @param index_price Index price (spot reference)
      * @param funding_rate Funding rate
+     * @param next_funding_time_ms Next funding time in milliseconds (Phase 5.0)
      * @param timestamp_us Timestamp in microseconds
      */
-    void on_mark_price(double mark_price, double index_price, double funding_rate, uint64_t timestamp_us);
+    void on_mark_price(double mark_price, double index_price, double funding_rate, uint64_t next_funding_time_ms,
+                       uint64_t timestamp_us);
 
     /**
      * Update from liquidation stream.
@@ -139,6 +144,7 @@ private:
 
     // Latest values
     double funding_rate_ = 0.0;
+    uint64_t next_funding_time_ms_ = 0; // Phase 5.0
     double futures_bid_ = 0.0;
     double futures_ask_ = 0.0;
     double spot_bid_ = 0.0;
@@ -206,10 +212,11 @@ constexpr double FuturesMetrics::get_window_alpha(FuturesWindow window) {
 }
 
 inline void FuturesMetrics::on_mark_price(double mark_price, double index_price, double funding_rate,
-                                          uint64_t timestamp_us) {
+                                          uint64_t next_funding_time_ms, uint64_t timestamp_us) {
     (void)mark_price;  // Unused - basis calculated from BBO
     (void)index_price; // Unused - may be used in future for basis spread analysis
     funding_rate_ = funding_rate;
+    next_funding_time_ms_ = next_funding_time_ms; // Phase 5.0
     last_update_us_ = timestamp_us;
 }
 
@@ -285,6 +292,7 @@ inline FuturesMetrics::Metrics FuturesMetrics::calculate_metrics(FuturesWindow w
     // Funding rate metrics
     m.funding_rate = funding_rate_;
     m.funding_rate_extreme = (std::abs(funding_rate_) > FUNDING_EXTREME_THRESHOLD);
+    m.next_funding_time_ms = next_funding_time_ms_; // Phase 5.0
 
     size_t window_idx = static_cast<size_t>(window);
     const WindowState& ws = window_states_[window_idx];

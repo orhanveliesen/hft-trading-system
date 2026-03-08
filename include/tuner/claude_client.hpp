@@ -135,6 +135,8 @@ static constexpr const char* DEFAULT_MODEL = "claude-opus-4-5-20251101";
  * Thread-safe, connection-pooling HTTP client for Anthropic API.
  */
 class ClaudeClient {
+    friend class TestableClaudeClient; // For testing private methods
+
 public:
     ClaudeClient() {
         // Try environment variables first
