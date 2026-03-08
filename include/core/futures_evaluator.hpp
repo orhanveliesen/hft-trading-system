@@ -92,6 +92,9 @@ public:
 
         auto fm = fm_ptr->get_metrics(FuturesWindow::W1s); // Use 1s window
 
+        // CRITICAL: Check exit conditions FIRST (before opening new positions)
+        evaluate_exits(symbol, market, spot_position, fm, now_ns);
+
         // Evaluate all modes (pass now_ns to avoid syscalls in each mode)
         evaluate_hedge_mode(symbol, market, spot_position, fm, now_ns);
         evaluate_directional_mode(symbol, market, fm, now_ns); // STUB - Phase 5.2
@@ -237,6 +240,93 @@ private:
         // Track position (use same now_ns - all timestamps consistent)
         Price entry_price = (farm_side == Side::Buy) ? market.ask : market.bid;
         positions_->open_position(symbol, PositionSource::Farming, farm_side, qty, entry_price, now_ns);
+    }
+
+    /**
+     * @brief Evaluate exit conditions for all active positions
+     *
+     * Called BEFORE entry logic to ensure positions are closed when conditions met.
+     *
+     * Exit conditions:
+     * - Hedge: Basis turned negative (backwardation) - no longer profitable
+     * - Farming: PostFunding phase (safe to exit) OR funding rate reversed (crossed zero)
+     * - Directional: Not implemented (stub)
+     *
+     * @param now_ns Wall-clock time (passed to avoid syscall)
+     */
+    void evaluate_exits(Symbol symbol, const MarketSnapshot& market, const StrategyPosition& spot_position,
+                        const FuturesMetrics::Metrics& fm, uint64_t now_ns) {
+        (void)market;        // Reserved for future price checks
+        (void)spot_position; // Reserved for hedge exit when spot closed
+
+        // Get current funding phase
+        FundingPhase phase = FundingScheduler::get_phase(fm.next_funding_time_ms, now_ns);
+
+        // Check all 4 position slots for this symbol
+        for (size_t slot = 0; slot < FuturesPosition::MAX_POSITIONS_PER_SYMBOL; ++slot) {
+            const auto* pos_ptr = get_position_by_slot(symbol, slot);
+            if (!pos_ptr || !pos_ptr->is_active())
+                continue;
+
+            const auto& pos = *pos_ptr;
+            bool should_exit = false;
+            std::string exit_reason;
+
+            // Hedge exit logic
+            if (pos.source == PositionSource::Hedge) {
+                // Exit if basis turned negative (backwardation = futures cheaper than spot)
+                if (fm.basis_bps < -HEDGE_BASIS_THRESHOLD) {
+                    should_exit = true;
+                    exit_reason = "hedge_backwardation";
+                }
+                // Also exit if spot position no longer exists
+                else if (!spot_position.has_position()) {
+                    should_exit = true;
+                    exit_reason = "hedge_spot_closed";
+                }
+            }
+
+            // Farming exit logic
+            else if (pos.source == PositionSource::Farming) {
+                // Exit during PostFunding phase (safe exit window)
+                if (phase == FundingPhase::PostFunding) {
+                    should_exit = true;
+                    exit_reason = "farming_postfunding";
+                }
+                // Exit if funding rate reversed (crossed zero)
+                else if ((pos.side == Side::Buy && fm.funding_rate > 0) ||
+                         (pos.side == Side::Sell && fm.funding_rate < 0)) {
+                    should_exit = true;
+                    exit_reason = "farming_reversed";
+                }
+            }
+
+            // Directional exit logic (STUB - Phase 5.2)
+            // Will implement when signal sharing added
+
+            // Execute exit
+            if (should_exit) {
+                if (pos.side == Side::Buy) {
+                    // Close long = Market sell
+                    bus_->publish(FuturesCloseLongEvent{
+                        .symbol = symbol, .qty = pos.quantity, .reason = exit_reason.c_str(), .timestamp_ns = now_ns});
+                } else {
+                    // Close short = Market buy
+                    bus_->publish(FuturesCloseShortEvent{
+                        .symbol = symbol, .qty = pos.quantity, .reason = exit_reason.c_str(), .timestamp_ns = now_ns});
+                }
+
+                // Remove from position tracker
+                positions_->close_position(symbol, static_cast<int>(slot));
+            }
+        }
+    }
+
+    /**
+     * @brief Get position by slot index (helper for exit logic)
+     */
+    const FuturesPositionEntry* get_position_by_slot(Symbol symbol, size_t slot) const {
+        return positions_->get_by_slot(symbol, slot);
     }
 };
 

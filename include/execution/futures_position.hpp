@@ -182,6 +182,24 @@ public:
         return false; // All 4 slots occupied
     }
 
+    /**
+     * @brief Get position by slot index (for exit logic iteration)
+     *
+     * @param symbol Symbol ID
+     * @param slot Slot index (0-3)
+     * @return Pointer to position entry or nullptr if invalid
+     */
+    inline const FuturesPositionEntry* get_by_slot(Symbol symbol, size_t slot) const {
+        if (symbol >= hft::trading::MAX_SYMBOLS || slot >= MAX_POSITIONS_PER_SYMBOL)
+            return nullptr;
+
+        const auto& entry = positions_[symbol][slot];
+        if (!entry.is_active())
+            return nullptr;
+
+        return &entry;
+    }
+
 private:
     // Symbol-indexed 2D array: positions_[symbol][0..3]
     // O(4) lookup per symbol instead of O(256) flat array scan
