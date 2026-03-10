@@ -1,36 +1,156 @@
 #!/bin/bash
-# Pre-commit hook: Auto-format C++ files with clang-format-16
+# Pre-commit hook: Auto-format C++ files + enforce 100% code coverage
+
+# ANSI color codes
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m' # No Color
+
+# ============================================================================
+# PART 1: Auto-format C++ files with clang-format-16
+# ============================================================================
 
 # Find all staged C++ files
 STAGED_FILES=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.(cpp|hpp)$')
 
-if [ -z "$STAGED_FILES" ]; then
-    exit 0
+if [ ! -z "$STAGED_FILES" ]; then
+    # Check if clang-format-16 is available (either locally or via Docker)
+    if command -v clang-format-16 &> /dev/null; then
+        # Use local clang-format-16 (preferred)
+        echo "Formatting staged files with clang-format-16..."
+        echo "$STAGED_FILES" | xargs clang-format-16 -i
+    elif command -v clang-format &> /dev/null; then
+        # Fall back to unversioned clang-format
+        echo "Formatting staged files with clang-format..."
+        echo "$STAGED_FILES" | xargs clang-format -i
+    elif command -v docker &> /dev/null; then
+        # Use Docker image
+        echo "Formatting staged files with clang-format-16 (Docker)..."
+        for file in $STAGED_FILES; do
+            docker run --rm -v "$(pwd):/workspace" ghcr.io/orhanveliesen/hft-builder:latest \
+                sh -c "cd /workspace && clang-format-16 -i $file"
+        done
+    else
+        echo "Warning: clang-format-16 not found. Skipping formatting."
+    fi
+
+    # Re-add formatted files
+    echo "$STAGED_FILES" | xargs git add
+    echo "✓ Code formatted successfully"
 fi
 
-# Check if clang-format-16 is available (either locally or via Docker)
-if command -v clang-format-16 &> /dev/null; then
-    # Use local clang-format-16 (preferred)
-    echo "Formatting staged files with clang-format-16..."
-    echo "$STAGED_FILES" | xargs clang-format-16 -i
-elif command -v clang-format &> /dev/null; then
-    # Fall back to unversioned clang-format
-    echo "Formatting staged files with clang-format..."
-    echo "$STAGED_FILES" | xargs clang-format -i
-elif command -v docker &> /dev/null; then
-    # Use Docker image
-    echo "Formatting staged files with clang-format-16 (Docker)..."
-    for file in $STAGED_FILES; do
-        docker run --rm -v "$(pwd):/workspace" ghcr.io/orhanveliesen/hft-builder:latest \
-            sh -c "cd /workspace && clang-format-16 -i $file"
-    done
-else
-    echo "Warning: clang-format-16 not found. Skipping formatting."
-    exit 0
+# ============================================================================
+# PART 2: Enforce 100% code coverage
+# ============================================================================
+
+echo ""
+echo -e "${YELLOW}🔍 Running pre-commit coverage check...${NC}"
+
+# Build directory for coverage
+BUILD_DIR="build-coverage"
+
+# Step 1: Configure CMake with coverage enabled
+echo -e "${YELLOW}📦 Configuring CMake with coverage...${NC}"
+cmake -B ${BUILD_DIR} \
+    -DCMAKE_BUILD_TYPE=Debug \
+    -DENABLE_COVERAGE=ON \
+    > /dev/null 2>&1
+
+if [ $? -ne 0 ]; then
+    echo -e "${RED}❌ CMake configuration failed!${NC}"
+    exit 1
 fi
 
-# Re-add formatted files
-echo "$STAGED_FILES" | xargs git add
+# Step 2: Build project
+echo -e "${YELLOW}🔨 Building project...${NC}"
+cmake --build ${BUILD_DIR} -j$(nproc) > /dev/null 2>&1
 
-echo "✓ Code formatted successfully"
+if [ $? -ne 0 ]; then
+    echo -e "${RED}❌ Build failed!${NC}"
+    exit 1
+fi
+
+# Step 3: Run tests
+echo -e "${YELLOW}🧪 Running tests...${NC}"
+ctest --test-dir ${BUILD_DIR} --output-on-failure > /dev/null 2>&1
+
+if [ $? -ne 0 ]; then
+    echo -e "${RED}❌ Tests failed!${NC}"
+    exit 1
+fi
+
+# Step 4: Capture coverage
+echo -e "${YELLOW}📊 Capturing coverage data...${NC}"
+cd ${BUILD_DIR}
+
+lcov --capture --directory . --output-file coverage.info > /dev/null 2>&1
+if [ $? -ne 0 ]; then
+    echo -e "${RED}❌ Coverage capture failed!${NC}"
+    cd ..
+    exit 1
+fi
+
+# Step 5: Filter coverage data
+lcov --remove coverage.info '/usr/*' '*/external/*' '*/tests/*' --output-file coverage_filtered.info > /dev/null 2>&1
+if [ $? -ne 0 ]; then
+    echo -e "${RED}❌ Coverage filter failed!${NC}"
+    cd ..
+    exit 1
+fi
+
+# Step 6: Parse coverage percentages
+COVERAGE_SUMMARY=$(lcov --summary coverage_filtered.info 2>&1)
+
+LINE_COVERAGE=$(echo "$COVERAGE_SUMMARY" | grep "lines" | awk '{print $2}' | sed 's/%//')
+FUNCTION_COVERAGE=$(echo "$COVERAGE_SUMMARY" | grep "functions" | awk '{print $2}' | sed 's/%//')
+
+cd ..
+
+echo -e "${YELLOW}📈 Coverage Results:${NC}"
+echo -e "  Lines:     ${LINE_COVERAGE}%"
+echo -e "  Functions: ${FUNCTION_COVERAGE}%"
+
+# Step 7: Check thresholds (100% required)
+PASS=true
+
+if (( $(echo "$LINE_COVERAGE < 100.0" | bc -l) )); then
+    echo -e "${RED}❌ Line coverage ${LINE_COVERAGE}% is below 100% threshold${NC}"
+    PASS=false
+fi
+
+if [ "$PASS" = false ]; then
+    echo ""
+    echo -e "${RED}════════════════════════════════════════════════════${NC}"
+    echo -e "${RED}  COMMIT REJECTED: Coverage below 100% threshold${NC}"
+    echo -e "${RED}════════════════════════════════════════════════════${NC}"
+    echo ""
+    echo -e "${YELLOW}📋 Files with less than 100% coverage:${NC}"
+    echo ""
+
+    cd ${BUILD_DIR}
+    lcov --list coverage_filtered.info | grep -v "100.0%" | grep "%" | head -20
+    cd ..
+
+    echo ""
+    echo -e "${YELLOW}💡 To see detailed coverage report:${NC}"
+    echo -e "   cd ${BUILD_DIR}"
+    echo -e "   genhtml coverage_filtered.info --output-directory coverage_html"
+    echo -e "   open coverage_html/index.html"
+    echo ""
+
+    # Cleanup
+    rm -f ${BUILD_DIR}/coverage.info ${BUILD_DIR}/coverage_filtered.info
+
+    exit 1
+fi
+
+# Step 8: Success
+echo ""
+echo -e "${GREEN}✅ Coverage check passed: ${LINE_COVERAGE}% line coverage${NC}"
+echo ""
+
+# Cleanup
+rm -f ${BUILD_DIR}/coverage.info ${BUILD_DIR}/coverage_filtered.info
+
 exit 0

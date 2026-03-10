@@ -77,13 +77,20 @@ UDP Multicast (ITCH 5.0)
 ## Commands
 
 ```bash
-# Build (CMake + Make)
-mkdir -p build && cd build
-cmake -DCMAKE_BUILD_TYPE=Release ..
-make -j$(nproc)
+# Build (ALWAYS from project root, NEVER cd into build/)
+cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j$(nproc)
 
 # Test
-ctest --output-on-failure
+ctest --test-dir build --output-on-failure
+
+# Coverage build (separate directory)
+cmake -B build-coverage -DCMAKE_BUILD_TYPE=Debug -DENABLE_COVERAGE=ON
+cmake --build build-coverage -j$(nproc)
+ctest --test-dir build-coverage --output-on-failure
+
+# Generate coverage report (outputs to build-coverage/coverage_html/)
+cd build-coverage && cmake --build . --target coverage && cd ..
 
 # Format code (before commit)
 find include tools tests benchmarks -type f \( -name "*.cpp" -o -name "*.hpp" \) -exec clang-format -i {} +
@@ -92,7 +99,7 @@ find include tools tests benchmarks -type f \( -name "*.cpp" -o -name "*.hpp" \)
 git config core.hooksPath .githooks
 
 # Benchmark (mandatory for hot path changes)
-./bench_orderbook
+./build/bench_orderbook
 
 # Run paper trading
 ./trader --paper
@@ -141,12 +148,8 @@ gh run watch
 - **Target**: 100% line coverage (strict)
 - **Tool**: lcov + gcov
 - **Exclusions**: `/usr/*`, `*/external/*`, `*/tests/*`
-- **Unreachable error paths**: Mark with `LCOV_EXCL_LINE` comment
-  ```cpp
-  if (unlikely_error_condition) { // LCOV_EXCL_LINE
-      handle_unreachable_error(); // LCOV_EXCL_LINE
-  } // LCOV_EXCL_LINE
-  ```
+- **NEVER use `// LCOV_EXCL_LINE`** - All code must have real test coverage. No exceptions.
+- **Build isolation**: All coverage artifacts (`.info`, `coverage_html/`, `.gcda`, `.gcno`) MUST stay in build directories (`build-coverage/`). NEVER generate coverage reports in project root.
 
 ### Formatting (clang-format)
 - **Style**: LLVM-based, HFT-aware (120 col limit, compact hot path)
@@ -168,14 +171,11 @@ gh run watch
 # Pull latest image
 docker pull ghcr.io/orhanveliesen/hft-builder:latest
 
-# Build project in container
 docker run --rm -v $(pwd):/workspace ghcr.io/orhanveliesen/hft-builder:latest \
-  bash -c "mkdir -p build && cd build && cmake -DCMAKE_BUILD_TYPE=Release .. && make -j$(nproc)"
+  bash -c "cmake -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j$(nproc)"
 
-# Run tests
 docker run --rm -v $(pwd):/workspace ghcr.io/orhanveliesen/hft-builder:latest \
-  bash -c "cd build && ctest --output-on-failure"
-
+  bash -c "ctest --test-dir build --output-on-failure"
 # Format code
 docker run --rm -v $(pwd):/workspace ghcr.io/orhanveliesen/hft-builder:latest \
   bash -c "find include tools tests benchmarks -type f \( -name '*.cpp' -o -name '*.hpp' \) -exec clang-format -i {} +"

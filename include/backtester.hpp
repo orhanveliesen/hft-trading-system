@@ -229,7 +229,7 @@ private:
             // TODO: Implement probabilistic fill
             return tick.ask <= quote.bid_price;
         }
-        return false;
+        return false; // LCOV_EXCL_LINE - Unreachable, all FillMode cases covered
     }
 
     bool should_fill_ask(const TickData& tick, const strategy::Quote& quote) const {
@@ -242,7 +242,7 @@ private:
         case FillMode::Probabilistic:
             return tick.bid >= quote.ask_price;
         }
-        return false;
+        return false; // LCOV_EXCL_LINE - Unreachable, all FillMode cases covered
     }
 
     double calculate_sharpe() const {

@@ -5,6 +5,9 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+# Code coverage support
+include(cmake/coverage.cmake)
+
 # Get git commit hash for build versioning
 execute_process(
     COMMAND git rev-parse --short=8 HEAD
@@ -138,6 +141,30 @@ add_test(NAME SharedConfigTests COMMAND test_shared_config)
 
 add_executable(test_account tests/test_account.cpp)
 add_test(NAME AccountTests COMMAND test_account)
+
+add_executable(test_types tests/test_types.cpp)
+add_test(NAME TypesTests COMMAND test_types)
+
+add_executable(test_time_utils tests/test_time_utils.cpp)
+add_test(NAME TimeUtilsTests COMMAND test_time_utils)
+
+add_executable(test_system_utils tests/test_system_utils.cpp)
+add_test(NAME SystemUtilsTests COMMAND test_system_utils)
+
+add_executable(test_book_side tests/test_book_side.cpp)
+add_test(NAME BookSideTests COMMAND test_book_side)
+
+add_executable(test_market_health_monitor tests/test_market_health_monitor.cpp)
+add_test(NAME MarketHealthMonitorTests COMMAND test_market_health_monitor)
+
+add_executable(test_risk_manager tests/test_risk_manager.cpp)
+add_test(NAME RiskManagerTests COMMAND test_risk_manager)
+
+add_executable(test_simd_ops tests/test_simd_ops.cpp)
+add_test(NAME SimdOpsTests COMMAND test_simd_ops)
+
+add_executable(test_packet_buffer tests/test_packet_buffer.cpp)
+add_test(NAME PacketBufferTests COMMAND test_packet_buffer)
 
 add_executable(test_market_data tests/test_market_data.cpp)
 add_test(NAME MarketDataTests COMMAND test_market_data)
@@ -378,6 +405,14 @@ add_test(NAME FuturesPositionTests COMMAND test_futures_position)
 add_executable(test_futures_evaluator tests/test_futures_evaluator.cpp)
 target_link_libraries(test_futures_evaluator trader_core)
 add_test(NAME FuturesEvaluatorTests COMMAND test_futures_evaluator)
+
+add_executable(test_halt_manager tests/test_halt_manager.cpp)
+target_link_libraries(test_halt_manager trader_core)
+add_test(NAME HaltManagerTests COMMAND test_halt_manager)
+
+add_executable(test_execution_engine tests/test_execution_engine.cpp)
+target_link_libraries(test_execution_engine trader_core)
+add_test(NAME ExecutionEngineTests COMMAND test_execution_engine)
 
 # TODO: Fix test_strategy_evaluator.cpp type mismatches (MockMetricsManager vs core::MetricsManager)
 # add_executable(test_strategy_evaluator tests/test_strategy_evaluator.cpp)

@@ -321,6 +321,526 @@ void test_dropped_packet_detection() {
 }
 
 // ============================================================================
+// Test: Subscriber Double Start Protection
+// ============================================================================
+void test_subscriber_double_start() {
+    std::cout << "  test_subscriber_double_start... ";
+
+    TelemetrySubscriber sub("239.255.0.1", 5564);
+    if (!sub.is_valid()) {
+        std::cout << "SKIPPED\n";
+        return;
+    }
+
+    sub.start();
+
+    // Attempt to start again - should be no-op
+    sub.start();
+
+    sub.stop();
+
+    std::cout << "PASSED\n";
+}
+
+// ============================================================================
+// Test: Stop Before Start
+// ============================================================================
+void test_stop_before_start() {
+    std::cout << "  test_stop_before_start... ";
+
+    TelemetrySubscriber sub("239.255.0.1", 5565);
+    if (!sub.is_valid()) {
+        std::cout << "SKIPPED\n";
+        return;
+    }
+
+    // Stop without starting - should not crash
+    sub.stop();
+
+    std::cout << "PASSED\n";
+}
+
+// ============================================================================
+// Test: Subscriber Without Callback
+// ============================================================================
+void test_subscriber_no_callback() {
+    std::cout << "  test_subscriber_no_callback... ";
+
+    const uint16_t port = 5566;
+    TelemetrySubscriber sub("239.255.0.1", port);
+    if (!sub.is_valid()) {
+        std::cout << "SKIPPED\n";
+        return;
+    }
+
+    // Start without setting callback - should not crash
+    sub.start();
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+    // Send a packet
+    int sock = socket(AF_INET, SOCK_DGRAM, 0);
+    int loop = 1;
+    setsockopt(sock, IPPROTO_IP, IP_MULTICAST_LOOP, &loop, sizeof(loop));
+
+    sockaddr_in dest{};
+    dest.sin_family = AF_INET;
+    dest.sin_port = htons(port);
+    inet_pton(AF_INET, "239.255.0.1", &dest.sin_addr);
+
+    TelemetryPacket pkt{};
+    pkt.type = TelemetryType::Heartbeat;
+    sendto(sock, &pkt, sizeof(pkt), 0, reinterpret_cast<sockaddr*>(&dest), sizeof(dest));
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+    sub.stop();
+    close(sock);
+
+    std::cout << "PASSED\n";
+}
+
+// ============================================================================
+// Test: Regime Packet Fields
+// ============================================================================
+void test_regime_packet() {
+    std::cout << "  test_regime_packet... ";
+
+    const uint16_t port = 5567;
+    std::atomic<bool> received{false};
+    TelemetryPacket received_pkt{};
+
+    TelemetrySubscriber sub("239.255.0.1", port);
+    if (!sub.is_valid()) {
+        std::cout << "SKIPPED\n";
+        return;
+    }
+
+    sub.set_callback([&](const TelemetryPacket& pkt) {
+        if (pkt.type == TelemetryType::Regime) {
+            received_pkt = pkt;
+            received.store(true);
+        }
+    });
+    sub.start();
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+    // Send regime packet
+    int sock = socket(AF_INET, SOCK_DGRAM, 0);
+    int loop = 1;
+    setsockopt(sock, IPPROTO_IP, IP_MULTICAST_LOOP, &loop, sizeof(loop));
+
+    sockaddr_in dest{};
+    dest.sin_family = AF_INET;
+    dest.sin_port = htons(port);
+    inet_pton(AF_INET, "239.255.0.1", &dest.sin_addr);
+
+    TelemetryPacket pkt{};
+    pkt.type = TelemetryType::Regime;
+    pkt.symbol_id = 123;
+    pkt.data.regime.regime = 3;
+    pkt.data.regime.confidence = 95;
+    pkt.data.regime.volatility = 1234567890LL;
+    pkt.timestamp_ns = TelemetryPublisher::now_ns();
+    pkt.sequence = 42;
+
+    sendto(sock, &pkt, sizeof(pkt), 0, reinterpret_cast<sockaddr*>(&dest), sizeof(dest));
+
+    // Wait for reception
+    auto start = std::chrono::steady_clock::now();
+    while (!received.load()) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        auto elapsed = std::chrono::steady_clock::now() - start;
+        if (elapsed > std::chrono::seconds(2)) {
+            std::cout << "SKIPPED (multicast not available)\n";
+            sub.stop();
+            close(sock);
+            return;
+        }
+    }
+
+    sub.stop();
+    close(sock);
+
+    // Verify
+    assert(received_pkt.type == TelemetryType::Regime);
+    assert(received_pkt.symbol_id == 123);
+    assert(received_pkt.data.regime.regime == 3);
+    assert(received_pkt.data.regime.confidence == 95);
+    assert(received_pkt.data.regime.volatility == 1234567890LL);
+
+    std::cout << "PASSED\n";
+}
+
+// ============================================================================
+// Test: Position Packet Fields
+// ============================================================================
+void test_position_packet() {
+    std::cout << "  test_position_packet... ";
+
+    const uint16_t port = 5568;
+    std::atomic<bool> received{false};
+    TelemetryPacket received_pkt{};
+
+    TelemetrySubscriber sub("239.255.0.1", port);
+    if (!sub.is_valid()) {
+        std::cout << "SKIPPED\n";
+        return;
+    }
+
+    sub.set_callback([&](const TelemetryPacket& pkt) {
+        if (pkt.type == TelemetryType::Position) {
+            received_pkt = pkt;
+            received.store(true);
+        }
+    });
+    sub.start();
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+    // Send position packet
+    int sock = socket(AF_INET, SOCK_DGRAM, 0);
+    int loop = 1;
+    setsockopt(sock, IPPROTO_IP, IP_MULTICAST_LOOP, &loop, sizeof(loop));
+
+    sockaddr_in dest{};
+    dest.sin_family = AF_INET;
+    dest.sin_port = htons(port);
+    inet_pton(AF_INET, "239.255.0.1", &dest.sin_addr);
+
+    TelemetryPacket pkt{};
+    pkt.type = TelemetryType::Position;
+    pkt.symbol_id = 99;
+    pkt.data.position.quantity = 1500'00000000LL;
+    pkt.data.position.avg_price = 91234'00000000LL;
+    pkt.data.position.market_value = 136851000'00000000LL;
+    pkt.data.position.unrealized_pnl = 5000'00000000LL;
+    pkt.timestamp_ns = TelemetryPublisher::now_ns();
+    pkt.sequence = 77;
+
+    sendto(sock, &pkt, sizeof(pkt), 0, reinterpret_cast<sockaddr*>(&dest), sizeof(dest));
+
+    // Wait for reception
+    auto start = std::chrono::steady_clock::now();
+    while (!received.load()) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        auto elapsed = std::chrono::steady_clock::now() - start;
+        if (elapsed > std::chrono::seconds(2)) {
+            std::cout << "SKIPPED (multicast not available)\n";
+            sub.stop();
+            close(sock);
+            return;
+        }
+    }
+
+    sub.stop();
+    close(sock);
+
+    // Verify all fields
+    assert(received_pkt.type == TelemetryType::Position);
+    assert(received_pkt.symbol_id == 99);
+    assert(received_pkt.data.position.quantity == 1500'00000000LL);
+    assert(received_pkt.data.position.avg_price == 91234'00000000LL);
+    assert(received_pkt.data.position.market_value == 136851000'00000000LL);
+    assert(received_pkt.data.position.unrealized_pnl == 5000'00000000LL);
+
+    std::cout << "PASSED\n";
+}
+
+// ============================================================================
+// Test: PnL Packet Fields
+// ============================================================================
+void test_pnl_packet() {
+    std::cout << "  test_pnl_packet... ";
+
+    const uint16_t port = 5569;
+    std::atomic<bool> received{false};
+    TelemetryPacket received_pkt{};
+
+    TelemetrySubscriber sub("239.255.0.1", port);
+    if (!sub.is_valid()) {
+        std::cout << "SKIPPED\n";
+        return;
+    }
+
+    sub.set_callback([&](const TelemetryPacket& pkt) {
+        if (pkt.type == TelemetryType::PnL) {
+            received_pkt = pkt;
+            received.store(true);
+        }
+    });
+    sub.start();
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+    // Send PnL packet
+    int sock = socket(AF_INET, SOCK_DGRAM, 0);
+    int loop = 1;
+    setsockopt(sock, IPPROTO_IP, IP_MULTICAST_LOOP, &loop, sizeof(loop));
+
+    sockaddr_in dest{};
+    dest.sin_family = AF_INET;
+    dest.sin_port = htons(port);
+    inet_pton(AF_INET, "239.255.0.1", &dest.sin_addr);
+
+    TelemetryPacket pkt{};
+    pkt.type = TelemetryType::PnL;
+    pkt.data.pnl.realized_pnl = 5000'00000000LL;
+    pkt.data.pnl.unrealized_pnl = 2500'00000000LL;
+    pkt.data.pnl.total_equity = 107500'00000000LL;
+    pkt.data.pnl.win_count = 42;
+    pkt.data.pnl.loss_count = 18;
+    pkt.timestamp_ns = TelemetryPublisher::now_ns();
+    pkt.sequence = 88;
+
+    sendto(sock, &pkt, sizeof(pkt), 0, reinterpret_cast<sockaddr*>(&dest), sizeof(dest));
+
+    // Wait for reception
+    auto start = std::chrono::steady_clock::now();
+    while (!received.load()) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        auto elapsed = std::chrono::steady_clock::now() - start;
+        if (elapsed > std::chrono::seconds(2)) {
+            std::cout << "SKIPPED (multicast not available)\n";
+            sub.stop();
+            close(sock);
+            return;
+        }
+    }
+
+    sub.stop();
+    close(sock);
+
+    // Verify all fields
+    assert(received_pkt.type == TelemetryType::PnL);
+    assert(received_pkt.data.pnl.realized_pnl == 5000'00000000LL);
+    assert(received_pkt.data.pnl.unrealized_pnl == 2500'00000000LL);
+    assert(received_pkt.data.pnl.total_equity == 107500'00000000LL);
+    assert(received_pkt.data.pnl.win_count == 42);
+    assert(received_pkt.data.pnl.loss_count == 18);
+
+    std::cout << "PASSED\n";
+}
+
+// ============================================================================
+// Test: Fill Packet Fields
+// ============================================================================
+void test_fill_packet() {
+    std::cout << "  test_fill_packet... ";
+
+    const uint16_t port = 5570;
+    std::atomic<bool> received{false};
+    TelemetryPacket received_pkt{};
+
+    TelemetrySubscriber sub("239.255.0.1", port);
+    if (!sub.is_valid()) {
+        std::cout << "SKIPPED\n";
+        return;
+    }
+
+    sub.set_callback([&](const TelemetryPacket& pkt) {
+        if (pkt.type == TelemetryType::Fill) {
+            received_pkt = pkt;
+            received.store(true);
+        }
+    });
+    sub.start();
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+    // Send fill packet (sell side)
+    int sock = socket(AF_INET, SOCK_DGRAM, 0);
+    int loop = 1;
+    setsockopt(sock, IPPROTO_IP, IP_MULTICAST_LOOP, &loop, sizeof(loop));
+
+    sockaddr_in dest{};
+    dest.sin_family = AF_INET;
+    dest.sin_port = htons(port);
+    inet_pton(AF_INET, "239.255.0.1", &dest.sin_addr);
+
+    TelemetryPacket pkt{};
+    pkt.type = TelemetryType::Fill;
+    pkt.symbol_id = 55;
+    pkt.data.fill.side = 1; // Sell
+    pkt.data.fill.quantity = 250;
+    pkt.data.fill.price = 91567'00000000LL;
+    pkt.data.fill.fill_type = 0; // Full fill
+    pkt.timestamp_ns = TelemetryPublisher::now_ns();
+    pkt.sequence = 99;
+
+    sendto(sock, &pkt, sizeof(pkt), 0, reinterpret_cast<sockaddr*>(&dest), sizeof(dest));
+
+    // Wait for reception
+    auto start = std::chrono::steady_clock::now();
+    while (!received.load()) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        auto elapsed = std::chrono::steady_clock::now() - start;
+        if (elapsed > std::chrono::seconds(2)) {
+            std::cout << "SKIPPED (multicast not available)\n";
+            sub.stop();
+            close(sock);
+            return;
+        }
+    }
+
+    sub.stop();
+    close(sock);
+
+    // Verify all fields
+    assert(received_pkt.type == TelemetryType::Fill);
+    assert(received_pkt.symbol_id == 55);
+    assert(received_pkt.data.fill.side == 1);
+    assert(received_pkt.data.fill.quantity == 250);
+    assert(received_pkt.data.fill.price == 91567'00000000LL);
+    assert(received_pkt.data.fill.fill_type == 0);
+
+    std::cout << "PASSED\n";
+}
+
+// ============================================================================
+// Test: Latency Packet Fields
+// ============================================================================
+void test_latency_packet() {
+    std::cout << "  test_latency_packet... ";
+
+    const uint16_t port = 5571;
+    std::atomic<bool> received{false};
+    TelemetryPacket received_pkt{};
+
+    TelemetrySubscriber sub("239.255.0.1", port);
+    if (!sub.is_valid()) {
+        std::cout << "SKIPPED\n";
+        return;
+    }
+
+    sub.set_callback([&](const TelemetryPacket& pkt) {
+        if (pkt.type == TelemetryType::Latency) {
+            received_pkt = pkt;
+            received.store(true);
+        }
+    });
+    sub.start();
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+    // Send latency packet
+    int sock = socket(AF_INET, SOCK_DGRAM, 0);
+    int loop = 1;
+    setsockopt(sock, IPPROTO_IP, IP_MULTICAST_LOOP, &loop, sizeof(loop));
+
+    sockaddr_in dest{};
+    dest.sin_family = AF_INET;
+    dest.sin_port = htons(port);
+    inet_pton(AF_INET, "239.255.0.1", &dest.sin_addr);
+
+    TelemetryPacket pkt{};
+    pkt.type = TelemetryType::Latency;
+    pkt.data.latency.tick_to_decision_ns = 750;
+    pkt.data.latency.decision_to_order_ns = 250;
+    pkt.data.latency.order_to_ack_ns = 1500;
+    pkt.data.latency.total_roundtrip_ns = 2500;
+    pkt.timestamp_ns = TelemetryPublisher::now_ns();
+    pkt.sequence = 111;
+
+    sendto(sock, &pkt, sizeof(pkt), 0, reinterpret_cast<sockaddr*>(&dest), sizeof(dest));
+
+    // Wait for reception
+    auto start = std::chrono::steady_clock::now();
+    while (!received.load()) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        auto elapsed = std::chrono::steady_clock::now() - start;
+        if (elapsed > std::chrono::seconds(2)) {
+            std::cout << "SKIPPED (multicast not available)\n";
+            sub.stop();
+            close(sock);
+            return;
+        }
+    }
+
+    sub.stop();
+    close(sock);
+
+    // Verify all fields
+    assert(received_pkt.type == TelemetryType::Latency);
+    assert(received_pkt.data.latency.tick_to_decision_ns == 750);
+    assert(received_pkt.data.latency.decision_to_order_ns == 250);
+    assert(received_pkt.data.latency.order_to_ack_ns == 1500);
+    assert(received_pkt.data.latency.total_roundtrip_ns == 2500);
+
+    std::cout << "PASSED\n";
+}
+
+// ============================================================================
+// Test: Multiple Subscribers
+// ============================================================================
+void test_multiple_subscribers() {
+    std::cout << "  test_multiple_subscribers... ";
+
+    const uint16_t port = 5572;
+
+    std::atomic<int> count1{0};
+    std::atomic<int> count2{0};
+
+    TelemetrySubscriber sub1("239.255.0.1", port);
+    TelemetrySubscriber sub2("239.255.0.1", port);
+
+    if (!sub1.is_valid() || !sub2.is_valid()) {
+        std::cout << "SKIPPED\n";
+        return;
+    }
+
+    sub1.set_callback([&](const TelemetryPacket&) { count1.fetch_add(1); });
+    sub2.set_callback([&](const TelemetryPacket&) { count2.fetch_add(1); });
+
+    sub1.start();
+    sub2.start();
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+    // Send packets
+    int sock = socket(AF_INET, SOCK_DGRAM, 0);
+    int loop = 1;
+    setsockopt(sock, IPPROTO_IP, IP_MULTICAST_LOOP, &loop, sizeof(loop));
+
+    sockaddr_in dest{};
+    dest.sin_family = AF_INET;
+    dest.sin_port = htons(port);
+    inet_pton(AF_INET, "239.255.0.1", &dest.sin_addr);
+
+    for (int i = 0; i < 3; ++i) {
+        TelemetryPacket pkt{};
+        pkt.type = TelemetryType::Heartbeat;
+        pkt.sequence = i;
+        pkt.timestamp_ns = TelemetryPublisher::now_ns();
+        sendto(sock, &pkt, sizeof(pkt), 0, reinterpret_cast<sockaddr*>(&dest), sizeof(dest));
+    }
+
+    // Wait for both subscribers to receive
+    auto start = std::chrono::steady_clock::now();
+    while (count1.load() < 3 || count2.load() < 3) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        auto elapsed = std::chrono::steady_clock::now() - start;
+        if (elapsed > std::chrono::seconds(2)) {
+            std::cout << "SKIPPED (multicast not available)\n";
+            sub1.stop();
+            sub2.stop();
+            close(sock);
+            return;
+        }
+    }
+
+    sub1.stop();
+    sub2.stop();
+    close(sock);
+
+    // Both subscribers should receive all packets
+    assert(count1.load() == 3);
+    assert(count2.load() == 3);
+
+    std::cout << "PASSED\n";
+}
+
+// ============================================================================
 // Main
 // ============================================================================
 int main() {
@@ -334,8 +854,17 @@ int main() {
     test_publish_receive_quote();
     test_sequence_tracking();
     test_dropped_packet_detection();
+    test_subscriber_double_start();
+    test_stop_before_start();
+    test_subscriber_no_callback();
+    test_regime_packet();
+    test_position_packet();
+    test_pnl_packet();
+    test_fill_packet();
+    test_latency_packet();
+    test_multiple_subscribers();
 
-    std::cout << "\n=== All tests passed! ===\n\n";
+    std::cout << "\n=== All 17 tests passed! ===\n\n";
 
     std::cout << "Architecture summary:\n";
     std::cout << "  - HFT Engine → UDP Multicast (fire-and-forget)\n";

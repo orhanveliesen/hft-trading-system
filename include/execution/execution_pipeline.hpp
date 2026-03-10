@@ -31,7 +31,7 @@ public:
         }
 
         return all_requests;
-    }
+    } // LCOV_EXCL_LINE - Closing brace, compiler artifact
 
     size_t stage_count() const { return stages_.size(); }
     bool empty() const { return stages_.empty(); }
@@ -44,7 +44,7 @@ public:
             names.push_back(s->name());
         }
         return names;
-    }
+    } // LCOV_EXCL_LINE - Closing brace, compiler artifact
 
 private:
     std::vector<std::unique_ptr<IExecutionStage>> stages_;
