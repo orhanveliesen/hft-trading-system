@@ -241,14 +241,22 @@ void test_parse_levels_empty() {
 }
 
 void test_parse_levels_malformed() {
-    // Malformed JSON - missing quotes
-    std::string json = R"([42000.50,1.5])";
     std::array<WsDepthUpdate::Level, 20> levels{};
 
-    int count = BinanceWs::parse_levels(json, levels);
+    // Test 1: Malformed JSON - missing quotes
+    std::string json1 = R"([42000.50,1.5])";
+    int count1 = BinanceWs::parse_levels(json1, levels);
+    assert(count1 == 0);
 
-    // Should fail gracefully and return 0
-    assert(count == 0);
+    // Test 2: No brackets at all - triggers line 331 break (no '[' found)
+    std::string json2 = "no brackets here";
+    int count2 = BinanceWs::parse_levels(json2, levels);
+    assert(count2 == 0);
+
+    // Test 3: Opening bracket without closing - triggers line 336 break (no ']' found)
+    std::string json3 = R"([["42000.50","1.5")";
+    int count3 = BinanceWs::parse_levels(json3, levels);
+    assert(count3 == 0);
 
     std::cout << "✓ test_parse_levels_malformed\n";
 }
@@ -341,6 +349,377 @@ void test_parse_depth_integration() {
     std::cout << "✓ test_parse_depth_integration\n";
 }
 
+// ============================================================================
+// Connection/Disconnection Tests (Mock Mode)
+// ============================================================================
+
+void test_connect_without_streams() {
+    BinanceWs ws(false);
+    ws.set_test_mode(true);
+
+    bool error_received = false;
+    std::string error_msg;
+    ws.set_error_callback([&](const std::string& err) {
+        error_received = true;
+        error_msg = err;
+    });
+
+    bool result = ws.connect();
+
+    assert(result == false);
+    assert(error_received == true);
+    assert(error_msg == "No streams subscribed");
+
+    std::cout << "✓ test_connect_without_streams\n";
+}
+
+void test_connect_with_streams() {
+    BinanceWs ws(false);
+    ws.set_test_mode(true);
+    ws.subscribe_book_ticker("BTCUSDT");
+
+    bool connect_callback_invoked = false;
+    bool connect_status = false;
+    ws.set_connect_callback([&](bool connected) {
+        connect_callback_invoked = true;
+        connect_status = connected;
+    });
+
+    bool result = ws.connect();
+
+    assert(result == true);
+    assert(ws.is_connected() == true);
+    assert(ws.is_running() == true);
+    assert(connect_callback_invoked == true);
+    assert(connect_status == true);
+
+    ws.disconnect();
+
+    std::cout << "✓ test_connect_with_streams\n";
+}
+
+void test_disconnect_triggers_callback() {
+    BinanceWs ws(false);
+    ws.set_test_mode(true);
+    ws.subscribe_trade("ETHUSDT");
+
+    int callback_count = 0;
+    bool final_status = true;
+    ws.set_connect_callback([&](bool connected) {
+        callback_count++;
+        final_status = connected;
+    });
+
+    ws.connect();
+    assert(callback_count == 1);
+    assert(final_status == true);
+
+    ws.disconnect();
+    assert(callback_count == 2);
+    assert(final_status == false);
+    assert(ws.is_connected() == false);
+    assert(ws.is_running() == false);
+
+    std::cout << "✓ test_disconnect_triggers_callback\n";
+}
+
+void test_error_callback() {
+    BinanceWs ws(false);
+    ws.set_test_mode(true);
+
+    bool error_received = false;
+    std::string error_msg;
+    ws.set_error_callback([&](const std::string& err) {
+        error_received = true;
+        error_msg = err;
+    });
+
+    ws.simulate_error("Connection timeout");
+
+    assert(error_received == true);
+    assert(error_msg == "Connection timeout");
+
+    std::cout << "✓ test_error_callback\n";
+}
+
+void test_is_connected_is_running() {
+    BinanceWs ws(false);
+    ws.set_test_mode(true);
+    ws.subscribe_kline("BTCUSDT", "1m");
+
+    assert(ws.is_connected() == false);
+    assert(ws.is_running() == false);
+
+    ws.connect();
+    assert(ws.is_connected() == true);
+    assert(ws.is_running() == true);
+
+    ws.disconnect();
+    assert(ws.is_connected() == false);
+    assert(ws.is_running() == false);
+
+    std::cout << "✓ test_is_connected_is_running\n";
+}
+
+void test_parse_book_ticker() {
+    BinanceWs ws(false);
+    ws.set_test_mode(true);
+
+    bool callback_invoked = false;
+    BookTicker received;
+    ws.set_book_ticker_callback([&](const BookTicker& bt) {
+        callback_invoked = true;
+        received = bt;
+    });
+
+    std::string json = R"({"u":123,"s":"BTCUSDT","b":"50000.00","B":"1.5","a":"50001.00","A":"2.0"})";
+    ws.parse_message_for_test(json);
+
+    assert(callback_invoked == true);
+    assert(received.symbol == "BTCUSDT");
+    assert(received.bid_price == 500000000); // 50000.00 * 10000
+    assert(std::abs(received.bid_qty - 1.5) < 0.01);
+    assert(received.ask_price == 500010000); // 50001.00 * 10000
+    assert(std::abs(received.ask_qty - 2.0) < 0.01);
+    assert(received.update_time == 123);
+
+    std::cout << "✓ test_parse_book_ticker\n";
+}
+
+void test_parse_trade() {
+    BinanceWs ws(false);
+    ws.set_test_mode(true);
+
+    bool callback_invoked = false;
+    WsTrade received;
+    ws.set_trade_callback([&](const WsTrade& trade) {
+        callback_invoked = true;
+        received = trade;
+    });
+
+    std::string json = R"({"e":"trade","E":123,"s":"BTCUSDT","t":456,"p":"50000.00","q":"1.5","T":789,"m":true})";
+    ws.parse_message_for_test(json);
+
+    assert(callback_invoked == true);
+    assert(received.symbol == "BTCUSDT");
+    assert(received.trade_id == 456);
+    assert(received.price == 500000000); // 50000.00 * 10000
+    assert(std::abs(received.quantity - 1.5) < 0.01);
+    assert(received.time == 789);
+    assert(received.is_buyer_maker == true);
+
+    std::cout << "✓ test_parse_trade\n";
+}
+
+void test_parse_kline() {
+    BinanceWs ws(false);
+    ws.set_test_mode(true);
+
+    bool callback_invoked = false;
+    WsKline received;
+    ws.set_kline_callback([&](const WsKline& kline) {
+        callback_invoked = true;
+        received = kline;
+    });
+
+    std::string json =
+        R"({"e":"kline","E":123,"s":"BTCUSDT","k":{"t":100,"T":200,"o":"50000.00","h":"50100.00","l":"49900.00","c":"50050.00","v":"10.5","n":100,"x":true}})";
+    ws.parse_message_for_test(json);
+
+    assert(callback_invoked == true);
+    assert(received.symbol == "BTCUSDT");
+    assert(received.open_time == 100);
+    assert(received.close_time == 200);
+    assert(received.open == 500000000);  // 50000.00 * 10000
+    assert(received.high == 501000000);  // 50100.00 * 10000
+    assert(received.low == 499000000);   // 49900.00 * 10000
+    assert(received.close == 500500000); // 50050.00 * 10000
+    assert(std::abs(received.volume - 10.5) < 0.01);
+    assert(received.trades == 100);
+    assert(received.is_closed == true);
+
+    std::cout << "✓ test_parse_kline\n";
+}
+
+void test_parse_depth() {
+    BinanceWs ws(false);
+    ws.set_test_mode(true);
+
+    bool callback_invoked = false;
+    WsDepthUpdate received;
+    ws.set_depth_callback([&](const WsDepthUpdate& depth) {
+        callback_invoked = true;
+        received = depth;
+    });
+
+    // Simulate combined stream message with depth data
+    std::string json =
+        R"({"stream":"btcusdt@depth5@100ms","data":{"lastUpdateId":160,"bids":[["42000.50","1.5"],["41999.00","3.2"]],"asks":[["42001.00","2.0"]]}})";
+    ws.parse_message_for_test(json);
+
+    assert(callback_invoked == true);
+    assert(received.symbol == "BTCUSDT");
+    assert(received.last_update_id == 160);
+    assert(received.bid_count == 2);
+    assert(received.ask_count == 1);
+    assert(received.bids[0].price == 420005000); // 42000.50 * 10000
+    assert(received.bids[0].quantity == 15000);  // 1.5 * 10000
+    assert(received.asks[0].price == 420010000); // 42001.00 * 10000
+
+    std::cout << "✓ test_parse_depth\n";
+}
+
+// Test parsing without callbacks set (early returns)
+void test_parse_without_callbacks() {
+    BinanceWs ws(false);
+    ws.set_test_mode(true);
+
+    // Parse book_ticker without callback - should return early
+    std::string bt_json = R"({"u":123,"s":"BTCUSDT","b":"50000.00","B":"1.5","a":"50001.00","A":"2.0"})";
+    ws.parse_message_for_test(bt_json); // No callback set, should return early
+
+    // Parse trade without callback - should return early
+    std::string trade_json =
+        R"({"e":"trade","E":123,"s":"BTCUSDT","t":12345,"p":"50000.00","q":"1.5","T":1234567890,"m":true})";
+    ws.parse_message_for_test(trade_json);
+
+    // Parse kline without callback - should return early
+    std::string kline_json =
+        R"({"e":"kline","E":123,"s":"BTCUSDT","k":{"t":100,"T":200,"o":"50000.00","h":"50100.00","l":"49900.00","c":"50050.00","v":"10.5","n":100,"x":true}})";
+    ws.parse_message_for_test(kline_json);
+
+    // Parse depth without callback - should return early
+    std::string depth_json =
+        R"({"stream":"btcusdt@depth5@100ms","data":{"lastUpdateId":160,"bids":[["42000.50","1.5"]],"asks":[["42001.00","2.0"]]}})";
+    ws.parse_message_for_test(depth_json);
+
+    std::cout << "✓ test_parse_without_callbacks\n";
+}
+
+// Test malformed kline JSON (missing "k" object)
+void test_parse_kline_malformed() {
+    BinanceWs ws(false);
+    ws.set_test_mode(true);
+
+    bool callback_invoked = false;
+    ws.set_kline_callback([&](const WsKline&) { callback_invoked = true; });
+
+    // Missing "k" object - should return early
+    std::string json = R"({"e":"kline","E":123,"s":"BTCUSDT"})";
+    ws.parse_message_for_test(json);
+
+    assert(callback_invoked == false);
+
+    std::cout << "✓ test_parse_kline_malformed\n";
+}
+
+// Test extract functions with edge cases
+void test_extract_functions_edge_cases() {
+    BinanceWs ws(false);
+    ws.set_test_mode(true);
+
+    bool callback_invoked = false;
+    WsKline received;
+    ws.set_kline_callback([&](const WsKline& kline) {
+        callback_invoked = true;
+        received = kline;
+    });
+
+    // Kline with boolean field to test extract_bool
+    std::string json =
+        R"({"e":"kline","E":123,"s":"BTCUSDT","k":{"t":100,"T":200,"o":"50000.00","h":"50100.00","l":"49900.00","c":"50050.00","v":"10.5","n":100,"x":false}})";
+    ws.parse_message_for_test(json);
+
+    assert(callback_invoked == true);
+    assert(received.is_closed == false);
+
+    std::cout << "✓ test_extract_functions_edge_cases\n";
+}
+
+// Test kline parsing with malformed k object
+void test_parse_kline_missing_braces() {
+    BinanceWs ws(false);
+    ws.set_test_mode(true);
+
+    bool callback_invoked = false;
+    ws.set_kline_callback([&](const WsKline&) { callback_invoked = true; });
+
+    // k object incomplete - missing closing brace
+    std::string json = R"({"e":"kline","E":123,"s":"BTCUSDT","k":{"t":100)";
+    ws.parse_message_for_test(json);
+
+    assert(callback_invoked == false);
+
+    std::cout << "✓ test_parse_kline_missing_braces\n";
+}
+
+// Test extract_string with missing keys
+void test_extract_string_missing_key() {
+    BinanceWs ws(false);
+    ws.set_test_mode(true);
+
+    bool callback_invoked = false;
+    BookTicker received;
+    ws.set_book_ticker_callback([&](const BookTicker& bt) {
+        callback_invoked = true;
+        received = bt;
+    });
+
+    // Missing "s" (symbol) field - extract_string should return ""
+    std::string json = R"({"u":123,"b":"50000.00","B":"1.5","a":"50001.00","A":"2.0"})";
+    ws.parse_message_for_test(json);
+
+    assert(callback_invoked == true);
+    assert(received.symbol == "");
+
+    std::cout << "✓ test_extract_string_missing_key\n";
+}
+
+// Test extract function edge cases (unquoted numbers, missing keys)
+void test_extract_functions_comprehensive() {
+    BinanceWs ws(false);
+    ws.set_test_mode(true);
+
+    // Test 1: extract_double with unquoted format (lines 591-601)
+    // Use kline with unquoted numeric values
+    bool callback_invoked = false;
+    WsKline kline_received;
+    ws.set_kline_callback([&](const WsKline& kline) {
+        callback_invoked = true;
+        kline_received = kline;
+    });
+
+    // Unquoted numbers in k object (non-standard but should be handled)
+    std::string kline_unquoted =
+        R"({"e":"kline","E":123,"s":"BTCUSDT","k":{"t":100,"T":200,"o":50000.00,"h":50100.00,"l":49900.00,"c":50050.00,"v":10.5,"n":100,"x":true}})";
+    ws.parse_message_for_test(kline_unquoted);
+
+    assert(callback_invoked == true);
+    assert(kline_received.open == 500000000); // 50000.00 * 10000
+    callback_invoked = false;
+
+    // Test 2: extract_uint64 with missing key (line 608)
+    // Kline with missing "t" (open_time) field
+    std::string kline_missing_t =
+        R"({"e":"kline","E":123,"s":"BTCUSDT","k":{"T":200,"o":"50000.00","h":"50100.00","l":"49900.00","c":"50050.00","v":"10.5","n":100,"x":true}})";
+    ws.parse_message_for_test(kline_missing_t);
+
+    assert(callback_invoked == true);
+    assert(kline_received.open_time == 0); // extract_uint64 returns 0 when key missing
+    callback_invoked = false;
+
+    // Test 3: extract_bool with missing key (line 622)
+    // Kline with missing "x" (is_closed) field
+    std::string kline_missing_x =
+        R"({"e":"kline","E":123,"s":"BTCUSDT","k":{"t":100,"T":200,"o":"50000.00","h":"50100.00","l":"49900.00","c":"50050.00","v":"10.5","n":100}})";
+    ws.parse_message_for_test(kline_missing_x);
+
+    assert(callback_invoked == true);
+    assert(kline_received.is_closed == false); // extract_bool returns false when key missing
+
+    std::cout << "✓ test_extract_functions_comprehensive\n";
+}
+
 int main() {
     test_depth_to_snapshot_basic();
     test_depth_to_snapshot_empty_book();
@@ -358,6 +737,27 @@ int main() {
     test_parse_levels_max_levels();
     test_parse_depth_integration();
 
-    std::cout << "All BinanceWs depth tests passed!\n";
+    // Connection/disconnection tests (mock mode)
+    test_connect_without_streams();
+    test_connect_with_streams();
+    test_disconnect_triggers_callback();
+    test_error_callback();
+    test_is_connected_is_running();
+
+    // Message parsing tests
+    test_parse_book_ticker();
+    test_parse_trade();
+    test_parse_kline();
+    test_parse_depth();
+
+    // Edge case tests
+    test_parse_without_callbacks();
+    test_parse_kline_malformed();
+    test_extract_functions_edge_cases();
+    test_parse_kline_missing_braces();
+    test_extract_string_missing_key();
+    test_extract_functions_comprehensive();
+
+    std::cout << "\n✅ All BinanceWs depth tests passed!\n";
     return 0;
 }

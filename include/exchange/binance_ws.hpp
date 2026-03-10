@@ -193,26 +193,63 @@ public:
             return false;
         }
 
-        running_ = true; // LCOV_EXCL_LINE - Network I/O: thread spawn
+        // Test mode: simulate connection without thread
+        if (test_mode_) {
+            running_ = true;
+            connected_ = true;
+            if (connect_callback_) {
+                connect_callback_(true);
+            }
+            return true;
+        }
+
+        // Real mode: spawn event loop thread
+        running_ = true; // LCOV_EXCL_LINE - Network I/O: real mode thread spawn
         ws_thread_ = std::thread(&BinanceWs::run_event_loop, this); // LCOV_EXCL_LINE
-        return true; // LCOV_EXCL_LINE
+        return true;                                                // LCOV_EXCL_LINE
     }
 
-    void disconnect() { // LCOV_EXCL_START - Network I/O: thread join, libwebsockets teardown
+    void disconnect() {
         running_ = false;
-        if (ws_thread_.joinable()) {
-            ws_thread_.join();
+
+        // Test mode: immediate cleanup
+        if (test_mode_) {
+            connected_ = false;
+            if (connect_callback_) {
+                connect_callback_(false);
+            }
+            return;
         }
-        if (context_) {
-            lws_context_destroy(context_);
-            context_ = nullptr;
-        }
+
+        // Real mode: join thread and cleanup libwebsockets
+        if (ws_thread_.joinable()) {       // LCOV_EXCL_LINE - Network I/O: real mode cleanup
+            ws_thread_.join();             // LCOV_EXCL_LINE
+        }                                  // LCOV_EXCL_LINE
+        if (context_) {                    // LCOV_EXCL_LINE
+            lws_context_destroy(context_); // LCOV_EXCL_LINE
+            context_ = nullptr;            // LCOV_EXCL_LINE
+        }                                  // LCOV_EXCL_LINE
         connected_ = false;
-    } // LCOV_EXCL_STOP
+    }
 
     bool is_connected() const { return connected_; }
 
     bool is_running() const { return running_; }
+
+    // ========================================
+    // Test Mode Helpers
+    // ========================================
+
+    void set_test_mode(bool enable) { test_mode_ = enable; }
+
+    void simulate_error(const std::string& error) {
+        if (error_callback_) {
+            error_callback_(error);
+        }
+    }
+
+    // For testing: expose parse_message
+    void parse_message_for_test(const std::string& json) { parse_message(json); }
 
     // ========================================
     // Auto-Reconnect and Health Management
@@ -326,6 +363,7 @@ private:
 
     std::atomic<bool> running_;
     std::atomic<bool> connected_;
+    std::atomic<bool> test_mode_{false};
     std::atomic<bool> auto_reconnect_{false};
     std::atomic<bool> reconnect_requested_{false};
     std::atomic<std::chrono::steady_clock::time_point> last_data_time_{std::chrono::steady_clock::now()};
@@ -356,7 +394,7 @@ private:
     }
 
     // Build combined stream path
-    std::string build_stream_path() {
+    std::string build_stream_path() { // LCOV_EXCL_START - Network I/O: only called from real mode run_event_loop
         if (streams_.size() == 1) {
             return "/ws/" + streams_[0];
         }
@@ -368,7 +406,7 @@ private:
             path += streams_[i];
         }
         return path;
-    }
+    } // LCOV_EXCL_STOP
 
     // Parse incoming JSON message
     void parse_message(const std::string& json) {
@@ -400,13 +438,15 @@ private:
             }
         }
 
-        // Determine message type and parse
-        if (stream_name.find("@bookTicker") != std::string::npos || data_json.find("\"b\":") != std::string::npos) {
-            parse_book_ticker(data_json);
-        } else if (stream_name.find("@trade") != std::string::npos || data_json.find("\"T\":") != std::string::npos) {
-            parse_trade(data_json);
-        } else if (stream_name.find("@kline") != std::string::npos || data_json.find("\"k\":") != std::string::npos) {
+        // Determine message type and parse (order matters: check most specific first)
+        if (stream_name.find("@kline") != std::string::npos || data_json.find("\"k\":") != std::string::npos) {
             parse_kline(data_json);
+        } else if (stream_name.find("@bookTicker") != std::string::npos ||
+                   (data_json.find("\"b\":") != std::string::npos && data_json.find("\"a\":") != std::string::npos)) {
+            parse_book_ticker(data_json);
+        } else if (stream_name.find("@trade") != std::string::npos ||
+                   (data_json.find("\"t\":") != std::string::npos && data_json.find("\"p\":") != std::string::npos)) {
+            parse_trade(data_json);
         } else if (stream_name.find("@depth") != std::string::npos || data_json.find("\"bids\"") != std::string::npos) {
             // Extract symbol from stream name (e.g., "btcusdt@depth20@100ms")
             std::string symbol = stream_name.substr(0, stream_name.find('@'));
@@ -497,7 +537,8 @@ private:
             // Find outer closing ]] - nested array end
             size_t end = json.find("]]", start);
             if (end != std::string::npos) {
-                std::string bids_json = json.substr(start, end - start);
+                // Extract array contents: [["level1"],["level2"]]
+                std::string bids_json = json.substr(start, end - start + 1);
                 depth.bid_count = parse_levels(bids_json, depth.bids);
             }
         }
@@ -509,7 +550,8 @@ private:
             // Find outer closing ]] - nested array end
             size_t end = json.find("]]", start);
             if (end != std::string::npos) {
-                std::string asks_json = json.substr(start, end - start);
+                // Extract array contents: [["level1"],["level2"]]
+                std::string asks_json = json.substr(start, end - start + 1);
                 depth.ask_count = parse_levels(asks_json, depth.asks);
             }
         }
@@ -591,7 +633,8 @@ private:
     static constexpr int LWS_CLIENT_RECEIVE_COMPAT = LWS_CALLBACK_CLIENT_RECEIVE;
 #endif
 
-    static int ws_callback(struct lws* wsi, enum lws_callback_reasons reason, void* user, void* in, size_t len) { // LCOV_EXCL_START - Network I/O: libwebsockets callback
+    static int ws_callback(struct lws* wsi, enum lws_callback_reasons reason, void* user, void* in,
+                           size_t len) { // LCOV_EXCL_START - Network I/O: libwebsockets callback
         BinanceWs* self = static_cast<BinanceWs*>(lws_context_user(lws_get_context(wsi)));
 
         if (!self)
