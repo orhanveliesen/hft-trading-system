@@ -259,6 +259,72 @@ IPC (relaxed memory order):
 
 Hot path changes require benchmark before/after. Any regression = immediate revert.
 
+### Testing and Coverage Rules
+
+**CRITICAL - These rules are MANDATORY:**
+
+1. **NEVER use `--no-verify`**
+   - Pre-commit hooks MUST run on every commit
+   - If coverage fails, FIX the coverage gap with real tests
+   - Bypassing hooks is forbidden - no exceptions
+
+2. **NEVER use `LCOV_EXCL_LINE` or `LCOV_EXCL_START/STOP`**
+   - All code must have real test coverage
+   - If code cannot be tested, it should not exist in production
+   - Network I/O and external dependencies must be mocked/injected, not excluded
+   - Exception: Only allowed for code that will be deleted soon (mark with TODO + date)
+
+3. **Test Mocking Pattern: Inheritance-Based**
+   ```cpp
+   // ✅ CORRECT - Inheritance-based mock
+   class BinanceWs {
+   public:
+       virtual void connect() { /* real network */ }
+       virtual ~BinanceWs() = default;
+   };
+
+   class MockBinanceWs : public BinanceWs {
+   public:
+       void connect() override { /* immediate, no network */ }
+       void simulate_error(const std::string& msg) { /* test-only */ }
+   };
+
+   // Test uses MockBinanceWs
+   // Production uses BinanceWs
+   ```
+
+   ```cpp
+   // ❌ WRONG - Test mode flag in production code
+   class BinanceWs {
+       bool test_mode_ = false;  // ← Production code polluted with test concern
+   public:
+       void set_test_mode(bool m) { test_mode_ = m; }  // ← SRP violation
+       void connect() {
+           if (test_mode_) return;  // ← Runtime branch overhead
+           // real network...
+       }
+   };
+   ```
+
+   **Why inheritance-based mocking:**
+   - Zero runtime overhead in production (no test_mode_ branches)
+   - Clean separation: test concerns stay in test classes
+   - SRP: production class does production work only
+   - Virtual call overhead negligible for non-hot-path (connect/disconnect)
+
+   **For hot-path (order book, feed handler): use template policy instead:**
+   ```cpp
+   template<typename NetworkDriver = LiveWebSocketDriver>
+   class BinanceWs {
+       NetworkDriver driver_;
+   public:
+       void connect() { driver_.connect(endpoint_, this); }
+   };
+
+   // Production: BinanceWs<> (defaults to LiveWebSocketDriver)
+   // Test: BinanceWs<MockNetworkDriver>
+   ```
+
 ### IPC Testing Requirement
 Any IPC struct change must be tested with all consumers running:
 ```bash
