@@ -134,6 +134,18 @@ public:
     const std::vector<std::string>& get_streams() const { return streams_; }
 
     // ========================================
+    // Test Mode Helpers
+    // ========================================
+
+    void set_test_mode(bool enable) { test_mode_ = enable; }
+
+    void simulate_error(const std::string& error) {
+        if (error_callback_) {
+            error_callback_(error);
+        }
+    }
+
+    // ========================================
     // Connection Management
     // ========================================
 
@@ -145,22 +157,44 @@ public:
             return false;
         }
 
-        running_ = true; // LCOV_EXCL_LINE - Network I/O: thread spawn
+        // Test mode: simulate connection without thread
+        if (test_mode_) {
+            running_ = true;
+            connected_ = true;
+            if (connect_callback_) {
+                connect_callback_(true);
+            }
+            return true;
+        }
+
+        // Real mode: spawn event loop thread
+        running_ = true; // LCOV_EXCL_LINE - Network I/O: real mode thread spawn
         ws_thread_ = std::thread(&BinanceFuturesWs::run_event_loop, this); // LCOV_EXCL_LINE
         return true; // LCOV_EXCL_LINE
     }
 
-    void disconnect() { // LCOV_EXCL_START - Network I/O: thread join, libwebsockets teardown
+    void disconnect() {
         running_ = false;
-        if (ws_thread_.joinable()) {
-            ws_thread_.join();
+
+        // Test mode: immediate cleanup
+        if (test_mode_) {
+            connected_ = false;
+            if (connect_callback_) {
+                connect_callback_(false);
+            }
+            return;
         }
-        if (context_) {
-            lws_context_destroy(context_);
-            context_ = nullptr;
-        }
+
+        // Real mode: join thread and cleanup libwebsockets
+        if (ws_thread_.joinable()) { // LCOV_EXCL_LINE - Network I/O: real mode cleanup
+            ws_thread_.join(); // LCOV_EXCL_LINE
+        } // LCOV_EXCL_LINE
+        if (context_) { // LCOV_EXCL_LINE
+            lws_context_destroy(context_); // LCOV_EXCL_LINE
+            context_ = nullptr; // LCOV_EXCL_LINE
+        } // LCOV_EXCL_LINE
         connected_ = false;
-    } // LCOV_EXCL_STOP
+    }
 
     bool is_connected() const { return connected_; }
 
@@ -296,6 +330,7 @@ private:
 
     std::atomic<bool> running_;
     std::atomic<bool> connected_;
+    std::atomic<bool> test_mode_{false};
     std::thread ws_thread_;
 
     struct lws* wsi_;

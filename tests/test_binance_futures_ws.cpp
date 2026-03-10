@@ -552,6 +552,118 @@ void test_extract_uint64_large_values() {
 }
 
 // ============================================================================
+// Connection/Disconnection Tests (Mock Mode)
+// ============================================================================
+
+void test_connect_without_streams() {
+    BinanceFuturesWs ws(false);
+    ws.set_test_mode(true);
+
+    bool error_received = false;
+    std::string error_msg;
+    ws.set_error_callback([&](const std::string& err) {
+        error_received = true;
+        error_msg = err;
+    });
+
+    bool result = ws.connect();
+
+    assert(result == false);
+    assert(error_received == true);
+    assert(error_msg == "No streams subscribed");
+
+    std::cout << "✓ test_connect_without_streams\n";
+}
+
+void test_connect_with_streams() {
+    BinanceFuturesWs ws(false);
+    ws.set_test_mode(true);
+    ws.subscribe_mark_price("BTCUSDT");
+
+    bool connect_callback_invoked = false;
+    bool connect_status = false;
+    ws.set_connect_callback([&](bool connected) {
+        connect_callback_invoked = true;
+        connect_status = connected;
+    });
+
+    bool result = ws.connect();
+
+    assert(result == true);
+    assert(ws.is_connected() == true);
+    assert(ws.is_running() == true);
+    assert(connect_callback_invoked == true);
+    assert(connect_status == true);
+
+    ws.disconnect();
+
+    std::cout << "✓ test_connect_with_streams\n";
+}
+
+void test_disconnect_triggers_callback() {
+    BinanceFuturesWs ws(false);
+    ws.set_test_mode(true);
+    ws.subscribe_mark_price("BTCUSDT");
+
+    int callback_count = 0;
+    bool final_status = true;
+    ws.set_connect_callback([&](bool connected) {
+        callback_count++;
+        final_status = connected;
+    });
+
+    ws.connect();
+    assert(callback_count == 1);
+    assert(final_status == true);
+
+    ws.disconnect();
+    assert(callback_count == 2);
+    assert(final_status == false);
+    assert(ws.is_connected() == false);
+    assert(ws.is_running() == false);
+
+    std::cout << "✓ test_disconnect_triggers_callback\n";
+}
+
+void test_error_callback() {
+    BinanceFuturesWs ws(false);
+    ws.set_test_mode(true);
+
+    bool error_received = false;
+    std::string error_msg;
+    ws.set_error_callback([&](const std::string& err) {
+        error_received = true;
+        error_msg = err;
+    });
+
+    ws.simulate_error("Connection timeout");
+
+    assert(error_received == true);
+    assert(error_msg == "Connection timeout");
+
+    std::cout << "✓ test_error_callback\n";
+}
+
+void test_is_connected_is_running() {
+    BinanceFuturesWs ws(false);
+    ws.set_test_mode(true);
+    ws.subscribe_liquidation("BTCUSDT");
+
+    assert(ws.is_connected() == false);
+    assert(ws.is_running() == false);
+
+    ws.connect();
+    assert(ws.is_connected() == true);
+    assert(ws.is_running() == true);
+
+    ws.disconnect();
+    assert(ws.is_connected() == false);
+    assert(ws.is_running() == false);
+
+    std::cout << "✓ test_is_connected_is_running\n";
+}
+
+// ============================================================================
 // Main
 // ============================================================================
 
@@ -603,6 +715,13 @@ int main() {
     test_extract_double_quoted_vs_unquoted();
     test_extract_bool_values();
     test_extract_uint64_large_values();
+
+    // Connection/disconnection tests (mock mode)
+    test_connect_without_streams();
+    test_connect_with_streams();
+    test_disconnect_triggers_callback();
+    test_error_callback();
+    test_is_connected_is_running();
 
     std::cout << "\n✅ All Binance futures WebSocket tests passed!\n";
     return 0;
