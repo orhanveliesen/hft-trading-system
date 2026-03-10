@@ -193,12 +193,12 @@ public:
             return false;
         }
 
-        running_ = true;
-        ws_thread_ = std::thread(&BinanceWs::run_event_loop, this);
-        return true;
+        running_ = true; // LCOV_EXCL_LINE - Network I/O: thread spawn
+        ws_thread_ = std::thread(&BinanceWs::run_event_loop, this); // LCOV_EXCL_LINE
+        return true; // LCOV_EXCL_LINE
     }
 
-    void disconnect() {
+    void disconnect() { // LCOV_EXCL_START - Network I/O: thread join, libwebsockets teardown
         running_ = false;
         if (ws_thread_.joinable()) {
             ws_thread_.join();
@@ -208,7 +208,7 @@ public:
             context_ = nullptr;
         }
         connected_ = false;
-    }
+    } // LCOV_EXCL_STOP
 
     bool is_connected() const { return connected_; }
 
@@ -591,7 +591,7 @@ private:
     static constexpr int LWS_CLIENT_RECEIVE_COMPAT = LWS_CALLBACK_CLIENT_RECEIVE;
 #endif
 
-    static int ws_callback(struct lws* wsi, enum lws_callback_reasons reason, void* user, void* in, size_t len) {
+    static int ws_callback(struct lws* wsi, enum lws_callback_reasons reason, void* user, void* in, size_t len) { // LCOV_EXCL_START - Network I/O: libwebsockets callback
         BinanceWs* self = static_cast<BinanceWs*>(lws_context_user(lws_get_context(wsi)));
 
         if (!self)
@@ -635,10 +635,10 @@ private:
         }
 
         return 0;
-    }
+    } // LCOV_EXCL_STOP
 
     // Event loop thread
-    void run_event_loop() {
+    void run_event_loop() { // LCOV_EXCL_START - Network I/O: libwebsockets event loop
         // Create context
         struct lws_context_creation_info info;
         memset(&info, 0, sizeof(info));
@@ -733,7 +733,7 @@ private:
                 retry_count = 0;
             }
         }
-    }
+    } // LCOV_EXCL_STOP
 };
 
 } // namespace exchange
