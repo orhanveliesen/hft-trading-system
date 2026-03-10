@@ -8,6 +8,33 @@
 using namespace hft;
 using namespace hft::exchange;
 
+// Mock BinanceFuturesWs for testing (inheritance-based pattern)
+class MockBinanceFuturesWs : public BinanceFuturesWs {
+public:
+    explicit MockBinanceFuturesWs(bool use_testnet = false) : BinanceFuturesWs(use_testnet) {}
+
+    bool connect() override {
+        if (!validate_streams()) {
+            return false;
+        }
+        running_ = true;
+        connected_ = true;
+        trigger_connect(true);
+        return true;
+    }
+
+    void disconnect() override {
+        running_ = false;
+        connected_ = false;
+        trigger_connect(false);
+    }
+
+    // Test helpers - expose protected methods
+    void parse_for_test(const std::string& json) { parse_message(json); }
+
+    void simulate_error_for_test(const std::string& error) { trigger_error(error); }
+};
+
 // ============================================================================
 // Stream Path Building Tests
 // ============================================================================
@@ -221,7 +248,7 @@ void test_parse_missing_fields() {
 // ============================================================================
 
 void test_subscribe_before_connect() {
-    BinanceFuturesWs ws;
+    MockBinanceFuturesWs ws;
 
     // Should succeed - subscribing before connect is allowed
     ws.subscribe_mark_price("BTCUSDT");
@@ -231,7 +258,7 @@ void test_subscribe_before_connect() {
 }
 
 void test_connect_without_subscriptions() {
-    BinanceFuturesWs ws;
+    MockBinanceFuturesWs ws;
 
     // Should fail - no streams subscribed
     bool result = ws.connect();
@@ -273,7 +300,7 @@ void test_testnet_endpoint() {
 // ============================================================================
 
 void test_subscribe_methods() {
-    BinanceFuturesWs ws;
+    MockBinanceFuturesWs ws;
 
     // Test all subscribe methods
     ws.subscribe_mark_price("BTCUSDT", "1s");
@@ -299,7 +326,7 @@ void test_subscribe_methods() {
 // ============================================================================
 
 void test_callback_setters() {
-    BinanceFuturesWs ws;
+    MockBinanceFuturesWs ws;
 
     bool mark_price_called = false;
     bool liquidation_called = false;
@@ -330,7 +357,7 @@ void test_callback_setters() {
 }
 
 void test_error_callback_invocation() {
-    BinanceFuturesWs ws;
+    MockBinanceFuturesWs ws;
 
     std::string captured_error;
     ws.set_error_callback([&](const std::string& err) { captured_error = err; });
@@ -349,7 +376,7 @@ void test_error_callback_invocation() {
 // ============================================================================
 
 void test_initial_state() {
-    BinanceFuturesWs ws;
+    MockBinanceFuturesWs ws;
 
     assert(!ws.is_connected());
     assert(!ws.is_running());
@@ -359,7 +386,7 @@ void test_initial_state() {
 }
 
 void test_symbol_lowercase_conversion() {
-    BinanceFuturesWs ws;
+    MockBinanceFuturesWs ws;
 
     ws.subscribe_mark_price("BTCUSDT");
     ws.subscribe_liquidation("EthUSDT");
@@ -378,7 +405,7 @@ void test_symbol_lowercase_conversion() {
 // ============================================================================
 
 void test_parse_message_routes_mark_price() {
-    BinanceFuturesWs ws;
+    MockBinanceFuturesWs ws;
 
     bool callback_invoked = false;
     MarkPriceUpdate captured_update;
@@ -390,7 +417,7 @@ void test_parse_message_routes_mark_price() {
 
     std::string json =
         R"({"e":"markPriceUpdate","E":1700000000000,"s":"BTCUSDT","p":"42000.50","P":"41950.00","r":"0.00010000","T":1700028800000})";
-    ws.parse_message_for_test(json);
+    ws.parse_for_test(json);
 
     assert(callback_invoked);
     assert(captured_update.symbol == "BTCUSDT");
@@ -400,7 +427,7 @@ void test_parse_message_routes_mark_price() {
 }
 
 void test_parse_message_routes_liquidation() {
-    BinanceFuturesWs ws;
+    MockBinanceFuturesWs ws;
 
     bool callback_invoked = false;
     LiquidationOrder captured_order;
@@ -412,7 +439,7 @@ void test_parse_message_routes_liquidation() {
 
     std::string json =
         R"({"e":"forceOrder","E":1700000000000,"o":{"s":"BTCUSDT","S":"SELL","p":"42000.00","q":"0.010","ap":"42100.00","X":"FILLED","T":1700000000000}})";
-    ws.parse_message_for_test(json);
+    ws.parse_for_test(json);
 
     assert(callback_invoked);
     assert(captured_order.symbol == "BTCUSDT");
@@ -422,7 +449,7 @@ void test_parse_message_routes_liquidation() {
 }
 
 void test_parse_message_routes_book_ticker() {
-    BinanceFuturesWs ws;
+    MockBinanceFuturesWs ws;
 
     bool callback_invoked = false;
     FuturesBookTicker captured_ticker;
@@ -434,7 +461,7 @@ void test_parse_message_routes_book_ticker() {
 
     std::string json =
         R"({"e":"bookTicker","s":"BTCUSDT","b":"42000.50","B":"1.5","a":"42001.00","A":"2.0","T":1700000000000,"E":1700000001000})";
-    ws.parse_message_for_test(json);
+    ws.parse_for_test(json);
 
     assert(callback_invoked);
     assert(captured_ticker.symbol == "BTCUSDT");
@@ -444,7 +471,7 @@ void test_parse_message_routes_book_ticker() {
 }
 
 void test_parse_message_routes_agg_trade() {
-    BinanceFuturesWs ws;
+    MockBinanceFuturesWs ws;
 
     bool callback_invoked = false;
     WsAggTrade captured_trade;
@@ -456,7 +483,7 @@ void test_parse_message_routes_agg_trade() {
 
     std::string json =
         R"({"e":"aggTrade","E":1700000000000,"s":"BTCUSDT","a":123456,"p":"42000.50","q":"0.100","f":100,"l":105,"T":1700000000000,"m":true})";
-    ws.parse_message_for_test(json);
+    ws.parse_for_test(json);
 
     assert(callback_invoked);
     assert(captured_trade.symbol == "BTCUSDT");
@@ -466,7 +493,7 @@ void test_parse_message_routes_agg_trade() {
 }
 
 void test_parse_message_routes_kline() {
-    BinanceFuturesWs ws;
+    MockBinanceFuturesWs ws;
 
     bool callback_invoked = false;
     WsKline captured_kline;
@@ -478,7 +505,7 @@ void test_parse_message_routes_kline() {
 
     std::string json =
         R"({"e":"kline","E":1700000000000,"s":"BTCUSDT","k":{"t":1700000000000,"T":1700000060000,"o":"42.00","c":"42.10","h":"42.15","l":"41.99","v":"10.5","n":100,"x":true}})";
-    ws.parse_message_for_test(json);
+    ws.parse_for_test(json);
 
     assert(callback_invoked);
     assert(captured_kline.symbol == "BTCUSDT");
@@ -488,7 +515,7 @@ void test_parse_message_routes_kline() {
 }
 
 void test_parse_message_combined_stream() {
-    BinanceFuturesWs ws;
+    MockBinanceFuturesWs ws;
 
     bool callback_invoked = false;
     MarkPriceUpdate captured_update;
@@ -501,7 +528,7 @@ void test_parse_message_combined_stream() {
     // Combined stream format (multi-stream WebSocket)
     std::string json =
         R"({"stream":"btcusdt@markPrice@1s","data":{"e":"markPriceUpdate","E":1700000000000,"s":"BTCUSDT","p":"42000.50","P":"41950.00","r":"0.00010000","T":1700028800000}})";
-    ws.parse_message_for_test(json);
+    ws.parse_for_test(json);
 
     assert(callback_invoked);
     assert(captured_update.symbol == "BTCUSDT");
@@ -510,12 +537,12 @@ void test_parse_message_combined_stream() {
 }
 
 void test_parse_message_no_callback_set() {
-    BinanceFuturesWs ws;
+    MockBinanceFuturesWs ws;
 
     // No callbacks set - should not crash
     std::string json =
         R"({"e":"markPriceUpdate","E":1700000000000,"s":"BTCUSDT","p":"42000.50","P":"41950.00","r":"0.00010000","T":1700028800000})";
-    ws.parse_message_for_test(json);
+    ws.parse_for_test(json);
 
     std::cout << "✓ test_parse_message_no_callback_set\n";
 }
@@ -566,8 +593,7 @@ void test_extract_uint64_large_values() {
 // ============================================================================
 
 void test_connect_without_streams() {
-    BinanceFuturesWs ws(false);
-    ws.set_test_mode(true);
+    MockBinanceFuturesWs ws(false);
 
     bool error_received = false;
     std::string error_msg;
@@ -586,8 +612,7 @@ void test_connect_without_streams() {
 }
 
 void test_connect_with_streams() {
-    BinanceFuturesWs ws(false);
-    ws.set_test_mode(true);
+    MockBinanceFuturesWs ws(false);
     ws.subscribe_mark_price("BTCUSDT");
 
     bool connect_callback_invoked = false;
@@ -611,8 +636,7 @@ void test_connect_with_streams() {
 }
 
 void test_disconnect_triggers_callback() {
-    BinanceFuturesWs ws(false);
-    ws.set_test_mode(true);
+    MockBinanceFuturesWs ws(false);
     ws.subscribe_mark_price("BTCUSDT");
 
     int callback_count = 0;
@@ -636,8 +660,7 @@ void test_disconnect_triggers_callback() {
 }
 
 void test_error_callback() {
-    BinanceFuturesWs ws(false);
-    ws.set_test_mode(true);
+    MockBinanceFuturesWs ws(false);
 
     bool error_received = false;
     std::string error_msg;
@@ -646,7 +669,7 @@ void test_error_callback() {
         error_msg = err;
     });
 
-    ws.simulate_error("Connection timeout");
+    ws.simulate_error_for_test("Connection timeout");
 
     assert(error_received == true);
     assert(error_msg == "Connection timeout");
@@ -655,8 +678,7 @@ void test_error_callback() {
 }
 
 void test_is_connected_is_running() {
-    BinanceFuturesWs ws(false);
-    ws.set_test_mode(true);
+    MockBinanceFuturesWs ws(false);
     ws.subscribe_liquidation("BTCUSDT");
 
     assert(ws.is_connected() == false);
