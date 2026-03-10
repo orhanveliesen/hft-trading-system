@@ -54,8 +54,8 @@ void test_hedge_mode_publishes_sell_event() {
     // Setup futures metrics: basis = 25 bps (> 20 threshold)
     // basis = futures_mid - spot_mid = 50125 - 50000 = 125
     // basis_bps = 125 / 50000 * 10000 = 25 bps
-    metrics->on_spot_bbo(0, 49995.0, 50005.0, 1000000);        // spot_mid = 50000
-    metrics->on_futures_bbo(0, 50120.0, 50130.0, 1000000);     // futures_mid = 50125
+    metrics->on_spot_bbo(0, 49995.0, 50005.0, 1000000);    // spot_mid = 50000
+    metrics->on_futures_bbo(0, 50120.0, 50130.0, 1000000); // futures_mid = 50125
     metrics->on_mark_price(0, 50125.0, 50000.0, 0.0001, 10000000, 1000000);
 
     // Setup spot position (has position to hedge)
@@ -100,10 +100,10 @@ void test_farming_mode_publishes_buy_event_on_negative_funding() {
 
     // Setup futures metrics: funding = -0.06% (negative, extreme)
     // Small basis (5 bps, below 20 bps hedge threshold)
-    metrics->on_spot_bbo(1, 49995.0, 50005.0, 1000000);        // spot_mid = 50000
-    metrics->on_futures_bbo(1, 50000.0, 50010.0, 1000000);     // futures_mid = 50005 (basis = 5 bps)
-    double funding_rate = -0.0006;                             // -0.06%
-    uint64_t next_funding_ms = 10000000 + (60 * 60 * 1000);    // 1 hour away (Normal phase)
+    metrics->on_spot_bbo(1, 49995.0, 50005.0, 1000000);     // spot_mid = 50000
+    metrics->on_futures_bbo(1, 50000.0, 50010.0, 1000000);  // futures_mid = 50005 (basis = 5 bps)
+    double funding_rate = -0.0006;                          // -0.06%
+    uint64_t next_funding_ms = 10000000 + (60 * 60 * 1000); // 1 hour away (Normal phase)
     metrics->on_mark_price(1, 50005.0, 50000.0, funding_rate, next_funding_ms, 1000000);
 
     // No spot position
@@ -145,9 +145,9 @@ void test_farming_mode_publishes_sell_event_on_positive_funding() {
     });
 
     // Setup futures metrics: funding = +0.06% (positive, extreme)
-    metrics->on_spot_bbo(2, 49995.0, 50005.0, 1000000);         // spot_mid = 50000
-    metrics->on_futures_bbo(2, 50000.0, 50010.0, 1000000);      // futures_mid = 50005 (basis = 5 bps)
-    double funding_rate = 0.0006;                               // +0.06%
+    metrics->on_spot_bbo(2, 49995.0, 50005.0, 1000000);    // spot_mid = 50000
+    metrics->on_futures_bbo(2, 50000.0, 50010.0, 1000000); // futures_mid = 50005 (basis = 5 bps)
+    double funding_rate = 0.0006;                          // +0.06%
     uint64_t next_funding_ms = 10000000 + (60 * 60 * 1000);
     metrics->on_mark_price(2, 50005.0, 50000.0, funding_rate, next_funding_ms, 1000000);
 
@@ -194,8 +194,8 @@ void test_exit_logic_publishes_close_short_on_backwardation() {
 
     // Setup futures metrics: basis = -25 bps (backwardation)
     // Need: -25 bps → basis = -125 → futures_mid = 49875
-    metrics->on_spot_bbo(3, 49995.0, 50005.0, 1000000);        // spot_mid = 50000
-    metrics->on_futures_bbo(3, 49870.0, 49880.0, 1000000);     // futures_mid = 49875 (basis = -25 bps)
+    metrics->on_spot_bbo(3, 49995.0, 50005.0, 1000000);    // spot_mid = 50000
+    metrics->on_futures_bbo(3, 49870.0, 49880.0, 1000000); // futures_mid = 49875 (basis = -25 bps)
     double funding_rate = 0.0001;
     uint64_t next_funding_ms = 10000000;
     metrics->on_mark_price(3, 49875.0, 50000.0, funding_rate, next_funding_ms, 1000000);
@@ -251,10 +251,10 @@ void test_exit_logic_publishes_close_long_on_postfunding() {
     // Use realistic timestamps based on wall clock
     uint64_t now_ns = util::wall_clock_ns();
     uint64_t now_ms = now_ns / 1'000'000;
-    uint64_t next_funding_ms = now_ms - (5 * 60 * 1000);        // 5 min ago (PostFunding)
+    uint64_t next_funding_ms = now_ms - (5 * 60 * 1000); // 5 min ago (PostFunding)
 
-    metrics->on_spot_bbo(4, 49995.0, 50005.0, now_ns / 1000);         // spot_mid = 50000
-    metrics->on_futures_bbo(4, 50000.0, 50010.0, now_ns / 1000);      // futures_mid = 50005
+    metrics->on_spot_bbo(4, 49995.0, 50005.0, now_ns / 1000);    // spot_mid = 50000
+    metrics->on_futures_bbo(4, 50000.0, 50010.0, now_ns / 1000); // futures_mid = 50005
     double funding_rate = -0.0006;
     metrics->on_mark_price(4, 50005.0, 50000.0, funding_rate, next_funding_ms, now_ns / 1000);
 
@@ -295,8 +295,8 @@ void test_cooldown_prevents_rapid_evaluation() {
     });
 
     // Setup futures metrics: high funding (should trigger farming)
-    metrics->on_spot_bbo(5, 49995.0, 50005.0, 1000000);         // spot_mid = 50000
-    metrics->on_futures_bbo(5, 50000.0, 50010.0, 1000000);      // futures_mid = 50005
+    metrics->on_spot_bbo(5, 49995.0, 50005.0, 1000000);    // spot_mid = 50000
+    metrics->on_futures_bbo(5, 50000.0, 50010.0, 1000000); // futures_mid = 50005
     double funding_rate = 0.0006;
     uint64_t next_funding_ms = 10000000 + (60 * 60 * 1000);
     metrics->on_mark_price(5, 50005.0, 50000.0, funding_rate, next_funding_ms, 1000000);
@@ -341,9 +341,9 @@ void test_no_action_when_thresholds_not_met() {
     });
 
     // Setup futures metrics: below all thresholds
-    metrics->on_spot_bbo(6, 49995.0, 50005.0, 1000000);        // spot_mid = 50000
-    metrics->on_futures_bbo(6, 50005.0, 50015.0, 1000000);     // futures_mid = 50010 (basis = 2 bps < 20 threshold)
-    double funding_rate = 0.0003;                              // 0.03% (below 0.05% threshold)
+    metrics->on_spot_bbo(6, 49995.0, 50005.0, 1000000);    // spot_mid = 50000
+    metrics->on_futures_bbo(6, 50005.0, 50015.0, 1000000); // futures_mid = 50010 (basis = 2 bps < 20 threshold)
+    double funding_rate = 0.0003;                          // 0.03% (below 0.05% threshold)
     uint64_t next_funding_ms = 10000000 + (60 * 60 * 1000);
     metrics->on_mark_price(6, 50010.0, 50000.0, funding_rate, next_funding_ms, 1000000);
 
@@ -386,8 +386,8 @@ void test_no_duplicate_hedge_position() {
     positions.open_position(7, PositionSource::Hedge, Side::Sell, 1.5, 50000 * 10000, 1000000000);
 
     // Setup futures metrics: high basis (would normally trigger hedge)
-    metrics->on_spot_bbo(7, 49995.0, 50005.0, 1000000);        // spot_mid = 50000
-    metrics->on_futures_bbo(7, 50120.0, 50130.0, 1000000);     // futures_mid = 50125 (basis = 25 bps > 20 threshold)
+    metrics->on_spot_bbo(7, 49995.0, 50005.0, 1000000);    // spot_mid = 50000
+    metrics->on_futures_bbo(7, 50120.0, 50130.0, 1000000); // futures_mid = 50125 (basis = 25 bps > 20 threshold)
     double funding_rate = 0.0001;
     uint64_t next_funding_ms = 10000000;
     metrics->on_mark_price(7, 50125.0, 50000.0, funding_rate, next_funding_ms, 1000000);
@@ -433,10 +433,10 @@ void test_farming_exit_on_funding_reversal_short() {
     positions.open_position(10, PositionSource::Farming, Side::Sell, 1.0, 50000 * 10000, 1000000000);
 
     // Setup futures metrics: funding reversed to negative (was positive when entered)
-    metrics->on_spot_bbo(10, 49995.0, 50005.0, 1000000);       // spot_mid = 50000
-    metrics->on_futures_bbo(10, 50000.0, 50010.0, 1000000);    // futures_mid = 50005
-    double funding_rate = -0.0006;                             // Now negative (reversed)
-    uint64_t next_funding_ms = 10000000 + (60 * 60 * 1000);    // Normal phase
+    metrics->on_spot_bbo(10, 49995.0, 50005.0, 1000000);    // spot_mid = 50000
+    metrics->on_futures_bbo(10, 50000.0, 50010.0, 1000000); // futures_mid = 50005
+    double funding_rate = -0.0006;                          // Now negative (reversed)
+    uint64_t next_funding_ms = 10000000 + (60 * 60 * 1000); // Normal phase
     metrics->on_mark_price(10, 50005.0, 50000.0, funding_rate, next_funding_ms, 1000000);
 
     // No spot position
@@ -481,8 +481,8 @@ void test_hedge_exit_on_spot_position_closed() {
     positions.open_position(11, PositionSource::Hedge, Side::Sell, 1.5, 50000 * 10000, 1000000000);
 
     // Setup futures metrics: positive basis (still profitable)
-    metrics->on_spot_bbo(11, 49995.0, 50005.0, 1000000);       // spot_mid = 50000
-    metrics->on_futures_bbo(11, 50120.0, 50130.0, 1000000);    // futures_mid = 50125 (basis = 25 bps > 20 threshold)
+    metrics->on_spot_bbo(11, 49995.0, 50005.0, 1000000);    // spot_mid = 50000
+    metrics->on_futures_bbo(11, 50120.0, 50130.0, 1000000); // futures_mid = 50125 (basis = 25 bps > 20 threshold)
     double funding_rate = 0.0001;
     uint64_t next_funding_ms = 10000000;
     metrics->on_mark_price(11, 50125.0, 50000.0, funding_rate, next_funding_ms, 1000000);

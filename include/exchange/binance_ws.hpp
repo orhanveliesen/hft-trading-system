@@ -500,8 +500,9 @@ private:
 
         size_t start = json.find("{", k_pos);
         size_t end = json.find("}", start);
-        if (start == std::string::npos || end == std::string::npos) // LCOV_EXCL_LINE - Defensive: valid JSON from routing
-            return;                                                  // LCOV_EXCL_LINE
+        if (start == std::string::npos ||
+            end == std::string::npos) // LCOV_EXCL_LINE - Defensive: valid JSON from routing
+            return;                   // LCOV_EXCL_LINE
 
         std::string k_json = json.substr(start, end - start + 1);
 
@@ -568,8 +569,8 @@ private:
 
         size_t start = pos + search.length();
         size_t end = json.find("\"", start);
-        if (end == std::string::npos)           // LCOV_EXCL_LINE - Defensive: valid JSON from routing
-            return "";                          // LCOV_EXCL_LINE
+        if (end == std::string::npos) // LCOV_EXCL_LINE - Defensive: valid JSON from routing
+            return "";                // LCOV_EXCL_LINE
 
         return json.substr(start, end - start);
     }
@@ -588,9 +589,9 @@ private:
         }
 
         // Try unquoted: "key":123.45                                                 // LCOV_EXCL_START
-        search = "\"" + key + "\":";                                                // Defensive: Binance always uses
-        pos = json.find(search);                                                    // quoted numbers, this fallback
-        if (pos == std::string::npos)                                               // is for spec compliance only
+        search = "\"" + key + "\":";  // Defensive: Binance always uses
+        pos = json.find(search);      // quoted numbers, this fallback
+        if (pos == std::string::npos) // is for spec compliance only
             return 0.0;
 
         size_t start = pos + search.length();
@@ -598,7 +599,7 @@ private:
         if (end == std::string::npos)
             return 0.0;
 
-        return std::stod(json.substr(start, end - start));                          // LCOV_EXCL_STOP
+        return std::stod(json.substr(start, end - start)); // LCOV_EXCL_STOP
     }
 
     uint64_t extract_uint64(const std::string& json, const std::string& key) {
@@ -609,8 +610,8 @@ private:
 
         size_t start = pos + search.length();
         size_t end = json.find_first_of(",}", start);
-        if (end == std::string::npos)           // LCOV_EXCL_LINE - Defensive: valid JSON from routing
-            return 0;                           // LCOV_EXCL_LINE
+        if (end == std::string::npos) // LCOV_EXCL_LINE - Defensive: valid JSON from routing
+            return 0;                 // LCOV_EXCL_LINE
 
         return std::stoull(json.substr(start, end - start));
     }

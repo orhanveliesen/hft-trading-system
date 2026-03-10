@@ -170,7 +170,7 @@ public:
         // Real mode: spawn event loop thread
         running_ = true; // LCOV_EXCL_LINE - Network I/O: real mode thread spawn
         ws_thread_ = std::thread(&BinanceFuturesWs::run_event_loop, this); // LCOV_EXCL_LINE
-        return true; // LCOV_EXCL_LINE
+        return true;                                                       // LCOV_EXCL_LINE
     }
 
     void disconnect() {
@@ -186,13 +186,13 @@ public:
         }
 
         // Real mode: join thread and cleanup libwebsockets
-        if (ws_thread_.joinable()) { // LCOV_EXCL_LINE - Network I/O: real mode cleanup
-            ws_thread_.join(); // LCOV_EXCL_LINE
-        } // LCOV_EXCL_LINE
-        if (context_) { // LCOV_EXCL_LINE
+        if (ws_thread_.joinable()) {       // LCOV_EXCL_LINE - Network I/O: real mode cleanup
+            ws_thread_.join();             // LCOV_EXCL_LINE
+        }                                  // LCOV_EXCL_LINE
+        if (context_) {                    // LCOV_EXCL_LINE
             lws_context_destroy(context_); // LCOV_EXCL_LINE
-            context_ = nullptr; // LCOV_EXCL_LINE
-        } // LCOV_EXCL_LINE
+            context_ = nullptr;            // LCOV_EXCL_LINE
+        }                                  // LCOV_EXCL_LINE
         connected_ = false;
     }
 
@@ -501,7 +501,8 @@ private:
     static constexpr int LWS_CLIENT_RECEIVE_COMPAT = LWS_CALLBACK_CLIENT_RECEIVE;
 #endif
 
-    static int ws_callback(struct lws* wsi, enum lws_callback_reasons reason, void* user, void* in, size_t len) { // LCOV_EXCL_START - Network I/O: libwebsockets callback
+    static int ws_callback(struct lws* wsi, enum lws_callback_reasons reason, void* user, void* in,
+                           size_t len) { // LCOV_EXCL_START - Network I/O: libwebsockets callback
         BinanceFuturesWs* self = static_cast<BinanceFuturesWs*>(lws_context_user(lws_get_context(wsi)));
 
         if (!self)

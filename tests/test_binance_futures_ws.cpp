@@ -388,7 +388,8 @@ void test_parse_message_routes_mark_price() {
         captured_update = mp;
     });
 
-    std::string json = R"({"e":"markPriceUpdate","E":1700000000000,"s":"BTCUSDT","p":"42000.50","P":"41950.00","r":"0.00010000","T":1700028800000})";
+    std::string json =
+        R"({"e":"markPriceUpdate","E":1700000000000,"s":"BTCUSDT","p":"42000.50","P":"41950.00","r":"0.00010000","T":1700028800000})";
     ws.parse_message_for_test(json);
 
     assert(callback_invoked);
@@ -409,7 +410,8 @@ void test_parse_message_routes_liquidation() {
         captured_order = lo;
     });
 
-    std::string json = R"({"e":"forceOrder","E":1700000000000,"o":{"s":"BTCUSDT","S":"SELL","p":"42000.00","q":"0.010","ap":"42100.00","X":"FILLED","T":1700000000000}})";
+    std::string json =
+        R"({"e":"forceOrder","E":1700000000000,"o":{"s":"BTCUSDT","S":"SELL","p":"42000.00","q":"0.010","ap":"42100.00","X":"FILLED","T":1700000000000}})";
     ws.parse_message_for_test(json);
 
     assert(callback_invoked);
@@ -430,7 +432,8 @@ void test_parse_message_routes_book_ticker() {
         captured_ticker = fbt;
     });
 
-    std::string json = R"({"e":"bookTicker","s":"BTCUSDT","b":"42000.50","B":"1.5","a":"42001.00","A":"2.0","T":1700000000000,"E":1700000001000})";
+    std::string json =
+        R"({"e":"bookTicker","s":"BTCUSDT","b":"42000.50","B":"1.5","a":"42001.00","A":"2.0","T":1700000000000,"E":1700000001000})";
     ws.parse_message_for_test(json);
 
     assert(callback_invoked);
@@ -451,7 +454,8 @@ void test_parse_message_routes_agg_trade() {
         captured_trade = trade;
     });
 
-    std::string json = R"({"e":"aggTrade","E":1700000000000,"s":"BTCUSDT","a":123456,"p":"42000.50","q":"0.100","f":100,"l":105,"T":1700000000000,"m":true})";
+    std::string json =
+        R"({"e":"aggTrade","E":1700000000000,"s":"BTCUSDT","a":123456,"p":"42000.50","q":"0.100","f":100,"l":105,"T":1700000000000,"m":true})";
     ws.parse_message_for_test(json);
 
     assert(callback_invoked);
@@ -472,7 +476,8 @@ void test_parse_message_routes_kline() {
         captured_kline = kline;
     });
 
-    std::string json = R"({"e":"kline","E":1700000000000,"s":"BTCUSDT","k":{"t":1700000000000,"T":1700000060000,"o":"42.00","c":"42.10","h":"42.15","l":"41.99","v":"10.5","n":100,"x":true}})";
+    std::string json =
+        R"({"e":"kline","E":1700000000000,"s":"BTCUSDT","k":{"t":1700000000000,"T":1700000060000,"o":"42.00","c":"42.10","h":"42.15","l":"41.99","v":"10.5","n":100,"x":true}})";
     ws.parse_message_for_test(json);
 
     assert(callback_invoked);
@@ -494,7 +499,8 @@ void test_parse_message_combined_stream() {
     });
 
     // Combined stream format (multi-stream WebSocket)
-    std::string json = R"({"stream":"btcusdt@markPrice@1s","data":{"e":"markPriceUpdate","E":1700000000000,"s":"BTCUSDT","p":"42000.50","P":"41950.00","r":"0.00010000","T":1700028800000}})";
+    std::string json =
+        R"({"stream":"btcusdt@markPrice@1s","data":{"e":"markPriceUpdate","E":1700000000000,"s":"BTCUSDT","p":"42000.50","P":"41950.00","r":"0.00010000","T":1700028800000}})";
     ws.parse_message_for_test(json);
 
     assert(callback_invoked);
@@ -507,7 +513,8 @@ void test_parse_message_no_callback_set() {
     BinanceFuturesWs ws;
 
     // No callbacks set - should not crash
-    std::string json = R"({"e":"markPriceUpdate","E":1700000000000,"s":"BTCUSDT","p":"42000.50","P":"41950.00","r":"0.00010000","T":1700028800000})";
+    std::string json =
+        R"({"e":"markPriceUpdate","E":1700000000000,"s":"BTCUSDT","p":"42000.50","P":"41950.00","r":"0.00010000","T":1700028800000})";
     ws.parse_message_for_test(json);
 
     std::cout << "✓ test_parse_message_no_callback_set\n";
@@ -532,11 +539,13 @@ void test_extract_double_quoted_vs_unquoted() {
 
 void test_extract_bool_values() {
     // Test true
-    WsAggTrade trade1 = BinanceFuturesWs::parse_agg_trade(R"({"s":"BTCUSDT","a":1,"p":"0","q":"0","f":0,"l":0,"T":0,"m":true})");
+    WsAggTrade trade1 =
+        BinanceFuturesWs::parse_agg_trade(R"({"s":"BTCUSDT","a":1,"p":"0","q":"0","f":0,"l":0,"T":0,"m":true})");
     assert(trade1.is_buyer_maker == true);
 
     // Test false
-    WsAggTrade trade2 = BinanceFuturesWs::parse_agg_trade(R"({"s":"BTCUSDT","a":1,"p":"0","q":"0","f":0,"l":0,"T":0,"m":false})");
+    WsAggTrade trade2 =
+        BinanceFuturesWs::parse_agg_trade(R"({"s":"BTCUSDT","a":1,"p":"0","q":"0","f":0,"l":0,"T":0,"m":false})");
     assert(trade2.is_buyer_maker == false);
 
     std::cout << "✓ test_extract_bool_values\n";
@@ -544,7 +553,8 @@ void test_extract_bool_values() {
 
 void test_extract_uint64_large_values() {
     // Test large timestamp
-    MarkPriceUpdate mp = BinanceFuturesWs::parse_mark_price_update(R"({"s":"BTC","p":"0","P":"0","r":"0","E":1700000000000,"T":9999999999999})");
+    MarkPriceUpdate mp = BinanceFuturesWs::parse_mark_price_update(
+        R"({"s":"BTC","p":"0","P":"0","r":"0","E":1700000000000,"T":9999999999999})");
     assert(mp.event_time == 1700000000000);
     assert(mp.next_funding_time == 9999999999999);
 

@@ -54,7 +54,9 @@ public:
     static constexpr const char* PERIOD_12h = "12h";
     static constexpr const char* PERIOD_1d = "1d";
 
-    explicit BinanceFuturesRest(bool use_testnet = false) : base_url_(use_testnet ? TESTNET : MAINNET), curl_(nullptr) { // LCOV_EXCL_START - Network I/O: libcurl initialization
+    explicit BinanceFuturesRest(bool use_testnet = false)
+        : base_url_(use_testnet ? TESTNET : MAINNET),
+          curl_(nullptr) { // LCOV_EXCL_START - Network I/O: libcurl initialization
         curl_global_init(CURL_GLOBAL_DEFAULT);
         curl_ = curl_easy_init();
         if (!curl_) {
@@ -85,8 +87,9 @@ public:
     /**
      * Fetch funding rate history
      */
-    std::vector<FundingRate> fetch_funding_rate_history(const std::string& symbol, Timestamp start_time = 0,
-                                                        Timestamp end_time = 0, int limit = 100) { // LCOV_EXCL_START - Network I/O: HTTP request
+    std::vector<FundingRate>
+    fetch_funding_rate_history(const std::string& symbol, Timestamp start_time = 0, Timestamp end_time = 0,
+                               int limit = 100) { // LCOV_EXCL_START - Network I/O: HTTP request
         std::string url = base_url_ + build_funding_rate_history_url(symbol, start_time, end_time, limit);
         std::string response = http_get(url);
         return parse_funding_rate_history_json(response);
@@ -104,9 +107,10 @@ public:
     /**
      * Fetch open interest history
      */
-    std::vector<OpenInterest> fetch_open_interest_history(const std::string& symbol, const std::string& period = "5m",
-                                                          Timestamp start_time = 0, Timestamp end_time = 0,
-                                                          int limit = 30) { // LCOV_EXCL_START - Network I/O: HTTP request
+    std::vector<OpenInterest>
+    fetch_open_interest_history(const std::string& symbol, const std::string& period = "5m", Timestamp start_time = 0,
+                                Timestamp end_time = 0,
+                                int limit = 30) { // LCOV_EXCL_START - Network I/O: HTTP request
         std::string url = base_url_ + build_open_interest_history_url(symbol, period, start_time, end_time, limit);
         std::string response = http_get(url);
         return parse_open_interest_history_json(response);
@@ -125,7 +129,8 @@ public:
      * Fetch klines (candlestick data)
      */
     std::vector<Kline> fetch_klines(const std::string& symbol, const std::string& interval, Timestamp start_time = 0,
-                                    Timestamp end_time = 0, int limit = 500) { // LCOV_EXCL_START - Network I/O: HTTP request
+                                    Timestamp end_time = 0,
+                                    int limit = 500) { // LCOV_EXCL_START - Network I/O: HTTP request
         std::string url = base_url_ + build_klines_url(symbol, interval, start_time, end_time, limit);
         std::string response = http_get(url);
         return parse_klines_json(response);
@@ -134,8 +139,9 @@ public:
     /**
      * Fetch all klines in a time range (handles pagination)
      */
-    std::vector<Kline> fetch_klines_range(const std::string& symbol, const std::string& interval, Timestamp start_time,
-                                          Timestamp end_time) { // LCOV_EXCL_START - Network I/O: HTTP request with pagination
+    std::vector<Kline>
+    fetch_klines_range(const std::string& symbol, const std::string& interval, Timestamp start_time,
+                       Timestamp end_time) { // LCOV_EXCL_START - Network I/O: HTTP request with pagination
         std::vector<Kline> all_klines;
         Timestamp current_start = start_time;
         const int limit = 1000; // Max per request
@@ -335,7 +341,8 @@ private:
     CURL* curl_;
 
     // CURL write callback
-    static size_t write_callback(void* contents, size_t size, size_t nmemb, std::string* output) { // LCOV_EXCL_START - Network I/O: libcurl callback
+    static size_t write_callback(void* contents, size_t size, size_t nmemb,
+                                 std::string* output) { // LCOV_EXCL_START - Network I/O: libcurl callback
         size_t total_size = size * nmemb;
         output->append(static_cast<char*>(contents), total_size);
         return total_size;
