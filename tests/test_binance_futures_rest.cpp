@@ -296,6 +296,74 @@ void test_parse_type_mismatch() {
     std::cout << "✓ test_parse_type_mismatch\n";
 }
 
+void test_parse_empty_array() {
+    std::string json = "[]";
+
+    std::vector<FundingRate> history = BinanceFuturesRest::parse_funding_rate_history_json(json);
+    assert(history.empty());
+
+    std::vector<OpenInterest> oi_history = BinanceFuturesRest::parse_open_interest_history_json(json);
+    assert(oi_history.empty());
+
+    std::vector<Kline> klines = BinanceFuturesRest::parse_klines_json(json);
+    assert(klines.empty());
+
+    std::cout << "✓ test_parse_empty_array\n";
+}
+
+void test_parse_klines_malformed_array() {
+    // Array with insufficient elements (need 11, has 5)
+    std::string json = R"([
+        [1700000000000, "42.00", "42.15", "41.99", "42.10"]
+    ])";
+
+    std::vector<Kline> klines = BinanceFuturesRest::parse_klines_json(json);
+    assert(klines.empty()); // Should skip malformed entries
+
+    std::cout << "✓ test_parse_klines_malformed_array\n";
+}
+
+void test_parse_invalid_string_to_double() {
+    // Invalid number string
+    std::string json = R"({
+        "symbol": "BTCUSDT",
+        "markPrice": "invalid_number"
+    })";
+
+    FundingRate fr = BinanceFuturesRest::parse_funding_rate_json(json);
+    assert(fr.symbol == "BTCUSDT");
+    assert(fr.mark_price == 0.0); // Should default to 0.0 on parse error
+
+    std::cout << "✓ test_parse_invalid_string_to_double\n";
+}
+
+void test_parse_klines_numeric_fields() {
+    // Test with numeric price fields instead of strings
+    std::string json = R"([
+        [
+            1700000000000,
+            42.00,
+            42.15,
+            41.99,
+            42.10,
+            10.5,
+            1700000060000,
+            441.525,
+            100,
+            5.2,
+            218.3725,
+            0
+        ]
+    ])";
+
+    std::vector<Kline> klines = BinanceFuturesRest::parse_klines_json(json);
+    assert(klines.size() == 1);
+    assert(klines[0].open == 420000);
+    assert(std::abs(klines[0].volume - 10.5) < 0.01);
+
+    std::cout << "✓ test_parse_klines_numeric_fields\n";
+}
+
 // ============================================================================
 // Main
 // ============================================================================
@@ -323,6 +391,10 @@ int main() {
     test_parse_malformed_json();
     test_parse_missing_fields();
     test_parse_type_mismatch();
+    test_parse_empty_array();
+    test_parse_klines_malformed_array();
+    test_parse_invalid_string_to_double();
+    test_parse_klines_numeric_fields();
 
     std::cout << "\n✅ All Binance futures REST tests passed!\n";
     return 0;

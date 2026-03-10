@@ -54,20 +54,20 @@ public:
     static constexpr const char* PERIOD_12h = "12h";
     static constexpr const char* PERIOD_1d = "1d";
 
-    explicit BinanceFuturesRest(bool use_testnet = false) : base_url_(use_testnet ? TESTNET : MAINNET), curl_(nullptr) {
+    explicit BinanceFuturesRest(bool use_testnet = false) : base_url_(use_testnet ? TESTNET : MAINNET), curl_(nullptr) { // LCOV_EXCL_START - Network I/O: libcurl initialization
         curl_global_init(CURL_GLOBAL_DEFAULT);
         curl_ = curl_easy_init();
         if (!curl_) {
             throw std::runtime_error("Failed to initialize CURL");
         }
-    }
+    } // LCOV_EXCL_STOP
 
-    ~BinanceFuturesRest() {
+    ~BinanceFuturesRest() { // LCOV_EXCL_START - Network I/O: libcurl cleanup
         if (curl_) {
             curl_easy_cleanup(curl_);
         }
         curl_global_cleanup();
-    }
+    } // LCOV_EXCL_STOP
 
     // Non-copyable
     BinanceFuturesRest(const BinanceFuturesRest&) = delete;
@@ -76,66 +76,66 @@ public:
     /**
      * Fetch current funding rate
      */
-    FundingRate fetch_funding_rate(const std::string& symbol) {
+    FundingRate fetch_funding_rate(const std::string& symbol) { // LCOV_EXCL_START - Network I/O: HTTP request
         std::string url = base_url_ + build_funding_rate_url(symbol);
         std::string response = http_get(url);
         return parse_funding_rate_json(response);
-    }
+    } // LCOV_EXCL_STOP
 
     /**
      * Fetch funding rate history
      */
     std::vector<FundingRate> fetch_funding_rate_history(const std::string& symbol, Timestamp start_time = 0,
-                                                        Timestamp end_time = 0, int limit = 100) {
+                                                        Timestamp end_time = 0, int limit = 100) { // LCOV_EXCL_START - Network I/O: HTTP request
         std::string url = base_url_ + build_funding_rate_history_url(symbol, start_time, end_time, limit);
         std::string response = http_get(url);
         return parse_funding_rate_history_json(response);
-    }
+    } // LCOV_EXCL_STOP
 
     /**
      * Fetch current open interest
      */
-    OpenInterest fetch_open_interest(const std::string& symbol) {
+    OpenInterest fetch_open_interest(const std::string& symbol) { // LCOV_EXCL_START - Network I/O: HTTP request
         std::string url = base_url_ + build_open_interest_url(symbol);
         std::string response = http_get(url);
         return parse_open_interest_json(response);
-    }
+    } // LCOV_EXCL_STOP
 
     /**
      * Fetch open interest history
      */
     std::vector<OpenInterest> fetch_open_interest_history(const std::string& symbol, const std::string& period = "5m",
                                                           Timestamp start_time = 0, Timestamp end_time = 0,
-                                                          int limit = 30) {
+                                                          int limit = 30) { // LCOV_EXCL_START - Network I/O: HTTP request
         std::string url = base_url_ + build_open_interest_history_url(symbol, period, start_time, end_time, limit);
         std::string response = http_get(url);
         return parse_open_interest_history_json(response);
-    }
+    } // LCOV_EXCL_STOP
 
     /**
      * Fetch mark price
      */
-    MarkPriceUpdate fetch_mark_price(const std::string& symbol) {
+    MarkPriceUpdate fetch_mark_price(const std::string& symbol) { // LCOV_EXCL_START - Network I/O: HTTP request
         std::string url = base_url_ + build_mark_price_url(symbol);
         std::string response = http_get(url);
         return parse_mark_price_json(response);
-    }
+    } // LCOV_EXCL_STOP
 
     /**
      * Fetch klines (candlestick data)
      */
     std::vector<Kline> fetch_klines(const std::string& symbol, const std::string& interval, Timestamp start_time = 0,
-                                    Timestamp end_time = 0, int limit = 500) {
+                                    Timestamp end_time = 0, int limit = 500) { // LCOV_EXCL_START - Network I/O: HTTP request
         std::string url = base_url_ + build_klines_url(symbol, interval, start_time, end_time, limit);
         std::string response = http_get(url);
         return parse_klines_json(response);
-    }
+    } // LCOV_EXCL_STOP
 
     /**
      * Fetch all klines in a time range (handles pagination)
      */
     std::vector<Kline> fetch_klines_range(const std::string& symbol, const std::string& interval, Timestamp start_time,
-                                          Timestamp end_time) {
+                                          Timestamp end_time) { // LCOV_EXCL_START - Network I/O: HTTP request with pagination
         std::vector<Kline> all_klines;
         Timestamp current_start = start_time;
         const int limit = 1000; // Max per request
@@ -158,7 +158,7 @@ public:
         }
 
         return all_klines;
-    }
+    } // LCOV_EXCL_STOP
 
     // ========================================
     // Static URL Builders (for testing)
@@ -335,14 +335,14 @@ private:
     CURL* curl_;
 
     // CURL write callback
-    static size_t write_callback(void* contents, size_t size, size_t nmemb, std::string* output) {
+    static size_t write_callback(void* contents, size_t size, size_t nmemb, std::string* output) { // LCOV_EXCL_START - Network I/O: libcurl callback
         size_t total_size = size * nmemb;
         output->append(static_cast<char*>(contents), total_size);
         return total_size;
-    }
+    } // LCOV_EXCL_STOP
 
     // HTTP GET request
-    std::string http_get(const std::string& url) {
+    std::string http_get(const std::string& url) { // LCOV_EXCL_START - Network I/O: libcurl HTTP request
         std::string response;
 
         curl_easy_setopt(curl_, CURLOPT_URL, url.c_str());
@@ -370,7 +370,7 @@ private:
         }
 
         return response;
-    }
+    } // LCOV_EXCL_STOP
 
     // Parse double field (handles both string and number types)
     static double parse_double_field(const json& obj, const std::string& key) {
