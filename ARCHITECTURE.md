@@ -1021,14 +1021,22 @@ flowchart TD
 **100% line coverage required** (strict):
 - Tool: lcov + gcov
 - Exclusions: `/usr/*`, `*/external/*`, `*/tests/*`
-- Unreachable error paths: Mark with `LCOV_EXCL_LINE`
 
-Example:
-```cpp
-if (unlikely_error_condition) { // LCOV_EXCL_LINE
-    handle_unreachable_error(); // LCOV_EXCL_LINE
-} // LCOV_EXCL_LINE
-```
+### Coverage Policy
+
+**Source Code Annotations: FORBIDDEN**
+- `LCOV_EXCL_LINE`, `LCOV_EXCL_START`, `LCOV_EXCL_STOP` in source code: **NEVER**
+- All production code must have real test coverage
+- Use inheritance-based mocks or template policy for testability
+
+**lcov Filter (Tool Config): ALLOWED**
+- `lcov --remove` patterns in CI/pre-commit: **ALLOWED**
+- Only for:
+  - libwebsockets callbacks (untestable without real server)
+  - Third-party library wrappers (network I/O)
+- Pattern example: `*/exchange/*lws*`
+
+**Rationale:** Source code stays clean. Tool config explicitly documents what's excluded and why.
 
 ### Local Development with Docker
 
