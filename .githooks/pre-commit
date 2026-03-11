@@ -54,7 +54,8 @@ BUILD_DIR="build-coverage"
 echo -e "${YELLOW}📦 Configuring CMake with coverage...${NC}"
 cmake -B ${BUILD_DIR} \
     -DCMAKE_BUILD_TYPE=Debug \
-    -DENABLE_COVERAGE=ON \
+    -DCMAKE_CXX_FLAGS="-fprofile-arcs -ftest-coverage" \
+    -DCMAKE_EXE_LINKER_FLAGS="-lgcov" \
     > /dev/null 2>&1
 
 if [ $? -ne 0 ]; then
@@ -92,7 +93,7 @@ if [ $? -ne 0 ]; then
 fi
 
 # Step 5: Filter coverage data
-lcov --remove coverage.info '/usr/*' '*/external/*' '*/tests/*' --output-file coverage_filtered.info > /dev/null 2>&1
+lcov --remove coverage.info '/usr/*' '*/external/*' '*/tests/*' --output-file coverage.info > /dev/null 2>&1
 if [ $? -ne 0 ]; then
     echo -e "${RED}❌ Coverage filter failed!${NC}"
     cd ..
@@ -100,7 +101,7 @@ if [ $? -ne 0 ]; then
 fi
 
 # Step 6: Parse coverage percentages
-COVERAGE_SUMMARY=$(lcov --summary coverage_filtered.info 2>&1)
+COVERAGE_SUMMARY=$(lcov --summary coverage.info 2>&1)
 
 LINE_COVERAGE=$(echo "$COVERAGE_SUMMARY" | grep "lines" | awk '{print $2}' | sed 's/%//')
 FUNCTION_COVERAGE=$(echo "$COVERAGE_SUMMARY" | grep "functions" | awk '{print $2}' | sed 's/%//')
@@ -116,6 +117,7 @@ PASS=true
 
 if (( $(echo "$LINE_COVERAGE < 100.0" | bc -l) )); then
     echo -e "${RED}❌ Line coverage ${LINE_COVERAGE}% is below 100% threshold${NC}"
+    echo -e "${YELLOW}Use LCOV_EXCL_LINE for unreachable error paths if needed${NC}"
     PASS=false
 fi
 
@@ -129,18 +131,18 @@ if [ "$PASS" = false ]; then
     echo ""
 
     cd ${BUILD_DIR}
-    lcov --list coverage_filtered.info | grep -v "100.0%" | grep "%" | head -20
+    lcov --list coverage.info | grep -v "100.0%" | grep "%" | head -20
     cd ..
 
     echo ""
     echo -e "${YELLOW}💡 To see detailed coverage report:${NC}"
     echo -e "   cd ${BUILD_DIR}"
-    echo -e "   genhtml coverage_filtered.info --output-directory coverage_html"
+    echo -e "   genhtml coverage.info --output-directory coverage_html"
     echo -e "   open coverage_html/index.html"
     echo ""
 
     # Cleanup
-    rm -f ${BUILD_DIR}/coverage.info ${BUILD_DIR}/coverage_filtered.info
+    rm -f ${BUILD_DIR}/coverage.info
 
     exit 1
 fi
@@ -151,6 +153,6 @@ echo -e "${GREEN}✅ Coverage check passed: ${LINE_COVERAGE}% line coverage${NC}
 echo ""
 
 # Cleanup
-rm -f ${BUILD_DIR}/coverage.info ${BUILD_DIR}/coverage_filtered.info
+rm -f ${BUILD_DIR}/coverage.info
 
 exit 0
