@@ -58,7 +58,7 @@ jobs:
           echo "Coverage: ${COVERAGE}%"
           if (( $(echo "$COVERAGE < 100.0" | bc -l) )); then
             echo "ERROR: Coverage ${COVERAGE}% is below 100% threshold"
-            echo "Use LCOV_EXCL_LINE for unreachable error paths if needed"
+            echo "Add real tests for uncovered code paths - LCOV_EXCL markers are forbidden in source code"
             exit 1
           fi
           echo "Coverage requirement met: ${COVERAGE}%"

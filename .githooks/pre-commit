@@ -41,8 +41,14 @@ if [ ! -z "$STAGED_FILES" ]; then
 fi
 
 # ============================================================================
-# PART 2: Enforce 100% code coverage
+# PART 2: Enforce 100% code coverage (only if C++ files are staged)
 # ============================================================================
+
+# Skip coverage check if no C++ files are staged (docs-only commits)
+if [ -z "$STAGED_FILES" ]; then
+    echo -e "${GREEN}✅ No C++ files staged - skipping coverage check${NC}"
+    exit 0
+fi
 
 echo ""
 echo -e "${YELLOW}🔍 Running pre-commit coverage check...${NC}"
@@ -117,7 +123,7 @@ PASS=true
 
 if (( $(echo "$LINE_COVERAGE < 100.0" | bc -l) )); then
     echo -e "${RED}❌ Line coverage ${LINE_COVERAGE}% is below 100% threshold${NC}"
-    echo -e "${YELLOW}Use LCOV_EXCL_LINE for unreachable error paths if needed${NC}"
+    echo -e "${YELLOW}Add real tests for uncovered code paths - LCOV_EXCL markers are forbidden${NC}"
     PASS=false
 fi
 
