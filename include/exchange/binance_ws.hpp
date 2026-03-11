@@ -135,7 +135,7 @@ public:
         : host_(use_testnet ? TESTNET_WS : MAINNET_WS), port_(use_testnet ? TESTNET_PORT : MAINNET_PORT),
           running_(false), connected_(false), wsi_(nullptr), context_(nullptr) {}
 
-    ~BinanceWs() { disconnect(); }
+    virtual ~BinanceWs() { disconnect(); }
 
     // Non-copyable
     BinanceWs(const BinanceWs&) = delete;
@@ -185,21 +185,24 @@ public:
     // Connection Management
     // ========================================
 
-    bool connect() {
-        if (streams_.empty()) {
-            if (error_callback_) {
-                error_callback_("No streams subscribed");
-            }
+    // LCOV_EXCL_START - Network I/O: entire method (mocked in tests)
+    virtual bool connect() {
+        if (!validate_streams()) {
             return false;
         }
 
+        // Real mode: spawn event loop thread
         running_ = true;
         ws_thread_ = std::thread(&BinanceWs::run_event_loop, this);
         return true;
     }
+    // LCOV_EXCL_STOP
 
-    void disconnect() {
+    virtual void disconnect() {
         running_ = false;
+
+        // LCOV_EXCL_START - Network I/O: real mode cleanup (mocked in tests)
+        // Real mode: join thread and cleanup libwebsockets
         if (ws_thread_.joinable()) {
             ws_thread_.join();
         }
@@ -207,6 +210,7 @@ public:
             lws_context_destroy(context_);
             context_ = nullptr;
         }
+        // LCOV_EXCL_STOP
         connected_ = false;
     }
 
@@ -278,6 +282,27 @@ public:
     }
 
     /**
+     * Build WebSocket stream path from subscribed streams.
+     * Single stream: /ws/btcusdt@bookTicker
+     * Multiple streams: /stream?streams=btcusdt@bookTicker/ethusdt@trade
+     *
+     * Public for testing.
+     */
+    static std::string build_stream_path(const std::vector<std::string>& streams) {
+        if (streams.size() == 1) {
+            return "/ws/" + streams[0];
+        }
+
+        std::string path = "/stream?streams=";
+        for (size_t i = 0; i < streams.size(); ++i) {
+            if (i > 0)
+                path += "/";
+            path += streams[i];
+        }
+        return path;
+    }
+
+    /**
      * Parse price/qty pairs from JSON array string.
      * Format: ["42000.50","1.5"],["41999.00","3.2"]
      *
@@ -319,22 +344,37 @@ public:
         return count;
     }
 
-private:
-    std::string host_;
-    int port_;
-    std::vector<std::string> streams_;
+protected:
+    // Validate streams before connecting - used by both base and mock
+    bool validate_streams() {
+        if (streams_.empty()) {
+            if (error_callback_) {
+                error_callback_("No streams subscribed");
+            }
+            return false;
+        }
+        return true;
+    }
 
+    // Protected helpers for mocks to trigger callbacks
+    void trigger_error(const std::string& error) {
+        if (error_callback_) {
+            error_callback_(error);
+        }
+    }
+
+    void trigger_connect(bool connected) {
+        if (connect_callback_) {
+            connect_callback_(connected);
+        }
+    }
+
+    // Allow mocks to access these for testing
     std::atomic<bool> running_;
     std::atomic<bool> connected_;
-    std::atomic<bool> auto_reconnect_{false};
-    std::atomic<bool> reconnect_requested_{false};
-    std::atomic<std::chrono::steady_clock::time_point> last_data_time_{std::chrono::steady_clock::now()};
-    std::thread ws_thread_;
+    std::vector<std::string> streams_;
 
-    struct lws* wsi_;
-    struct lws_context* context_;
-
-    // Callbacks
+    // Callbacks (allow mocks to trigger them)
     BookTickerCallback book_ticker_callback_;
     WsTradeCallback trade_callback_;
     WsKlineCallback kline_callback_;
@@ -343,34 +383,7 @@ private:
     WsConnectCallback connect_callback_;
     WsReconnectCallback reconnect_callback_;
 
-    // Receive buffer
-    std::string rx_buffer_;
-    std::mutex rx_mutex_;
-
-    static std::string to_lower(const std::string& s) {
-        std::string result = s;
-        for (char& c : result) {
-            c = std::tolower(c);
-        }
-        return result;
-    }
-
-    // Build combined stream path
-    std::string build_stream_path() {
-        if (streams_.size() == 1) {
-            return "/ws/" + streams_[0];
-        }
-
-        std::string path = "/stream?streams=";
-        for (size_t i = 0; i < streams_.size(); ++i) {
-            if (i > 0)
-                path += "/";
-            path += streams_[i];
-        }
-        return path;
-    }
-
-    // Parse incoming JSON message
+    // Parse incoming JSON message - allow mocks to use it
     void parse_message(const std::string& json) {
         // Update last data time for health monitoring
         last_data_time_.store(std::chrono::steady_clock::now());
@@ -400,13 +413,15 @@ private:
             }
         }
 
-        // Determine message type and parse
-        if (stream_name.find("@bookTicker") != std::string::npos || data_json.find("\"b\":") != std::string::npos) {
-            parse_book_ticker(data_json);
-        } else if (stream_name.find("@trade") != std::string::npos || data_json.find("\"T\":") != std::string::npos) {
-            parse_trade(data_json);
-        } else if (stream_name.find("@kline") != std::string::npos || data_json.find("\"k\":") != std::string::npos) {
+        // Determine message type and parse (order matters: check most specific first)
+        if (stream_name.find("@kline") != std::string::npos || data_json.find("\"k\":") != std::string::npos) {
             parse_kline(data_json);
+        } else if (stream_name.find("@bookTicker") != std::string::npos ||
+                   (data_json.find("\"b\":") != std::string::npos && data_json.find("\"a\":") != std::string::npos)) {
+            parse_book_ticker(data_json);
+        } else if (stream_name.find("@trade") != std::string::npos ||
+                   (data_json.find("\"t\":") != std::string::npos && data_json.find("\"p\":") != std::string::npos)) {
+            parse_trade(data_json);
         } else if (stream_name.find("@depth") != std::string::npos || data_json.find("\"bids\"") != std::string::npos) {
             // Extract symbol from stream name (e.g., "btcusdt@depth20@100ms")
             std::string symbol = stream_name.substr(0, stream_name.find('@'));
@@ -415,6 +430,36 @@ private:
             parse_depth(data_json, symbol);
         }
     }
+
+private:
+    std::string host_;
+    int port_;
+
+    std::atomic<bool> auto_reconnect_{false};
+    std::atomic<bool> reconnect_requested_{false};
+    std::atomic<std::chrono::steady_clock::time_point> last_data_time_{std::chrono::steady_clock::now()};
+    std::thread ws_thread_;
+
+    struct lws* wsi_;
+    struct lws_context* context_;
+
+    // Receive buffer
+    std::string rx_buffer_;
+    std::mutex rx_mutex_;
+
+    static std::string to_lower(const std::string& s) {
+        std::string result = s;
+        for (char& c : result) {
+            c = std::tolower(c);
+        }
+        return result;
+    }
+
+    // Build combined stream path (calls static version)
+    std::string
+    build_stream_path_internal() const {    // LCOV_EXCL_LINE - Network I/O: only called from real mode run_event_loop
+        return build_stream_path(streams_); // LCOV_EXCL_LINE
+    }                                       // LCOV_EXCL_LINE
 
     // Parse book ticker: {"u":123,"s":"BTCUSDT","b":"50000.00","B":"1.5","a":"50001.00","A":"2.0"}
     void parse_book_ticker(const std::string& json) {
@@ -497,7 +542,8 @@ private:
             // Find outer closing ]] - nested array end
             size_t end = json.find("]]", start);
             if (end != std::string::npos) {
-                std::string bids_json = json.substr(start, end - start);
+                // Extract array contents: [["level1"],["level2"]]
+                std::string bids_json = json.substr(start, end - start + 1);
                 depth.bid_count = parse_levels(bids_json, depth.bids);
             }
         }
@@ -509,7 +555,8 @@ private:
             // Find outer closing ]] - nested array end
             size_t end = json.find("]]", start);
             if (end != std::string::npos) {
-                std::string asks_json = json.substr(start, end - start);
+                // Extract array contents: [["level1"],["level2"]]
+                std::string asks_json = json.substr(start, end - start + 1);
                 depth.ask_count = parse_levels(asks_json, depth.asks);
             }
         }
@@ -553,8 +600,8 @@ private:
 
         size_t start = pos + search.length();
         size_t end = json.find_first_of(",}", start);
-        if (end == std::string::npos)
-            return 0.0;
+        if (end == std::string::npos) // LCOV_EXCL_LINE - Defensive: routing validates JSON structure
+            return 0.0;               // LCOV_EXCL_LINE
 
         return std::stod(json.substr(start, end - start));
     }
@@ -567,8 +614,8 @@ private:
 
         size_t start = pos + search.length();
         size_t end = json.find_first_of(",}", start);
-        if (end == std::string::npos)
-            return 0;
+        if (end == std::string::npos) // LCOV_EXCL_LINE - Defensive: routing validates JSON structure
+            return 0;                 // LCOV_EXCL_LINE
 
         return std::stoull(json.substr(start, end - start));
     }
@@ -591,6 +638,7 @@ private:
     static constexpr int LWS_CLIENT_RECEIVE_COMPAT = LWS_CALLBACK_CLIENT_RECEIVE;
 #endif
 
+    // LCOV_EXCL_START - Network I/O: libwebsockets callback
     static int ws_callback(struct lws* wsi, enum lws_callback_reasons reason, void* user, void* in, size_t len) {
         BinanceWs* self = static_cast<BinanceWs*>(lws_context_user(lws_get_context(wsi)));
 
@@ -635,8 +683,9 @@ private:
         }
 
         return 0;
-    }
+    } // LCOV_EXCL_STOP
 
+    // LCOV_EXCL_START - Network I/O: libwebsockets event loop
     // Event loop thread
     void run_event_loop() {
         // Create context
@@ -670,7 +719,7 @@ private:
         struct lws_client_connect_info ccinfo;
         memset(&ccinfo, 0, sizeof(ccinfo));
 
-        std::string path = build_stream_path();
+        std::string path = build_stream_path_internal();
 
         ccinfo.context = context_;
         ccinfo.address = host_.c_str();
@@ -733,7 +782,7 @@ private:
                 retry_count = 0;
             }
         }
-    }
+    } // LCOV_EXCL_STOP
 };
 
 } // namespace exchange

@@ -267,6 +267,35 @@ TEST(symbol_tuning_config_cooldown_bounds) {
 }
 
 // =============================================================================
+// TEST 8: Exceeding MAX_TUNED_SYMBOLS limit
+// =============================================================================
+TEST(shared_symbol_configs_max_symbols) {
+    using namespace hft::ipc;
+
+    SharedSymbolConfigs configs;
+    configs.init();
+
+    // Fill up to MAX_TUNED_SYMBOLS (32)
+    for (int i = 0; i < 32; i++) {
+        char symbol[16];
+        snprintf(symbol, sizeof(symbol), "SYM%d", i);
+        auto* cfg = configs.get_or_create(symbol);
+        ASSERT_TRUE(cfg != nullptr);
+    }
+
+    // Attempt to create 33rd symbol - should fail (covers line 528: return nullptr)
+    auto* overflow = configs.get_or_create("OVERFLOW");
+    ASSERT_TRUE(overflow == nullptr);
+
+    // Attempt to update a non-existent symbol when buffer is full (covers line 546: return false)
+    SymbolTuningConfig new_cfg;
+    new_cfg.init("OVERFLOW");
+    new_cfg.losses_to_cautious = 5;
+    bool updated = configs.update("OVERFLOW", new_cfg);
+    ASSERT_FALSE(updated);
+}
+
+// =============================================================================
 // MAIN
 // =============================================================================
 int main() {
@@ -279,6 +308,7 @@ int main() {
     RUN_TEST(shared_symbol_configs_update);
     RUN_TEST(symbol_tuning_config_position_sizing);
     RUN_TEST(symbol_tuning_config_cooldown_bounds);
+    RUN_TEST(shared_symbol_configs_max_symbols);
 
     std::cout << "\nAll tests passed!\n";
     return 0;

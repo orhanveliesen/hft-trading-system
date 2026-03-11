@@ -84,6 +84,11 @@
 #include "../include/execution/trading_engine.hpp"
 #include "../include/ipc/shared_metrics_snapshot.hpp"
 
+// Phase 5.1: Futures Trading
+#include "../include/core/futures_evaluator.hpp"
+#include "../include/execution/funding_scheduler.hpp"
+#include "../include/execution/futures_position.hpp"
+
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -1647,6 +1652,12 @@ int run(const CLIArgs& args) {
     // Initialize SpotEngine with paper adapter (production TBD)
     execution::SpotEngine spot_engine(nullptr); // Will be wired after app.paper_adapter_ is ready
 
+    // Initialize FuturesEngine with paper adapter (production TBD)
+    execution::FuturesEngine futures_engine(nullptr); // Will be wired after app.paper_adapter_ is ready
+
+    // Initialize FuturesPosition tracker
+    execution::FuturesPosition futures_positions;
+
     // Initialize LimitManager
     execution::LimitManager limit_manager(&event_bus, &spot_engine);
 
@@ -1696,6 +1707,9 @@ int run(const CLIArgs& args) {
 
     // 2. Create StrategyEvaluator (will be wired after app is fully initialized)
     std::unique_ptr<hft::core::StrategyEvaluator> strategy_evaluator_ptr;
+
+    // FuturesEvaluator will be created after app is fully initialized
+    std::unique_ptr<hft::core::FuturesEvaluator> futures_evaluator_ptr;
 
     // 3. Set near-zero thresholds (trigger on almost every real change)
     hft::core::MetricsThresholds thresholds;
@@ -1901,12 +1915,24 @@ int run(const CLIArgs& args) {
         std::cout << "[PHASE 5.0] SpotEngine wired with PaperExchangeAdapter\n";
     }
 
+    // 1b. Wire FuturesEngine with paper_adapter
+    if constexpr (std::is_same_v<OrderSender, PaperOrderSender>) {
+        futures_engine.set_exchange(app.get_paper_adapter());
+        // Note: Futures don't need position callback (no spot-style position checks)
+        std::cout << "[PHASE 5.1] FuturesEngine wired with PaperExchangeAdapter\n";
+    }
+
     // 2. Create StrategyEvaluator with cooldown (default 2000ms)
     strategy_evaluator_ptr = std::make_unique<hft::core::StrategyEvaluator>(
         &event_bus, &metrics_manager, &limit_manager, &app.strategy_selector(),
         hft::core::StrategyEvaluator::DEFAULT_COOLDOWN_NS);
 
-    // 3. Set MetricsManager change callback → StrategyEvaluator
+    // 2b. Create FuturesEvaluator
+    futures_evaluator_ptr =
+        std::make_unique<hft::core::FuturesEvaluator>(&event_bus, &metrics_manager, &futures_positions);
+    std::cout << "[PHASE 5.1] FuturesEvaluator created\n";
+
+    // 3. Set MetricsManager change callback → StrategyEvaluator + FuturesEvaluator
     metrics_manager.set_change_callback([&](Symbol id) {
         // Check if symbol is active and can trade
         if (!app.can_evaluate_symbol(id))
@@ -1926,8 +1952,13 @@ int run(const CLIArgs& args) {
         // Get position from portfolio
         StrategyPosition position = app.get_strategy_position(id);
 
-        // Evaluate strategy
+        // Evaluate spot strategy
         strategy_evaluator_ptr->evaluate(id, market, position);
+
+        // Evaluate futures modes (NEW)
+        if (futures_evaluator_ptr) {
+            futures_evaluator_ptr->evaluate(id, market, position);
+        }
     });
 
     // 4. Set up EventBus subscribers for action events
@@ -2018,9 +2049,91 @@ int run(const CLIArgs& args) {
 
     // LimitCancelEvent handled by LimitManager constructor subscription
 
+    // Phase 5.1: Futures event subscribers
+    event_bus.subscribe<hft::core::FuturesBuyEvent>([&](const hft::core::FuturesBuyEvent& e) {
+        execution::OrderRequest req;
+        req.symbol = e.symbol;
+        req.side = Side::Buy;
+        req.type = hft::OrderType::Market;
+        req.qty = e.qty;
+        req.venue = execution::Venue::Futures;
+        req.reason = e.reason;
+
+        auto book_metrics = metrics_manager.book(e.symbol);
+        if (!book_metrics)
+            return;
+        auto book_m = book_metrics->get_metrics();
+        MarketSnapshot market{static_cast<Price>(book_m.best_bid * risk::PRICE_SCALE),
+                              static_cast<Price>(book_m.best_ask * risk::PRICE_SCALE)};
+
+        futures_engine.execute(req, market);
+    });
+
+    event_bus.subscribe<hft::core::FuturesSellEvent>([&](const hft::core::FuturesSellEvent& e) {
+        execution::OrderRequest req;
+        req.symbol = e.symbol;
+        req.side = Side::Sell;
+        req.type = hft::OrderType::Market;
+        req.qty = e.qty;
+        req.venue = execution::Venue::Futures;
+        req.reason = e.reason;
+
+        auto book_metrics = metrics_manager.book(e.symbol);
+        if (!book_metrics)
+            return;
+        auto book_m = book_metrics->get_metrics();
+        MarketSnapshot market{static_cast<Price>(book_m.best_bid * risk::PRICE_SCALE),
+                              static_cast<Price>(book_m.best_ask * risk::PRICE_SCALE)};
+
+        futures_engine.execute(req, market);
+    });
+
+    event_bus.subscribe<hft::core::FuturesCloseLongEvent>([&](const hft::core::FuturesCloseLongEvent& e) {
+        // Close long position = Market sell
+        execution::OrderRequest req;
+        req.symbol = e.symbol;
+        req.side = Side::Sell;
+        req.type = hft::OrderType::Market;
+        req.qty = e.qty; // 0 = close all (handled by position tracker)
+        req.venue = execution::Venue::Futures;
+        req.reason = e.reason;
+
+        auto book_metrics = metrics_manager.book(e.symbol);
+        if (!book_metrics)
+            return;
+        auto book_m = book_metrics->get_metrics();
+        MarketSnapshot market{static_cast<Price>(book_m.best_bid * risk::PRICE_SCALE),
+                              static_cast<Price>(book_m.best_ask * risk::PRICE_SCALE)};
+
+        futures_engine.execute(req, market);
+    });
+
+    event_bus.subscribe<hft::core::FuturesCloseShortEvent>([&](const hft::core::FuturesCloseShortEvent& e) {
+        // Close short position = Market buy
+        execution::OrderRequest req;
+        req.symbol = e.symbol;
+        req.side = Side::Buy;
+        req.type = hft::OrderType::Market;
+        req.qty = e.qty; // 0 = close all
+        req.venue = execution::Venue::Futures;
+        req.reason = e.reason;
+
+        auto book_metrics = metrics_manager.book(e.symbol);
+        if (!book_metrics)
+            return;
+        auto book_m = book_metrics->get_metrics();
+        MarketSnapshot market{static_cast<Price>(book_m.best_bid * risk::PRICE_SCALE),
+                              static_cast<Price>(book_m.best_ask * risk::PRICE_SCALE)};
+
+        futures_engine.execute(req, market);
+    });
+
+    std::cout << "[PHASE 5.1] Futures EventBus subscribers wired\n";
+
     std::cout << "[PHASE 5.0] EventBus subscribers wired\n";
-    std::cout << "[PHASE 5.0] Event-driven architecture FULLY WIRED AND ACTIVE\n";
+    std::cout << "[PHASE 5.0+5.1] Event-driven architecture FULLY WIRED AND ACTIVE\n";
     std::cout << "[PHASE 5.0] WS → MetricsManager → Callback → StrategyEvaluator → EventBus → SpotEngine\n";
+    std::cout << "[PHASE 5.1] WS → MetricsManager → Callback → FuturesEvaluator → EventBus → FuturesEngine\n";
 
     auto start = std::chrono::steady_clock::now();
     auto last_heartbeat = start;

@@ -243,6 +243,288 @@ TEST(shared_ledger_fixed_point_accuracy) {
 }
 
 // =============================================================================
+// TEST 7: All conversion helpers
+// =============================================================================
+TEST(shared_ledger_all_conversion_helpers) {
+    using namespace hft::ipc;
+
+    const char* name = "/test_ledger_7";
+    SharedLedger::destroy(name);
+
+    auto* ledger = SharedLedger::create(name);
+    auto* e = ledger->append();
+
+    // Set all fixed-point fields
+    e->commission_x8.store(static_cast<int64_t>(1.23 * LEDGER_FIXED_SCALE));
+    e->cash_before_x8.store(static_cast<int64_t>(10000.0 * LEDGER_FIXED_SCALE));
+    e->cash_after_x8.store(static_cast<int64_t>(9900.0 * LEDGER_FIXED_SCALE));
+    e->cash_expected_x8.store(static_cast<int64_t>(9895.0 * LEDGER_FIXED_SCALE));
+    e->trade_value_x8.store(static_cast<int64_t>(100.0 * LEDGER_FIXED_SCALE));
+    e->expected_cash_change_x8.store(static_cast<int64_t>(-105.0 * LEDGER_FIXED_SCALE));
+    e->avg_entry_x8.store(static_cast<int64_t>(50.0 * LEDGER_FIXED_SCALE));
+    e->pnl_per_unit_x8.store(static_cast<int64_t>(2.5 * LEDGER_FIXED_SCALE));
+    e->expected_pnl_x8.store(static_cast<int64_t>(5.0 * LEDGER_FIXED_SCALE));
+    e->position_qty_x8.store(static_cast<int64_t>(10.0 * LEDGER_FIXED_SCALE));
+    e->position_avg_x8.store(static_cast<int64_t>(52.5 * LEDGER_FIXED_SCALE));
+    e->running_realized_pnl_x8.store(static_cast<int64_t>(123.45 * LEDGER_FIXED_SCALE));
+    e->running_commission_x8.store(static_cast<int64_t>(6.78 * LEDGER_FIXED_SCALE));
+
+    // Test all conversion helpers
+    ASSERT_NEAR(e->commission(), 1.23, 0.01);
+    ASSERT_NEAR(e->cash_before(), 10000.0, 0.01);
+    ASSERT_NEAR(e->cash_after(), 9900.0, 0.01);
+    ASSERT_NEAR(e->cash_expected(), 9895.0, 0.01);
+    ASSERT_NEAR(e->trade_value(), 100.0, 0.01);
+    ASSERT_NEAR(e->expected_cash_change(), -105.0, 0.01);
+    ASSERT_NEAR(e->avg_entry(), 50.0, 0.01);
+    ASSERT_NEAR(e->pnl_per_unit(), 2.5, 0.01);
+    ASSERT_NEAR(e->expected_pnl(), 5.0, 0.01);
+    ASSERT_NEAR(e->position_qty(), 10.0, 0.01);
+    ASSERT_NEAR(e->position_avg(), 52.5, 0.01);
+    ASSERT_NEAR(e->running_realized_pnl(), 123.45, 0.01);
+    ASSERT_NEAR(e->running_commission(), 6.78, 0.01);
+
+    // Test discrepancy helpers
+    ASSERT_NEAR(e->cash_discrepancy(), 5.0, 0.01); // 9900 - 9895
+    ASSERT_NEAR(e->pnl_discrepancy(), -5.0, 0.01); // 0 - 5 (realized_pnl not set)
+
+    SharedLedger::unmap(ledger);
+    SharedLedger::destroy(name);
+}
+
+// =============================================================================
+// TEST 8: Edge cases - empty ledger queries
+// =============================================================================
+TEST(shared_ledger_empty_queries) {
+    using namespace hft::ipc;
+
+    const char* name = "/test_ledger_8";
+    SharedLedger::destroy(name);
+
+    auto* ledger = SharedLedger::create(name);
+
+    // Query empty ledger
+    ASSERT_EQ(ledger->count(), 0u);
+    ASSERT_TRUE(ledger->first() == nullptr);
+    ASSERT_TRUE(ledger->last() == nullptr);
+    ASSERT_TRUE(ledger->entry(0) == nullptr);
+    ASSERT_TRUE(ledger->entry(100) == nullptr);
+    ASSERT_EQ(ledger->check_mismatches(), 0u);
+
+    SharedLedger::unmap(ledger);
+    SharedLedger::destroy(name);
+}
+
+// =============================================================================
+// TEST 9: Out-of-bounds entry access
+// =============================================================================
+TEST(shared_ledger_out_of_bounds) {
+    using namespace hft::ipc;
+
+    const char* name = "/test_ledger_9";
+    SharedLedger::destroy(name);
+
+    auto* ledger = SharedLedger::create(name);
+
+    // Add 3 entries
+    for (int i = 0; i < 3; i++) {
+        ledger->append();
+    }
+
+    ASSERT_EQ(ledger->count(), 3u);
+    ASSERT_TRUE(ledger->entry(0) != nullptr);
+    ASSERT_TRUE(ledger->entry(2) != nullptr);
+
+    // Out of bounds
+    ASSERT_TRUE(ledger->entry(3) == nullptr);
+    ASSERT_TRUE(ledger->entry(100) == nullptr);
+
+    SharedLedger::unmap(ledger);
+    SharedLedger::destroy(name);
+}
+
+// =============================================================================
+// TEST 10: record_mismatch increments counter
+// =============================================================================
+TEST(shared_ledger_record_mismatch) {
+    using namespace hft::ipc;
+
+    const char* name = "/test_ledger_10";
+    SharedLedger::destroy(name);
+
+    auto* ledger = SharedLedger::create(name);
+
+    ASSERT_EQ(ledger->mismatch_count.load(), 0u);
+
+    ledger->record_mismatch();
+    ASSERT_EQ(ledger->mismatch_count.load(), 1u);
+
+    ledger->record_mismatch();
+    ledger->record_mismatch();
+    ASSERT_EQ(ledger->mismatch_count.load(), 3u);
+
+    SharedLedger::unmap(ledger);
+    SharedLedger::destroy(name);
+}
+
+// =============================================================================
+// TEST 11: open_rw allows read-write access
+// =============================================================================
+TEST(shared_ledger_open_rw) {
+    using namespace hft::ipc;
+
+    const char* name = "/test_ledger_11";
+    SharedLedger::destroy(name);
+
+    // Create initial ledger
+    auto* writer = SharedLedger::create(name);
+    auto* e = writer->append();
+    e->price_x8.store(static_cast<int64_t>(100.0 * LEDGER_FIXED_SCALE));
+    SharedLedger::unmap(writer);
+
+    // Open with read-write
+    auto* rw = SharedLedger::open_rw(name);
+    ASSERT_TRUE(rw != nullptr);
+    ASSERT_TRUE(rw->is_valid());
+    ASSERT_EQ(rw->count(), 1u);
+
+    // Verify can read
+    auto* re = rw->entry(0);
+    ASSERT_NEAR(re->price(), 100.0, 0.01);
+
+    // Verify can write
+    auto* e2 = rw->append();
+    e2->price_x8.store(static_cast<int64_t>(200.0 * LEDGER_FIXED_SCALE));
+    ASSERT_EQ(rw->count(), 2u);
+
+    SharedLedger::unmap(rw);
+    SharedLedger::destroy(name);
+}
+
+// =============================================================================
+// TEST 12: open_rw returns nullptr for invalid ledger
+// =============================================================================
+TEST(shared_ledger_open_rw_invalid) {
+    using namespace hft::ipc;
+
+    const char* name = "/test_ledger_12";
+    SharedLedger::destroy(name);
+
+    // Create ledger with wrong magic
+    auto* ledger = SharedLedger::create(name);
+    ledger->magic = 0xDEADBEEF; // Corrupt magic
+    SharedLedger::unmap(ledger);
+
+    // open_rw should return nullptr
+    auto* rw = SharedLedger::open_rw(name);
+    ASSERT_TRUE(rw == nullptr);
+
+    SharedLedger::destroy(name);
+}
+
+// =============================================================================
+// TEST 13: open returns nullptr for invalid ledger
+// =============================================================================
+TEST(shared_ledger_open_invalid) {
+    using namespace hft::ipc;
+
+    const char* name = "/test_ledger_13";
+    SharedLedger::destroy(name);
+
+    // Create ledger with wrong magic
+    auto* ledger = SharedLedger::create(name);
+    ledger->magic = 0xDEADBEEF; // Corrupt magic
+    SharedLedger::unmap(ledger);
+
+    // open should return nullptr
+    auto* reader = SharedLedger::open(name);
+    ASSERT_TRUE(reader == nullptr);
+
+    SharedLedger::destroy(name);
+}
+
+// =============================================================================
+// TEST 14: open returns nullptr for non-existent ledger
+// =============================================================================
+TEST(shared_ledger_open_nonexistent) {
+    using namespace hft::ipc;
+
+    const char* name = "/test_ledger_nonexist";
+    SharedLedger::destroy(name);
+
+    auto* ledger = SharedLedger::open(name);
+    ASSERT_TRUE(ledger == nullptr);
+}
+
+// =============================================================================
+// TEST 15: open_rw returns nullptr for non-existent ledger
+// =============================================================================
+TEST(shared_ledger_open_rw_nonexistent) {
+    using namespace hft::ipc;
+
+    const char* name = "/test_ledger_rw_nonexist";
+    SharedLedger::destroy(name);
+
+    auto* ledger = SharedLedger::open_rw(name);
+    ASSERT_TRUE(ledger == nullptr);
+}
+
+// =============================================================================
+// TEST 16: total_entries tracks all writes including wraparound
+// =============================================================================
+TEST(shared_ledger_total_entries_tracking) {
+    using namespace hft::ipc;
+
+    const char* name = "/test_ledger_16";
+    SharedLedger::destroy(name);
+
+    auto* ledger = SharedLedger::create(name);
+
+    ASSERT_EQ(ledger->total_entries.load(), 0u);
+
+    // Add 10 entries
+    for (int i = 0; i < 10; i++) {
+        ledger->append();
+    }
+
+    ASSERT_EQ(ledger->total_entries.load(), 10u);
+    ASSERT_EQ(ledger->count(), 10u);
+
+    SharedLedger::unmap(ledger);
+    SharedLedger::destroy(name);
+}
+
+// =============================================================================
+// TEST 17: session_id is set on init
+// =============================================================================
+TEST(shared_ledger_session_id) {
+    using namespace hft::ipc;
+
+    const char* name = "/test_ledger_17";
+    SharedLedger::destroy(name);
+
+    auto* ledger = SharedLedger::create(name);
+
+    // Session ID should be non-zero (timestamp)
+    ASSERT_TRUE(ledger->session_id > 0);
+
+    SharedLedger::unmap(ledger);
+    SharedLedger::destroy(name);
+}
+
+// =============================================================================
+// TEST 18: unmap with nullptr is safe
+// =============================================================================
+TEST(shared_ledger_unmap_nullptr) {
+    using namespace hft::ipc;
+
+    // Should not crash
+    SharedLedger::unmap(nullptr);
+
+    ASSERT_TRUE(true);
+}
+
+// =============================================================================
 // MAIN
 // =============================================================================
 int main() {
@@ -254,7 +536,19 @@ int main() {
     RUN_TEST(shared_ledger_open_read);
     RUN_TEST(shared_ledger_mismatch_detection);
     RUN_TEST(shared_ledger_fixed_point_accuracy);
+    RUN_TEST(shared_ledger_all_conversion_helpers);
+    RUN_TEST(shared_ledger_empty_queries);
+    RUN_TEST(shared_ledger_out_of_bounds);
+    RUN_TEST(shared_ledger_record_mismatch);
+    RUN_TEST(shared_ledger_open_rw);
+    RUN_TEST(shared_ledger_open_rw_invalid);
+    RUN_TEST(shared_ledger_open_invalid);
+    RUN_TEST(shared_ledger_open_nonexistent);
+    RUN_TEST(shared_ledger_open_rw_nonexistent);
+    RUN_TEST(shared_ledger_total_entries_tracking);
+    RUN_TEST(shared_ledger_session_id);
+    RUN_TEST(shared_ledger_unmap_nullptr);
 
-    std::cout << "\n=== All tests passed! ===\n\n";
+    std::cout << "\n=== All 18 tests passed! ===\n\n";
     return 0;
 }

@@ -242,6 +242,26 @@ TEST(test_update_callback) {
     ASSERT_EQ(received_cash, 50000000);
 }
 
+TEST(test_order_cost_sell_calculation) {
+    MarginRequirement margin;
+    margin.initial_margin = 0.25;
+    margin.min_equity = 2500000;
+
+    AccountManager manager(margin);
+
+    AccountInfo info;
+    info.cash_balance = 100000000;
+    info.buying_power = 400000000;
+    manager.update(info);
+
+    // Sell 100 shares at $100 = $10,000 notional
+    OrderCost cost = manager.calculate_order_cost(Side::Sell, 100, 10000);
+
+    ASSERT_EQ(cost.notional, 1000000);
+    ASSERT_EQ(cost.margin_required, 250000);
+    ASSERT_TRUE(cost.can_afford);
+}
+
 int main() {
     std::cout << "=== Account Tests ===\n\n";
 
@@ -256,6 +276,7 @@ int main() {
 
     // Pre-trade checks
     RUN_TEST(test_order_cost_calculation);
+    RUN_TEST(test_order_cost_sell_calculation);
     RUN_TEST(test_order_cost_insufficient_funds);
     RUN_TEST(test_order_cost_below_min_equity);
 

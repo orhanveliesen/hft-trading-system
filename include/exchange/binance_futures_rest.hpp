@@ -17,9 +17,79 @@ namespace exchange {
 using json = nlohmann::json;
 
 /**
- * Binance Futures REST API client
+ * LibCurl-based HTTP client for production use
+ */
+class LibCurlHttpClient {
+public:
+    explicit LibCurlHttpClient(const std::string& base_url)
+        : base_url_(base_url), curl_(nullptr) { // LCOV_EXCL_START - Network I/O: libcurl initialization
+        curl_global_init(CURL_GLOBAL_DEFAULT);
+        curl_ = curl_easy_init();
+        if (!curl_) {
+            throw std::runtime_error("Failed to initialize CURL");
+        }
+    } // LCOV_EXCL_STOP
+
+    ~LibCurlHttpClient() { // LCOV_EXCL_START - Network I/O: libcurl cleanup
+        if (curl_) {
+            curl_easy_cleanup(curl_);
+        }
+        curl_global_cleanup();
+    } // LCOV_EXCL_STOP
+
+    // Non-copyable
+    LibCurlHttpClient(const LibCurlHttpClient&) = delete;
+    LibCurlHttpClient& operator=(const LibCurlHttpClient&) = delete;
+
+    std::string get(const std::string& path) { // LCOV_EXCL_START - Network I/O: HTTP request
+        std::string response;
+        std::string url = base_url_ + path;
+
+        curl_easy_setopt(curl_, CURLOPT_URL, url.c_str());
+        curl_easy_setopt(curl_, CURLOPT_WRITEFUNCTION, write_callback);
+        curl_easy_setopt(curl_, CURLOPT_WRITEDATA, &response);
+        curl_easy_setopt(curl_, CURLOPT_TIMEOUT, 30L);
+        curl_easy_setopt(curl_, CURLOPT_FOLLOWLOCATION, 1L);
+
+        // SSL options
+        curl_easy_setopt(curl_, CURLOPT_SSL_VERIFYPEER, 1L);
+        curl_easy_setopt(curl_, CURLOPT_SSL_VERIFYHOST, 2L);
+
+        CURLcode res = curl_easy_perform(curl_);
+
+        if (res != CURLE_OK) {
+            throw std::runtime_error(std::string("CURL error: ") + curl_easy_strerror(res));
+        }
+
+        // Check HTTP status
+        long http_code = 0;
+        curl_easy_getinfo(curl_, CURLINFO_RESPONSE_CODE, &http_code);
+
+        if (http_code != 200) {
+            throw std::runtime_error("HTTP error " + std::to_string(http_code) + ": " + response);
+        }
+
+        return response;
+    } // LCOV_EXCL_STOP
+
+private:
+    std::string base_url_;
+    CURL* curl_;
+
+    static size_t write_callback(void* contents, size_t size, size_t nmemb,
+                                 std::string* output) { // LCOV_EXCL_START - Network I/O: libcurl callback
+        size_t total_size = size * nmemb;
+        output->append(static_cast<char*>(contents), total_size);
+        return total_size;
+    } // LCOV_EXCL_STOP
+};
+
+/**
+ * Binance Futures REST API client (template policy pattern)
  *
- * Uses libcurl for HTTP requests to Binance USD-M Futures API.
+ * Template parameter Http enables zero-overhead mocking in tests.
+ * Production uses LibCurlHttpClient (default), tests use MockHttpClient.
+ *
  * This is NOT for hot path - only for data download/backfill.
  *
  * Endpoints:
@@ -29,6 +99,7 @@ using json = nlohmann::json;
  * - /futures/data/openInterestHist - OI history
  * - /fapi/v1/klines - Klines (OHLCV)
  */
+template <typename Http = LibCurlHttpClient>
 class BinanceFuturesRest {
 public:
     // API base URLs
@@ -54,20 +125,9 @@ public:
     static constexpr const char* PERIOD_12h = "12h";
     static constexpr const char* PERIOD_1d = "1d";
 
-    explicit BinanceFuturesRest(bool use_testnet = false) : base_url_(use_testnet ? TESTNET : MAINNET), curl_(nullptr) {
-        curl_global_init(CURL_GLOBAL_DEFAULT);
-        curl_ = curl_easy_init();
-        if (!curl_) {
-            throw std::runtime_error("Failed to initialize CURL");
-        }
-    }
+    explicit BinanceFuturesRest(bool use_testnet = false) : http_(use_testnet ? TESTNET : MAINNET) {}
 
-    ~BinanceFuturesRest() {
-        if (curl_) {
-            curl_easy_cleanup(curl_);
-        }
-        curl_global_cleanup();
-    }
+    ~BinanceFuturesRest() = default;
 
     // Non-copyable
     BinanceFuturesRest(const BinanceFuturesRest&) = delete;
@@ -77,8 +137,7 @@ public:
      * Fetch current funding rate
      */
     FundingRate fetch_funding_rate(const std::string& symbol) {
-        std::string url = base_url_ + build_funding_rate_url(symbol);
-        std::string response = http_get(url);
+        std::string response = http_.get(build_funding_rate_url(symbol));
         return parse_funding_rate_json(response);
     }
 
@@ -87,8 +146,7 @@ public:
      */
     std::vector<FundingRate> fetch_funding_rate_history(const std::string& symbol, Timestamp start_time = 0,
                                                         Timestamp end_time = 0, int limit = 100) {
-        std::string url = base_url_ + build_funding_rate_history_url(symbol, start_time, end_time, limit);
-        std::string response = http_get(url);
+        std::string response = http_.get(build_funding_rate_history_url(symbol, start_time, end_time, limit));
         return parse_funding_rate_history_json(response);
     }
 
@@ -96,8 +154,7 @@ public:
      * Fetch current open interest
      */
     OpenInterest fetch_open_interest(const std::string& symbol) {
-        std::string url = base_url_ + build_open_interest_url(symbol);
-        std::string response = http_get(url);
+        std::string response = http_.get(build_open_interest_url(symbol));
         return parse_open_interest_json(response);
     }
 
@@ -107,8 +164,7 @@ public:
     std::vector<OpenInterest> fetch_open_interest_history(const std::string& symbol, const std::string& period = "5m",
                                                           Timestamp start_time = 0, Timestamp end_time = 0,
                                                           int limit = 30) {
-        std::string url = base_url_ + build_open_interest_history_url(symbol, period, start_time, end_time, limit);
-        std::string response = http_get(url);
+        std::string response = http_.get(build_open_interest_history_url(symbol, period, start_time, end_time, limit));
         return parse_open_interest_history_json(response);
     }
 
@@ -116,8 +172,7 @@ public:
      * Fetch mark price
      */
     MarkPriceUpdate fetch_mark_price(const std::string& symbol) {
-        std::string url = base_url_ + build_mark_price_url(symbol);
-        std::string response = http_get(url);
+        std::string response = http_.get(build_mark_price_url(symbol));
         return parse_mark_price_json(response);
     }
 
@@ -126,16 +181,16 @@ public:
      */
     std::vector<Kline> fetch_klines(const std::string& symbol, const std::string& interval, Timestamp start_time = 0,
                                     Timestamp end_time = 0, int limit = 500) {
-        std::string url = base_url_ + build_klines_url(symbol, interval, start_time, end_time, limit);
-        std::string response = http_get(url);
+        std::string response = http_.get(build_klines_url(symbol, interval, start_time, end_time, limit));
         return parse_klines_json(response);
     }
 
     /**
      * Fetch all klines in a time range (handles pagination)
      */
-    std::vector<Kline> fetch_klines_range(const std::string& symbol, const std::string& interval, Timestamp start_time,
-                                          Timestamp end_time) {
+    std::vector<Kline>
+    fetch_klines_range(const std::string& symbol, const std::string& interval, Timestamp start_time,
+                       Timestamp end_time) { // LCOV_EXCL_START - Network I/O: HTTP pagination with rate limiting
         std::vector<Kline> all_klines;
         Timestamp current_start = start_time;
         const int limit = 1000; // Max per request
@@ -158,7 +213,7 @@ public:
         }
 
         return all_klines;
-    }
+    } // LCOV_EXCL_STOP
 
     // ========================================
     // Static URL Builders (for testing)
@@ -331,46 +386,7 @@ public:
     }
 
 private:
-    std::string base_url_;
-    CURL* curl_;
-
-    // CURL write callback
-    static size_t write_callback(void* contents, size_t size, size_t nmemb, std::string* output) {
-        size_t total_size = size * nmemb;
-        output->append(static_cast<char*>(contents), total_size);
-        return total_size;
-    }
-
-    // HTTP GET request
-    std::string http_get(const std::string& url) {
-        std::string response;
-
-        curl_easy_setopt(curl_, CURLOPT_URL, url.c_str());
-        curl_easy_setopt(curl_, CURLOPT_WRITEFUNCTION, write_callback);
-        curl_easy_setopt(curl_, CURLOPT_WRITEDATA, &response);
-        curl_easy_setopt(curl_, CURLOPT_TIMEOUT, 30L);
-        curl_easy_setopt(curl_, CURLOPT_FOLLOWLOCATION, 1L);
-
-        // SSL options
-        curl_easy_setopt(curl_, CURLOPT_SSL_VERIFYPEER, 1L);
-        curl_easy_setopt(curl_, CURLOPT_SSL_VERIFYHOST, 2L);
-
-        CURLcode res = curl_easy_perform(curl_);
-
-        if (res != CURLE_OK) {
-            throw std::runtime_error(std::string("CURL error: ") + curl_easy_strerror(res));
-        }
-
-        // Check HTTP status
-        long http_code = 0;
-        curl_easy_getinfo(curl_, CURLINFO_RESPONSE_CODE, &http_code);
-
-        if (http_code != 200) {
-            throw std::runtime_error("HTTP error " + std::to_string(http_code) + ": " + response);
-        }
-
-        return response;
-    }
+    Http http_; // Stack allocation, inlined calls, zero virtual dispatch
 
     // Parse double field (handles both string and number types)
     static double parse_double_field(const json& obj, const std::string& key) {
@@ -388,7 +404,7 @@ private:
         } else if (val.is_number()) {
             return val.get<double>();
         }
-        return 0.0;
+        return 0.0; // LCOV_EXCL_LINE - Defensive: Binance API always returns string or number
     }
 
     // Parse double from JSON value (array element)
@@ -396,13 +412,13 @@ private:
         if (val.is_string()) {
             try {
                 return std::stod(val.get<std::string>());
-            } catch (...) {
-                return 0.0;
+            } catch (...) { // LCOV_EXCL_LINE - Defensive: Binance API sends valid numbers
+                return 0.0; // LCOV_EXCL_LINE
             }
         } else if (val.is_number()) {
             return val.get<double>();
         }
-        return 0.0;
+        return 0.0; // LCOV_EXCL_LINE - Defensive: Binance API always returns string or number
     }
 };
 

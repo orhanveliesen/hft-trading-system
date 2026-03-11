@@ -90,12 +90,14 @@ __pycache__/
 
 # Test coverage
 coverage/
+coverage_html/
 *.gcov
 *.gcda
 *.gcno
 *.info
 cov_*.info
 coverage.info
+coverage_filtered.info
 
 # External dependencies (clone separately, except header-only libs)
 external/*

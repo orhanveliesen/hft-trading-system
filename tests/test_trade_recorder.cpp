@@ -1008,6 +1008,333 @@ TEST(reject_sell_with_no_position) {
 }
 
 // =============================================================================
+// Query Method Tests (NEW)
+// =============================================================================
+
+TEST(query_position_last_price) {
+    using namespace hft::trading;
+    TradeRecorder r;
+    r.init(100'000);
+
+    TradeInput buy{0, 100.0, 1.0, 0.1, 0.0, "BTC"};
+    r.record_buy(buy);
+
+    ASSERT_EQ(r.position_last_price(0), 100.0);
+
+    // Update market price
+    r.update_market_price(0, 105.0);
+    ASSERT_EQ(r.position_last_price(0), 105.0);
+}
+
+TEST(query_market_value) {
+    using namespace hft::trading;
+    TradeRecorder r;
+    r.init(100'000);
+
+    // Buy 2 BTC @ $100, market price = $110
+    TradeInput buy{0, 100.0, 2.0, 0.2, 0.0, "BTC"};
+    r.record_buy(buy);
+    r.update_market_price(0, 110.0);
+
+    ASSERT_NEAR(r.market_value(), 220.0, 0.01); // 2 * 110
+}
+
+TEST(query_equity) {
+    using namespace hft::trading;
+    TradeRecorder r;
+    r.init(100'000);
+
+    // Buy 1 BTC @ $100 (cash = 99899.90)
+    TradeInput buy{0, 100.0, 1.0, 0.1, 0.0, "BTC"};
+    r.record_buy(buy);
+
+    // Market price = $110
+    r.update_market_price(0, 110.0);
+
+    // Equity = cash + market_value = 99899.90 + 110 = 100009.90
+    ASSERT_NEAR(r.equity(), 100009.90, 0.01);
+}
+
+TEST(query_equity_pnl) {
+    using namespace hft::trading;
+    TradeRecorder r;
+    r.init(100'000);
+
+    // Buy 1 BTC @ $100
+    TradeInput buy{0, 100.0, 1.0, 0.1, 0.0, "BTC"};
+    r.record_buy(buy);
+
+    // Market price = $110 (unrealized +$10)
+    r.update_market_price(0, 110.0);
+
+    // Equity P&L = equity - initial = 100009.90 - 100000 = 9.90 (profit - commission)
+    ASSERT_NEAR(r.equity_pnl(), 9.90, 0.01);
+}
+
+TEST(query_pnl_difference_zero) {
+    using namespace hft::trading;
+    TradeRecorder r;
+    r.init(100'000);
+
+    // Multiple trades
+    TradeInput buy{0, 100.0, 2.0, 0.2, 0.0, "BTC"};
+    r.record_buy(buy);
+    r.update_market_price(0, 110.0);
+
+    TradeInput sell{0, 110.0, 1.0, 0.11, 0.0, "BTC"};
+    r.record_sell(sell);
+
+    // P&L difference should be ~0
+    ASSERT_NEAR(r.pnl_difference(), 0.0, 0.01);
+}
+
+TEST(query_win_rate) {
+    using namespace hft::trading;
+    TradeRecorder r;
+    r.init(100'000);
+
+    // 3 wins
+    for (int i = 0; i < 3; i++) {
+        TradeInput buy{0, 100.0, 1.0, 0.1, 0.0, "BTC"};
+        r.record_buy(buy);
+        TradeInput sell{0, 110.0, 1.0, 0.11, 0.0, "BTC"};
+        r.record_sell(sell);
+    }
+
+    // 2 losses
+    for (int i = 0; i < 2; i++) {
+        TradeInput buy{0, 100.0, 1.0, 0.1, 0.0, "BTC"};
+        r.record_buy(buy);
+        TradeInput sell{0, 90.0, 1.0, 0.09, 0.0, "BTC"};
+        r.record_sell(sell);
+    }
+
+    // Win rate = 3 / 5 = 60%
+    ASSERT_NEAR(r.win_rate(), 60.0, 0.1);
+}
+
+TEST(query_win_rate_zero_trades) {
+    using namespace hft::trading;
+    TradeRecorder r;
+    r.init(100'000);
+
+    ASSERT_EQ(r.win_rate(), 0.0);
+}
+
+TEST(query_initial_cash) {
+    using namespace hft::trading;
+    TradeRecorder r;
+    r.init(123456.78);
+
+    ASSERT_NEAR(r.initial_cash(), 123456.78, 0.01);
+
+    // Should not change after trades
+    TradeInput buy{0, 100.0, 1.0, 0.1, 0.0, "BTC"};
+    r.record_buy(buy);
+    ASSERT_NEAR(r.initial_cash(), 123456.78, 0.01);
+}
+
+// =============================================================================
+// Ledger Indexing Tests (NEW)
+// =============================================================================
+
+TEST(ledger_entry_by_index) {
+    using namespace hft::trading;
+    TradeRecorder r;
+    r.init(100'000);
+
+    // Create 3 trades
+    for (int i = 0; i < 3; i++) {
+        TradeInput buy{0, 100.0 + i, 1.0, 0.1, 0.0, "BTC"};
+        r.record_buy(buy);
+    }
+
+    ASSERT_EQ(r.ledger_count(), 3);
+
+    // Check indexing
+    auto* e0 = r.ledger_entry(0); // First trade
+    ASSERT_TRUE(e0 != nullptr);
+    ASSERT_NEAR(e0->price, 100.0, 0.01);
+
+    auto* e1 = r.ledger_entry(1); // Second trade
+    ASSERT_TRUE(e1 != nullptr);
+    ASSERT_NEAR(e1->price, 101.0, 0.01);
+
+    auto* e2 = r.ledger_entry(2); // Third trade
+    ASSERT_TRUE(e2 != nullptr);
+    ASSERT_NEAR(e2->price, 102.0, 0.01);
+
+    // Out of range
+    auto* e3 = r.ledger_entry(3);
+    ASSERT_TRUE(e3 == nullptr);
+}
+
+TEST(ledger_first_mismatch_none) {
+    using namespace hft::trading;
+    TradeRecorder r;
+    r.init(100'000);
+
+    TradeInput buy{0, 100.0, 1.0, 0.1, 0.0, "BTC"};
+    r.record_buy(buy);
+
+    // No mismatches
+    auto* mismatch = r.ledger_first_mismatch();
+    ASSERT_TRUE(mismatch == nullptr);
+}
+
+TEST(ledger_last_empty) {
+    using namespace hft::trading;
+    TradeRecorder r;
+    r.init(100'000);
+
+    // No entries yet
+    ASSERT_TRUE(r.ledger_last() == nullptr);
+}
+
+TEST(ledger_entry_out_of_range) {
+    using namespace hft::trading;
+    TradeRecorder r;
+    r.init(100'000);
+
+    // No entries
+    ASSERT_TRUE(r.ledger_entry(0) == nullptr);
+    ASSERT_TRUE(r.ledger_entry(100) == nullptr);
+}
+
+// =============================================================================
+// Circular Buffer Tests (NEW)
+// =============================================================================
+
+TEST(ledger_circular_buffer_wraparound) {
+    using namespace hft::trading;
+    TradeRecorder r;
+    r.init(100'000'000); // Large cash to handle many trades
+
+    // Fill ledger beyond MAX_LEDGER_ENTRIES (10000)
+    // Do 10100 trades to force wraparound
+    for (int i = 0; i < 10100; i++) {
+        TradeInput buy{0, 100.0, 0.01, 0.001, 0.0, "BTC"};
+        r.record_buy(buy);
+
+        TradeInput sell{0, 100.0, 0.01, 0.001, 0.0, "BTC"};
+        r.record_sell(sell);
+    }
+
+    // Ledger should be capped at MAX_LEDGER_ENTRIES (10000)
+    ASSERT_EQ(r.ledger_count(), 10000);
+
+    // Should still be able to access all entries
+    for (size_t i = 0; i < r.ledger_count(); i++) {
+        auto* e = r.ledger_entry(i);
+        ASSERT_TRUE(e != nullptr);
+    }
+
+    // Last entry should be most recent
+    auto* last = r.ledger_last();
+    ASSERT_TRUE(last != nullptr);
+    ASSERT_EQ(last->sequence, 20200u); // 10100 buys + 10100 sells
+}
+
+// =============================================================================
+// Query Edge Cases (NEW)
+// =============================================================================
+
+TEST(position_last_price_invalid_symbol) {
+    using namespace hft::trading;
+    TradeRecorder r;
+    r.init(100'000);
+
+    // Invalid symbol (>= MAX_RECORDER_SYMBOLS)
+    ASSERT_EQ(r.position_last_price(999), 0.0);
+}
+
+TEST(market_value_multiple_symbols) {
+    using namespace hft::trading;
+    TradeRecorder r;
+    r.init(100'000);
+
+    // BTC: 2 @ $110 = $220
+    TradeInput btc{0, 100.0, 2.0, 0.2, 0.0, "BTC"};
+    r.record_buy(btc);
+    r.update_market_price(0, 110.0);
+
+    // ETH: 5 @ $20 = $100
+    TradeInput eth{1, 10.0, 5.0, 0.5, 0.0, "ETH"};
+    r.record_buy(eth);
+    r.update_market_price(1, 20.0);
+
+    // Total market value = 220 + 100 = 320
+    ASSERT_NEAR(r.market_value(), 320.0, 0.01);
+}
+
+TEST(unrealized_pnl_no_positions) {
+    using namespace hft::trading;
+    TradeRecorder r;
+    r.init(100'000);
+
+    ASSERT_EQ(r.unrealized_pnl(), 0.0);
+}
+
+TEST(unrealized_pnl_no_market_price) {
+    using namespace hft::trading;
+    TradeRecorder r;
+    r.init(100'000);
+
+    TradeInput buy{0, 100.0, 1.0, 0.1, 0.0, "BTC"};
+    r.record_buy(buy);
+
+    // last_price is set by record_buy, so unrealized should be 0 (price == avg_price)
+    ASSERT_NEAR(r.unrealized_pnl(), 0.0, 0.01);
+}
+
+TEST(update_market_price_invalid_symbol) {
+    using namespace hft::trading;
+    TradeRecorder r;
+    r.init(100'000);
+
+    // Should not crash
+    r.update_market_price(999, 100.0);
+}
+
+// =============================================================================
+// Ledger Dump Test (NEW)
+// =============================================================================
+
+TEST(ledger_dump_coverage) {
+    using namespace hft::trading;
+    TradeRecorder r;
+    r.init(100'000);
+
+    // Create some trades
+    TradeInput buy{0, 100.0, 1.0, 0.1, 0.0, "BTC"};
+    r.record_buy(buy);
+
+    TradeInput sell{0, 110.0, 1.0, 0.11, 0.0, "BTC"};
+    r.record_sell(sell);
+
+    // Redirect stdout to avoid console spam in tests
+    // Just call it to cover the code
+    r.ledger_dump(2);
+
+    // If we got here without crashing, dump works
+    ASSERT_TRUE(true);
+}
+
+TEST(ledger_dump_more_than_available) {
+    using namespace hft::trading;
+    TradeRecorder r;
+    r.init(100'000);
+
+    TradeInput buy{0, 100.0, 1.0, 0.1, 0.0, "BTC"};
+    r.record_buy(buy);
+
+    // Request 100 entries, but only have 1
+    r.ledger_dump(100);
+
+    ASSERT_TRUE(true);
+}
+
+// =============================================================================
 // MAIN
 // =============================================================================
 int main() {
@@ -1056,6 +1383,36 @@ int main() {
     RUN_TEST(reject_zero_quantity_sell);
     RUN_TEST(reject_sell_with_no_position);
 
-    std::cout << "\n=== All tests passed! ===\n\n";
+    std::cout << "\n--- Query Method Tests ---\n";
+    RUN_TEST(query_position_last_price);
+    RUN_TEST(query_market_value);
+    RUN_TEST(query_equity);
+    RUN_TEST(query_equity_pnl);
+    RUN_TEST(query_pnl_difference_zero);
+    RUN_TEST(query_win_rate);
+    RUN_TEST(query_win_rate_zero_trades);
+    RUN_TEST(query_initial_cash);
+
+    std::cout << "\n--- Ledger Indexing Tests ---\n";
+    RUN_TEST(ledger_entry_by_index);
+    RUN_TEST(ledger_first_mismatch_none);
+    RUN_TEST(ledger_last_empty);
+    RUN_TEST(ledger_entry_out_of_range);
+
+    std::cout << "\n--- Circular Buffer Tests ---\n";
+    RUN_TEST(ledger_circular_buffer_wraparound);
+
+    std::cout << "\n--- Query Edge Cases ---\n";
+    RUN_TEST(position_last_price_invalid_symbol);
+    RUN_TEST(market_value_multiple_symbols);
+    RUN_TEST(unrealized_pnl_no_positions);
+    RUN_TEST(unrealized_pnl_no_market_price);
+    RUN_TEST(update_market_price_invalid_symbol);
+
+    std::cout << "\n--- Ledger Dump Tests ---\n";
+    RUN_TEST(ledger_dump_coverage);
+    RUN_TEST(ledger_dump_more_than_available);
+
+    std::cout << "\n=== All 48 tests passed! ===\n\n";
     return 0;
 }

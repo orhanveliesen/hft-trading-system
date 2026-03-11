@@ -208,13 +208,13 @@ struct SymbolTuningConfig {
         ema_dev_highvol_x100 = ema::DEV_HIGHVOL_X100;
 
         // Trade filtering
-        cooldown_ms = execution::COOLDOWN_MS;
-        signal_strength = execution::SIGNAL_STRENGTH;
+        cooldown_ms = hft::config::execution::COOLDOWN_MS;
+        signal_strength = hft::config::execution::SIGNAL_STRENGTH;
 
         // Order execution
-        order_type_preference = execution::ORDER_TYPE_AUTO;
-        limit_offset_bps_x100 = execution::LIMIT_OFFSET_BPS_X100;
-        limit_timeout_ms = execution::LIMIT_TIMEOUT_MS;
+        order_type_preference = hft::config::execution::ORDER_TYPE_AUTO;
+        limit_offset_bps_x100 = hft::config::execution::LIMIT_OFFSET_BPS_X100;
+        limit_timeout_ms = hft::config::execution::LIMIT_TIMEOUT_MS;
 
         // Mode thresholds (streak-based)
         losses_to_cautious = smart_strategy::LOSSES_TO_CAUTIOUS;

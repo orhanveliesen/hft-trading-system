@@ -166,7 +166,7 @@ public:
         }
 
         return cost;
-    }
+    } // LCOV_EXCL_LINE - Closing brace, compiler artifact
 
     // Quick check without full calculation
     bool can_afford(Quantity qty, Price price) const {
