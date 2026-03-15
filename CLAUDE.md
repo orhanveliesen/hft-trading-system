@@ -147,9 +147,39 @@ gh run watch
 ### Code Coverage Requirements
 - **Target**: 100% line coverage (strict)
 - **Tool**: lcov + gcov
-- **Exclusions**: `/usr/*`, `*/external/*`, `*/tests/*`
-- **NEVER use `// LCOV_EXCL_LINE`** - All code must have real test coverage. No exceptions.
 - **Build isolation**: All coverage artifacts (`.info`, `coverage_html/`, `.gcda`, `.gcno`) MUST stay in build directories (`build-coverage/`). NEVER generate coverage reports in project root.
+
+#### Source Code Markers vs Filter Config
+
+**NEVER use source code markers** (`LCOV_EXCL_LINE`, `LCOV_EXCL_START/STOP`):
+- Markers hide untested code in plain sight
+- New features can be excluded without review
+- Coverage percentage lies over time
+
+**ALWAYS use `lcov --remove` filter config** for genuinely untestable code:
+- **Single source of truth**: `cmake/coverage_excludes.list`
+- All tools read from this file: `cmake/coverage.cmake`, `.githooks/pre-commit`, `.github/workflows/codecov.yml`
+- Adding a new exclusion = one line in one file
+- Visible in code review, transparent and auditable
+
+```
+Marker = coverage'ı gizle (dürüst değil)
+Filter = coverage'ı belgeleyerek dışarıda bırak (şeffaf)
+```
+
+#### Excluded Patterns (Single Source: `cmake/coverage_excludes.list`)
+These patterns are filtered via `lcov --remove`, NOT source markers:
+
+| Pattern | Reason |
+|---------|--------|
+| `/usr/*` | System headers |
+| `*/external/*` | Third-party libraries |
+| `*/tests/*` | Test code itself |
+| `*_ws.hpp` | WebSocket network I/O (requires integration tests) |
+| `*/ipc/shared_*.hpp` | IPC syscall failures (shm_open, mmap, ftruncate) |
+| `*/network/udp_*.hpp` | UDP network I/O (requires integration tests) |
+
+**Adding new exclusions**: Add one line to `cmake/coverage_excludes.list`. Requires PR review with justification. Document why the code is untestable, not just inconvenient to test.
 
 ### Formatting (clang-format)
 - **Style**: LLVM-based, HFT-aware (120 col limit, compact hot path)

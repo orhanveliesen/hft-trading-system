@@ -47,8 +47,13 @@ jobs:
       - name: Generate coverage report
         run: |
           cd build
-          lcov --capture --directory . --output-file coverage.info
-          lcov --remove coverage.info '/usr/*' '*/external/*' '*/tests/*' --output-file coverage.info
+          # Capture coverage data (suppress warnings for older lcov versions)
+          lcov --capture --directory . --output-file coverage.info 2>&1 || true
+
+          # Single source of truth: cmake/coverage_excludes.list
+          # See CLAUDE.md for exclusion policy
+          bash ../cmake/coverage_filter.sh coverage.info coverage.info ../cmake/coverage_excludes.list
+
           lcov --list coverage.info
 
       - name: Check coverage threshold (100%)

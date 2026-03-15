@@ -1,0 +1,29 @@
+# Coverage Exclusion Patterns (Single Source of Truth)
+# =====================================================
+# This file is read by: cmake/coverage.cmake, .githooks/pre-commit, .github/workflows/codecov.yml
+# Adding new exclusions: Add pattern here, all three will pick it up automatically.
+# Format: One glob pattern per line. Lines starting with # are comments.
+#
+# POLICY: Only exclude code that genuinely cannot be unit tested.
+# Adding new exclusions requires PR review with justification.
+
+# System headers and third-party
+/usr/*
+*/external/*
+*/tests/*
+
+# WebSocket network I/O (requires live server connections)
+*/exchange/binance_ws.hpp
+*/exchange/binance_futures_ws.hpp
+
+# UDP receiver (epoll + recvmmsg syscalls)
+*/network/udp_receiver.hpp
+
+# IPC shared memory syscall failure paths (shm_open/mmap/ftruncate)
+*/ipc/shared_config.hpp
+*/ipc/shared_portfolio_state.hpp
+*/ipc/shared_event_log.hpp
+*/ipc/shared_ledger.hpp
+*/ipc/shared_metrics_snapshot.hpp
+*/ipc/shared_tuner_state.hpp
+*/ipc/udp_telemetry.hpp

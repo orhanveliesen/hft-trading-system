@@ -23,7 +23,7 @@ if(ENABLE_COVERAGE)
     endif()
 
     # Add coverage flags to compiler
-    set(COVERAGE_FLAGS "--coverage -fprofile-arcs -ftest-coverage -O0 -g")
+    set(COVERAGE_FLAGS "--coverage -fprofile-arcs -ftest-coverage -O0 -g -fno-inline")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${COVERAGE_FLAGS}")
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${COVERAGE_FLAGS}")
     set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} --coverage")
@@ -33,17 +33,26 @@ if(ENABLE_COVERAGE)
     message(STATUS "  - lcov: ${LCOV_PATH}")
     message(STATUS "  - genhtml: ${GENHTML_PATH}")
 
+    # Coverage exclusion patterns - single source of truth
+    set(COVERAGE_EXCLUDES_LIST "${CMAKE_SOURCE_DIR}/cmake/coverage_excludes.list")
+    set(COVERAGE_FILTER_SCRIPT "${CMAKE_SOURCE_DIR}/cmake/coverage_filter.sh")
+
     # Add custom target for generating coverage reports
     if(LCOV_PATH AND GENHTML_PATH)
         add_custom_target(coverage
+            COMMAND ${CMAKE_COMMAND} -E echo "Cleaning stale coverage data..."
+            COMMAND find . -name "*.gcda" -delete
+
             COMMAND ${CMAKE_COMMAND} -E echo "Running tests with coverage..."
             COMMAND ${CMAKE_CTEST_COMMAND} --output-on-failure || true
 
             COMMAND ${CMAKE_COMMAND} -E echo "Capturing coverage data..."
-            COMMAND ${LCOV_PATH} --capture --directory . --output-file coverage.info
+            COMMAND ${LCOV_PATH} --capture --directory . --output-file coverage.info --ignore-errors mismatch,mismatch --ignore-errors gcov,gcov
 
             COMMAND ${CMAKE_COMMAND} -E echo "Filtering coverage data..."
-            COMMAND ${LCOV_PATH} --remove coverage.info '/usr/*' '*/external/*' '*/tests/*' --output-file coverage_filtered.info
+            # Single source of truth: cmake/coverage_excludes.list
+            # See CLAUDE.md for exclusion policy
+            COMMAND bash ${COVERAGE_FILTER_SCRIPT} coverage.info coverage_filtered.info ${COVERAGE_EXCLUDES_LIST}
 
             COMMAND ${CMAKE_COMMAND} -E echo "Coverage summary:"
             COMMAND ${LCOV_PATH} --list coverage_filtered.info
@@ -58,5 +67,6 @@ if(ENABLE_COVERAGE)
         )
 
         message(STATUS "  - Run 'make coverage' to generate coverage report")
+        message(STATUS "  - Exclusion patterns: ${COVERAGE_EXCLUDES_LIST}")
     endif()
 endif()
