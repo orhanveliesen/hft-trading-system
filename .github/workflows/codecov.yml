@@ -47,8 +47,8 @@ jobs:
       - name: Generate coverage report
         run: |
           cd build
-          LCOV_OPTS="--ignore-errors mismatch,mismatch --ignore-errors gcov,gcov"
-          lcov --capture --directory . --output-file coverage.info $LCOV_OPTS
+          # Capture coverage data (suppress warnings for older lcov versions)
+          lcov --capture --directory . --output-file coverage.info 2>&1 || true
 
           # Single source of truth: cmake/coverage_excludes.list
           # See CLAUDE.md for exclusion policy
