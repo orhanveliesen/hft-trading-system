@@ -87,11 +87,15 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 
-# Step 4: Capture coverage
+# Step 4: Capture coverage (use --ignore-errors for lcov 2.0 compatibility)
 echo -e "${YELLOW}📊 Capturing coverage data...${NC}"
 cd ${BUILD_DIR}
 
-lcov --capture --directory . --output-file coverage.info > /dev/null 2>&1
+# lcov 2.0 requires --ignore-errors flags for strict gcov/gcov13 warnings
+# mismatch: gcov 13 compatibility (line number mismatches)
+# gcov: unexecuted blocks warnings
+LCOV_OPTS="--ignore-errors mismatch,mismatch --ignore-errors gcov,gcov --rc geninfo_unexecuted_blocks=1"
+lcov --capture --directory . --output-file coverage.info $LCOV_OPTS > /dev/null 2>&1
 if [ $? -ne 0 ]; then
     echo -e "${RED}❌ Coverage capture failed!${NC}"
     cd ..
@@ -99,8 +103,21 @@ if [ $? -ne 0 ]; then
 fi
 
 # Step 5: Filter coverage data
-lcov --remove coverage.info '/usr/*' '*/external/*' '*/tests/*' --output-file coverage.info > /dev/null 2>&1
-if [ $? -ne 0 ]; then
+# Single source of truth: cmake/coverage_excludes.list
+# See CLAUDE.md for exclusion policy
+REPO_ROOT=$(git rev-parse --show-toplevel)
+EXCLUDES_LIST="$REPO_ROOT/cmake/coverage_excludes.list"
+FILTER_SCRIPT="$REPO_ROOT/cmake/coverage_filter.sh"
+
+if [ ! -f "$EXCLUDES_LIST" ]; then
+    echo -e "${RED}❌ Coverage excludes list not found: $EXCLUDES_LIST${NC}"
+    cd ..
+    exit 1
+fi
+
+bash "$FILTER_SCRIPT" coverage.info coverage.info "$EXCLUDES_LIST" 2>/dev/null
+
+if [ ! -f coverage.info ]; then
     echo -e "${RED}❌ Coverage filter failed!${NC}"
     cd ..
     exit 1
